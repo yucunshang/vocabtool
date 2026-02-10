@@ -38,26 +38,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 数据加载 (Data Loading) - 核心优化
+# 2. 数据加载 (Data Loading)
 # ==========================================
 @st.cache_data
 def load_knowledge_base():
-    """从 JSON 文件加载静态知识库，极大提升性能"""
     try:
-        # 1. 术语库
         with open('data/terms.json', 'r', encoding='utf-8') as f:
             terms = json.load(f)
-        # 2. 专有名词库
         with open('data/proper.json', 'r', encoding='utf-8') as f:
             proper = json.load(f)
-        # 3. 补丁词库
         with open('data/patch.json', 'r', encoding='utf-8') as f:
             patch = json.load(f)
-        # 4. 歧义词 (列表转集合)
         with open('data/ambiguous.json', 'r', encoding='utf-8') as f:
             ambiguous = set(json.load(f))
             
-        # 确保术语 key 全小写，防止匹配失败
         terms = {k.lower(): v for k, v in terms.items()}
         proper = {k.lower(): v for k, v in proper.items()}
         
@@ -66,7 +60,6 @@ def load_knowledge_base():
         st.error("⚠️ 缺少数据文件！请确保 `data/` 文件夹下包含 terms.json, proper.json, patch.json, ambiguous.json")
         return {}, {}, {}, set()
 
-# 全局变量加载
 BUILTIN_TECHNICAL_TERMS, PROPER_NOUNS_DB, BUILTIN_PATCH_VOCAB, AMBIGUOUS_WORDS = load_knowledge_base()
 
 # ==========================================
@@ -124,7 +117,6 @@ def load_vocab():
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
         except: pass
     
-    # 注入 JSON 加载的补丁
     for word, rank in BUILTIN_PATCH_VOCAB.items():
         if word not in vocab: vocab[word] = rank
         else:
@@ -138,18 +130,21 @@ vocab_dict = load_vocab()
 # ==========================================
 def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list=False):
     words_str = ", ".join(word_list)
+    core_principle_text = ""
     
-    definition_instruction = ""
     if is_term_list or def_mode == "term":
-        definition_instruction = "- **领域锁定**：单词带有 (Domain) 标签，**必须**仅提供符合该领域背景的专业释义。"
+        core_principle_text = """1. 核心原则：领域锁定 (Domain Locked)
+- **领域匹配**：如果单词带有 (Domain) 标签，**必须**仅提供符合该领域背景的专业释义。
+- **原子性**：一张卡片只解释该领域的一个含义。"""
     elif def_mode == "split":
-        definition_instruction = """- **熟词深挖 (Polymsey Splitting)**：这些是高频常用词，为了掌握其不同用法，**请将不同的含义拆分为多条独立的数据（多张卡片）**。
-    - 例如 'fair' 应拆分为：
-      1. fair (adj) - reasonable/impartial (公平的)
-      2. fair (n) - gathering/market (集市)
-    - 不要把所有意思挤在一张卡片里。"""
-    else: # single
-        definition_instruction = "- **极简速记 (Minimalist)**：这些是生词，请**仅提供 1 个最核心、最常用的释义**。严禁罗列多个义项，减轻记忆负担。"
+        core_principle_text = """1. 核心原则：原子性 (Atomicity)
+- **含义拆分**：若一个单词有多个不同常用释义（名词 vs 动词，字面义 vs 引申义），**必须拆分为多条（1-3）独立数据**（即为同一个单词生成多行/多张卡片）。
+- **严禁堆砌**：每张卡片只承载一个特定语境下的含义，不准将多个释义挤在一起。"""
+    else: 
+        core_principle_text = """1. 核心原则：极简速记 (Minimalist)
+- **单一释义**：请**仅提供 1 个最核心、最常用的释义**。
+- **严禁拆分**：对于这些生词，不要生成多张卡片，一张卡片即可。
+- **减轻负担**：目的是快速混个脸熟，不要面面俱到。"""
 
     if output_format == 'csv':
         format_req = "CSV Code Block (后缀名 .csv)"
@@ -159,14 +154,14 @@ def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list
         format_desc = "请输出纯文本 TXT 代码块。"
 
     prompt = f"""
-请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表，请严格按照以下【释义策略】为我生成导入文件。
+请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表，请严格按照以下【核心原则】为我生成导入文件。
 
-1. 核心原则：释义策略
-{definition_instruction}
+{core_principle_text}
 
 2. 卡片正面 (Column 1: Front)
 - 内容：提供自然的短语或搭配 (Phrase/Collocation)。
 - 样式：纯文本。
+- 注意：如果是“含义拆分”模式，正面可以是一样的单词/短语，但背面解释不同。
 
 3. 卡片背面 (Column 2: Back)
 - 格式：HTML 排版，包含三部分，必须使用 <br><br> 分隔。
@@ -182,7 +177,7 @@ def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list
     return prompt
 
 # ==========================================
-# 6. 通用分析函数
+# 6. 通用分析函数 (核心修复区)
 # ==========================================
 def analyze_text(raw_text, mode="auto"):
     raw_items = []
@@ -206,7 +201,7 @@ def analyze_text(raw_text, mode="auto"):
         if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
         if item_lower in JUNK_WORDS: continue
         
-        # 1. 术语身份
+        # 1. 术语身份 (可与普通身份共存，如 motion)
         if item_lower in BUILTIN_TECHNICAL_TERMS:
             domain = BUILTIN_TECHNICAL_TERMS[item_lower]
             unique_items.append({
@@ -216,25 +211,41 @@ def analyze_text(raw_text, mode="auto"):
                 "raw": item_lower
             })
         
-        # 2. 专名身份 (Rank 1, 方便过滤)
-        if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
-            display = PROPER_NOUNS_DB.get(item_lower, item_cleaned.title())
+        is_proper_only = False
+        
+        # 2. 纯专名身份 (如 Monday, UK, China)
+        if item_lower in PROPER_NOUNS_DB:
             unique_items.append({
-                "word": display,
+                "word": PROPER_NOUNS_DB[item_lower],
                 "rank": 1, 
                 "cat": "proper",
                 "raw": item_lower
             })
+            is_proper_only = True # 标记为排他性：不允许再被当成普通单词
             
-        # 3. 普通身份
-        rank = vocab_dict.get(item_lower, 99999)
-        if rank != 99999:
-            unique_items.append({
-                "word": item_cleaned,
-                "rank": rank,
-                "cat": "general",
-                "raw": item_lower
-            })
+        # 3. 歧义词身份 (如 March/march)
+        elif item_lower in AMBIGUOUS_WORDS:
+            if item_cleaned[0].isupper(): # 首字母大写，说明当前语境是专名
+                unique_items.append({
+                    "word": item_cleaned,
+                    "rank": 1,
+                    "cat": "proper",
+                    "raw": item_lower
+                })
+                is_proper_only = True # 标记排他性
+            # 如果是小写 (如 china瓷器)，不做特殊处理，允许变成普通词
+            
+        # 4. 普通身份
+        # 核心修复：如果它已经被判定为专有名词(China)，就【跳过】查询词频表
+        if not is_proper_only:
+            rank = vocab_dict.get(item_lower, 99999)
+            if rank != 99999:
+                unique_items.append({
+                    "word": item_cleaned,
+                    "rank": rank,
+                    "cat": "general",
+                    "raw": item_lower
+                })
         
         seen.add(item_lower)
         
@@ -251,9 +262,6 @@ app_mode = st.radio("选择功能模式:",
 )
 st.divider()
 
-# ---------------------------------------------------------
-# 模式 A: 智能还原
-# ---------------------------------------------------------
 if "智能还原" in app_mode:
     c1, c2 = st.columns(2)
     with c1:
@@ -263,9 +271,6 @@ if "智能还原" in app_mode:
             st.code(res, language='text')
             st.caption("👆 一键复制")
 
-# ---------------------------------------------------------
-# 模式 B: 单词分级 (全量)
-# ---------------------------------------------------------
 elif "单词分级" in app_mode:
     col_level1, col_level2, _ = st.columns([1, 1, 2])
     with col_level1: current_level = st.number_input("当前水平", 0, 30000, 9000, 500)
@@ -274,7 +279,7 @@ elif "单词分级" in app_mode:
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         input_mode = st.radio("识别模式:", ("自动分词", "按行处理"), horizontal=True)
-        grade_input = st.text_area("input_box", height=400, placeholder="motion\nenergy\nrun\nset", label_visibility="collapsed")
+        grade_input = st.text_area("input_box", height=400, placeholder="China\nmotion\nrun", label_visibility="collapsed")
         btn_grade = st.button("开始分级", type="primary", use_container_width=True)
 
     with g_col2:
@@ -319,9 +324,6 @@ elif "单词分级" in app_mode:
                 render_tab(t4, "beyond", "超纲", def_mode="single") 
                 render_tab(t5, "known", "熟词", def_mode="split")  
 
-# ---------------------------------------------------------
-# 模式 C: 智能精选 (Top N)
-# ---------------------------------------------------------
 elif "Top N" in app_mode:
     st.info("💡 此模式自动过滤简单词，按 **由易到难** 挑选。")
     
@@ -332,7 +334,7 @@ elif "Top N" in app_mode:
         
     c_input, c_btn = st.columns([3, 1])
     with c_input:
-        topn_input = st.text_area("输入", height=150, placeholder="motion\nenergy\nrun", label_visibility="collapsed")
+        topn_input = st.text_area("输入", height=150, placeholder="China\nmotion\nrun", label_visibility="collapsed")
     with c_btn:
         btn_topn = st.button("🎲 生成精选", type="primary", use_container_width=True)
 
@@ -357,7 +359,6 @@ elif "Top N" in app_mode:
             st.divider()
             col_win, col_rest = st.columns(2)
             
-            # === 左栏 ===
             with col_win:
                 st.success(f"🔥 精选 Top {len(top_df)}")
                 if not top_df.empty:
@@ -376,7 +377,6 @@ elif "Top N" in app_mode:
                     with t2: st.code(p_txt, language='markdown')
                 else: st.warning("无")
 
-            # === 右栏 ===
             with col_rest:
                 st.subheader(f"💤 剩余 {len(rest_df)} 个")
                 if not rest_df.empty:
