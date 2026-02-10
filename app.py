@@ -29,82 +29,89 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 【核心】内置专业术语库 (带学科标签)
+# 2. 【核心】内置专业术语库 (带学科标签 - 扩容版)
 # ==========================================
-# 格式： "word": "Domain"
-# 即使单词在通用词频表中，也会强制作为术语处理，并带上领域标记
+# 策略：只收录“一眼假”的专业词（普通人很少用，或者是特定领域的强术语）。
+# 像 energy, force, cell, market 这种通用高频词不收录，让它们走普通分级。
 BUILTIN_TECHNICAL_TERMS = {
     # === Computer Science (CS/AI) ===
     "algorithm": "CS", "recursion": "CS", "latency": "CS", "throughput": "CS", "bandwidth": "CS",
     "api": "CS", "json": "CS", "backend": "CS", "frontend": "CS", "fullstack": "CS",
-    "neural": "AI", "network": "CS", "transformer": "AI", "embedding": "AI", "inference": "AI",
+    "neural": "AI", "transformer": "AI", "embedding": "AI", "inference": "AI", "perceptron": "AI",
     "python": "CS", "java": "CS", "docker": "CS", "kubernetes": "CS", "linux": "CS",
     "database": "CS", "cache": "CS", "compiler": "CS", "framework": "CS", "protocol": "CS",
-    "encryption": "CS", "hash": "CS", "token": "CS", "authentication": "CS", "authorization": "CS",
+    "encryption": "CS", "hash": "CS", "authentication": "CS", "authorization": "CS", "cryptography": "CS",
     "kernel": "CS", "shell": "CS", "terminal": "CS", "repository": "CS", "commit": "CS",
-    "merge": "CS", "branch": "CS", "deployment": "CS", "iteration": "CS", "agile": "CS",
-    "stack": "CS", "queue": "CS", "heap": "CS", "pointer": "CS", "reference": "CS",
-    "class": "CS", "object": "CS", "inheritance": "CS", "polymorphism": "CS", "syntax": "CS",
+    "deployment": "CS", "iteration": "CS", "agile": "CS", "polymorphism": "CS", "encapsulation": "CS",
+    "inheritance": "CS", "instantiation": "CS", "middleware": "CS", "scalability": "CS", "redundancy": "CS",
+    "virtualization": "CS", "hypervisor": "CS", "container": "CS", "microservice": "CS", "serverless": "CS",
+    "debugging": "CS", "syntax": "CS", "variable": "CS", "boolean": "CS", "integer": "CS",
+    "array": "CS", "pointer": "CS", "reference": "CS", "memory": "CS", "cpu": "CS",
+    "gpu": "CS", "binary": "CS", "hexadecimal": "CS", "bit": "CS", "byte": "CS",
 
     # === Mathematics (Math) ===
-    "variable": "Math", "function": "Math", "derivative": "Math", "integral": "Math", "limit": "Math",
-    "matrix": "Math", "vector": "Math", "scalar": "Math", "tensor": "Math", "calculus": "Math",
-    "algebra": "Math", "geometry": "Math", "theorem": "Math", "proof": "Math", "axiom": "Math",
-    "probability": "Math", "statistics": "Math", "variance": "Math", "deviation": "Math", "mean": "Math",
-    "median": "Math", "mode": "Math", "distribution": "Math", "correlation": "Math", "regression": "Math",
-    "integer": "Math", "fraction": "Math", "decimal": "Math", "prime": "Math", "factor": "Math",
-    "coefficient": "Math", "constant": "Math", "polynomial": "Math", "quadratic": "Math", "linear": "Math",
-    "exponential": "Math", "logarithm": "Math", "infinite": "Math", "finite": "Math", "set": "Math",
-    "subset": "Math", "union": "Math", "intersection": "Math", "domain": "Math", "range": "Math",
+    "derivative": "Math", "integral": "Math", "limit": "Math", "calculus": "Math", "differential": "Math",
+    "matrix": "Math", "vector": "Math", "scalar": "Math", "tensor": "Math", "determinant": "Math",
+    "theorem": "Math", "axiom": "Math", "hypothesis": "Math", "lemma": "Math", "corollary": "Math",
+    "variance": "Math", "deviation": "Math", "correlation": "Math", "regression": "Math", "covariance": "Math",
+    "polynomial": "Math", "quadratic": "Math", "logarithm": "Math", "exponential": "Math", "arithmetic": "Math",
+    "fraction": "Math", "decimal": "Math", "coefficient": "Math", "denominator": "Math", "numerator": "Math",
+    "probability": "Math", "statistics": "Math", "permutation": "Math", "combination": "Math", "factorial": "Math",
+    "geometry": "Math", "algebra": "Math", "trigonometry": "Math", "hypotenuse": "Math", "perimeter": "Math",
+    "circumference": "Math", "radius": "Math", "diameter": "Math", "tangent": "Math", "cosine": "Math",
+    "sine": "Math", "asymptote": "Math", "parabola": "Math", "ellipse": "Math", "hyperbola": "Math",
 
     # === Physics (Phys) ===
-    "velocity": "Phys", "acceleration": "Phys", "force": "Phys", "mass": "Phys", "energy": "Phys",
-    "momentum": "Phys", "inertia": "Phys", "gravity": "Phys", "friction": "Phys", "tension": "Phys",
-    "thermodynamics": "Phys", "entropy": "Phys", "enthalpy": "Phys", "kinetic": "Phys", "potential": "Phys",
-    "quantum": "Phys", "particle": "Phys", "wave": "Phys", "frequency": "Phys", "wavelength": "Phys",
-    "amplitude": "Phys", "resonance": "Phys", "photon": "Phys", "electron": "Phys", "proton": "Phys",
-    "neutron": "Phys", "nucleus": "Phys", "atom": "Phys", "molecule": "Phys", "relativity": "Phys",
-    "magnetism": "Phys", "electricity": "Phys", "circuit": "Phys", "voltage": "Phys", "current": "Phys",
-    "resistance": "Phys", "optics": "Phys", "refraction": "Phys", "reflection": "Phys", "lens": "Phys",
+    "velocity": "Phys", "acceleration": "Phys", "momentum": "Phys", "inertia": "Phys", "trajectory": "Phys",
+    "thermodynamics": "Phys", "entropy": "Phys", "enthalpy": "Phys", "kinetic": "Phys", "static": "Phys",
+    "quantum": "Phys", "resonance": "Phys", "photon": "Phys", "electron": "Phys", "positron": "Phys",
+    "proton": "Phys", "neutron": "Phys", "nucleus": "Phys", "atom": "Phys", "molecule": "Phys",
+    "relativity": "Phys", "magnetism": "Phys", "voltage": "Phys", "amperage": "Phys", "capacitance": "Phys",
+    "resistance": "Phys", "optics": "Phys", "refraction": "Phys", "reflection": "Phys", "diffraction": "Phys",
+    "fission": "Phys", "fusion": "Phys", "radioactivity": "Phys", "isotope": "Phys", "half-life": "Phys",
+    "gravity": "Phys", "friction": "Phys", "torque": "Phys", "oscillation": "Phys", "frequency": "Phys",
+    "wavelength": "Phys", "amplitude": "Phys", "doppler": "Phys", "spectrum": "Phys", "vacuum": "Phys",
 
     # === Chemistry (Chem) ===
-    "element": "Chem", "compound": "Chem", "mixture": "Chem", "solution": "Chem", "solvent": "Chem",
-    "solute": "Chem", "concentration": "Chem", "acid": "Chem", "base": "Chem", "alkali": "Chem",
-    "reaction": "Chem", "catalyst": "Chem", "enzyme": "Chem", "substrate": "Chem", "bond": "Chem",
-    "covalent": "Chem", "ionic": "Chem", "metallic": "Chem", "oxidation": "Chem", "reduction": "Chem",
-    "isotope": "Chem", "ion": "Chem", "anion": "Chem", "cation": "Chem", "polymer": "Chem",
-    "monomer": "Chem", "organic": "Chem", "inorganic": "Chem", "synthesis": "Chem", "analysis": "Chem",
-    "distillation": "Chem", "filtration": "Chem", "titration": "Chem", "indicator": "Chem", "ph": "Chem",
+    "compound": "Chem", "solvent": "Chem", "solute": "Chem", "concentration": "Chem", "precipitate": "Chem",
+    "alkali": "Chem", "catalyst": "Chem", "enzyme": "Chem", "substrate": "Chem", "reagent": "Chem",
+    "covalent": "Chem", "ionic": "Chem", "oxidation": "Chem", "reduction": "Chem", "electrolysis": "Chem",
+    "anion": "Chem", "cation": "Chem", "polymer": "Chem", "monomer": "Chem", "molecule": "Chem",
+    "organic": "Chem", "inorganic": "Chem", "distillation": "Chem", "titration": "Chem", "filtration": "Chem",
+    "hydrocarbon": "Chem", "carbohydrate": "Chem", "protein": "Chem", "lipid": "Chem", "amino": "Chem",
+    "stoichiometry": "Chem", "equilibrium": "Chem", "thermodynamics": "Chem", "kinetics": "Chem", "activation": "Chem",
+    "periodic": "Chem", "element": "Chem", "halogen": "Chem", "noble": "Chem", "metal": "Chem",
     
     # === Biology/Medicine (Bio/Med) ===
-    "cell": "Bio", "tissue": "Bio", "organ": "Bio", "system": "Bio", "organism": "Bio",
-    "mitochondria": "Bio", "nucleus": "Bio", "ribosome": "Bio", "membrane": "Bio", "cytoplasm": "Bio",
-    "dna": "Bio", "rna": "Bio", "gene": "Bio", "chromosome": "Bio", "genome": "Bio",
-    "protein": "Bio", "lipid": "Bio", "carbohydrate": "Bio", "vitamin": "Bio", "mineral": "Bio",
-    "evolution": "Bio", "selection": "Bio", "adaptation": "Bio", "mutation": "Bio", "species": "Bio",
-    "virus": "Med", "bacteria": "Med", "fungus": "Bio", "pathogen": "Med", "antibody": "Med",
-    "antigen": "Med", "vaccine": "Med", "immunity": "Med", "infection": "Med", "inflammation": "Med",
-    "diagnosis": "Med", "prognosis": "Med", "symptom": "Med", "treatment": "Med", "therapy": "Med",
-    "anatomy": "Med", "physiology": "Med", "pathology": "Med", "pharmacology": "Med", "surgery": "Med",
+    "tissue": "Bio", "organ": "Bio", "organism": "Bio", "species": "Bio", "genus": "Bio",
+    "mitochondria": "Bio", "ribosome": "Bio", "membrane": "Bio", "cytoplasm": "Bio", "chloroplast": "Bio",
+    "dna": "Bio", "rna": "Bio", "chromosome": "Bio", "genome": "Bio", "allele": "Bio",
+    "metabolism": "Bio", "photosynthesis": "Bio", "respiration": "Bio", "fermentation": "Bio", "homeostasis": "Bio",
+    "evolution": "Bio", "mutation": "Bio", "selection": "Bio", "adaptation": "Bio", "symbiosis": "Bio",
+    "pathogen": "Med", "antibody": "Med", "antigen": "Med", "vaccine": "Med", "immunity": "Med",
+    "inflammation": "Med", "diagnosis": "Med", "prognosis": "Med", "symptom": "Med", "syndrome": "Med",
+    "anatomy": "Med", "physiology": "Med", "pathology": "Med", "pharmacology": "Med", "toxicology": "Med",
+    "cardiovascular": "Med", "respiratory": "Med", "neurology": "Med", "oncology": "Med", "pediatrics": "Med",
 
     # === Business/Finance (Biz) ===
-    "revenue": "Biz", "profit": "Biz", "loss": "Biz", "margin": "Biz", "asset": "Biz",
-    "liability": "Biz", "equity": "Biz", "debt": "Biz", "capital": "Biz", "investment": "Biz",
-    "market": "Biz", "stock": "Biz", "bond": "Biz", "share": "Biz", "dividend": "Biz",
-    "audit": "Biz", "accounting": "Biz", "tax": "Biz", "fiscal": "Biz", "budget": "Biz",
-    "forecast": "Biz", "strategy": "Biz", "management": "Biz", "marketing": "Biz", "sales": "Biz",
-    "customer": "Biz", "client": "Biz", "stakeholder": "Biz", "shareholder": "Biz", "partner": "Biz",
-    "merger": "Biz", "acquisition": "Biz", "ipo": "Biz", "venture": "Biz", "startup": "Biz",
-    "inflation": "Econ", "deflation": "Econ", "recession": "Econ", "gdp": "Econ", "currency": "Econ",
-    
+    "revenue": "Biz", "margin": "Biz", "liability": "Biz", "equity": "Biz", "dividend": "Biz",
+    "audit": "Biz", "fiscal": "Biz", "budget": "Biz", "forecast": "Biz", "overhead": "Biz",
+    "stakeholder": "Biz", "shareholder": "Biz", "acquisition": "Biz", "ipo": "Biz", "merger": "Biz",
+    "inflation": "Econ", "deflation": "Econ", "recession": "Econ", "gdp": "Econ", "macroeconomics": "Econ",
+    "collateral": "Biz", "liquidity": "Biz", "bankruptcy": "Biz", "portfolio": "Biz", "diversification": "Biz",
+    "amortization": "Biz", "depreciation": "Biz", "asset": "Biz", "capital": "Biz", "investment": "Biz",
+    "arbitrage": "Biz", "derivative": "Biz", "hedge": "Biz", "leverage": "Biz", "valuation": "Biz",
+    "entrepreneur": "Biz", "startup": "Biz", "venture": "Biz", "incubator": "Biz", "accelerator": "Biz",
+
     # === Law (Law) ===
-    "plaintiff": "Law", "defendant": "Law", "judge": "Law", "jury": "Law", "verdict": "Law",
-    "trial": "Law", "court": "Law", "appeal": "Law", "petition": "Law", "motion": "Law",
-    "tort": "Law", "contract": "Law", "property": "Law", "crime": "Law", "felony": "Law",
-    "misdemeanor": "Law", "evidence": "Law", "witness": "Law", "testimony": "Law", "affidavit": "Law",
-    "warrant": "Law", "subpoena": "Law", "summons": "Law", "indictment": "Law", "litigation": "Law",
-    "attorney": "Law", "lawyer": "Law", "prosecutor": "Law", "counsel": "Law", "client": "Law",
-    "liability": "Law", "negligence": "Law", "damages": "Law", "settlement": "Law", "arbitration": "Law"
+    "plaintiff": "Law", "defendant": "Law", "verdict": "Law", "prosecutor": "Law", "juror": "Law",
+    "appeal": "Law", "petition": "Law", "motion": "Law", "tort": "Law", "litigation": "Law",
+    "felony": "Law", "misdemeanor": "Law", "affidavit": "Law", "subpoena": "Law", "warrant": "Law",
+    "indictment": "Law", "arraignment": "Law", "acquittal": "Law", "conviction": "Law", "probation": "Law",
+    "attorney": "Law", "jurisdiction": "Law", "arbitration": "Law", "mediation": "Law", "statute": "Law",
+    "constitution": "Law", "amendment": "Law", "treaty": "Law", "contract": "Law", "clause": "Law",
+    "liability": "Law", "negligence": "Law", "malpractice": "Law", "damages": "Law", "compensation": "Law",
+    "intellectual": "Law", "copyright": "Law", "trademark": "Law", "patent": "Law", "infringement": "Law"
 }
 
 # ==========================================
