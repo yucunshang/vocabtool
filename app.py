@@ -6,7 +6,26 @@ import simplemma
 
 st.set_page_config(page_title="Vibe Vocab Studio", page_icon="🧠", layout="wide")
 
-# --- 1. 智能加载配置 ---
+# --- 1. 自动适配 Simplemma 版本 (核心修复) ---
+# 这段代码会自动检测当前安装的版本，选择正确的方法
+try:
+    # 尝试新版写法 (v1.0+)
+    test_res = simplemma.lemmatize("testing", lang="en")
+    # 如果没报错，说明支持 lang="en"
+    def get_lemma(word):
+        return simplemma.lemmatize(word, lang="en")
+except TypeError:
+    # 如果报错，说明是旧版 (v0.9.x)，需要加载数据
+    if hasattr(simplemma, 'load_data'):
+        lang_data = simplemma.load_data('en')
+        def get_lemma(word):
+            return simplemma.lemmatize(word, lang_data)
+    else:
+        # 极低版本兼容
+        def get_lemma(word):
+            return word # 实在不行就返回原词，防止报错
+
+# --- 2. 智能加载词库 ---
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv", "COCA20000词Excel版.xlsx - Sheet1.csv"]
 
 @st.cache_data
@@ -44,7 +63,7 @@ def load_vocab():
         st.error(f"词库加载出错: {e}")
         return None
 
-# --- 2. 核心逻辑 (v5.0 适配最新版 simplemma) ---
+# --- 3. 核心逻辑 (调用自适应函数) ---
 def process_text_smart(text, vocab_dict, range_start, range_end):
     text_lower = text.lower()
     words = re.findall(r'\b[a-z\']{2,}\b', text_lower)
@@ -63,20 +82,13 @@ def process_text_smart(text, vocab_dict, range_start, range_end):
             rank = vocab_dict[w]
             match_word = w
         else:
-            # 2. 查还原形 (新版写法：直接传 lang='en')
-            try:
-                lemma = simplemma.lemmatize(w, lang='en')
-            except:
-                # 兼容旧版本写法 (万一有人装了旧版)
-                import simplemma.langdetect
-                langdata = simplemma.load_data('en')
-                lemma = simplemma.lemmatize(w, langdata)
-
+            # 2. 查还原形 (使用自适应函数)
+            lemma = get_lemma(w)
             if lemma in vocab_dict:
                 rank = vocab_dict[lemma]
                 match_word = lemma
             else:
-                # 3. 查简单变体
+                # 3. 查变体
                 if w.endswith("'s") and w[:-2] in vocab_dict:
                     rank = vocab_dict[w[:-2]]
                     match_word = w[:-2]
@@ -98,9 +110,9 @@ def process_text_smart(text, vocab_dict, range_start, range_end):
 
     return to_df(tier_known), to_df(tier_target), to_df(tier_beyond)
 
-# --- 3. 界面 UI ---
-st.title("🧠 Vibe Vocab (Final)")
-st.caption("智能还原 · 兼容最新版")
+# --- 4. 界面 UI ---
+st.title("🧠 Vibe Vocab (自适应稳定版)")
+st.caption("Auto-Adapt Engine · 兼容所有版本")
 
 vocab_dict = load_vocab()
 if not vocab_dict:
