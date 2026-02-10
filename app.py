@@ -6,26 +6,21 @@ import simplemma
 
 st.set_page_config(page_title="Vibe Vocab Studio", page_icon="🧠", layout="wide")
 
-# --- 1. 自动适配 Simplemma 版本 (核心修复) ---
-# 这段代码会自动检测当前安装的版本，选择正确的方法
+# --- 1. 自动适配 Simplemma 版本 ---
 try:
-    # 尝试新版写法 (v1.0+)
     test_res = simplemma.lemmatize("testing", lang="en")
-    # 如果没报错，说明支持 lang="en"
     def get_lemma(word):
         return simplemma.lemmatize(word, lang="en")
 except TypeError:
-    # 如果报错，说明是旧版 (v0.9.x)，需要加载数据
     if hasattr(simplemma, 'load_data'):
         lang_data = simplemma.load_data('en')
         def get_lemma(word):
             return simplemma.lemmatize(word, lang_data)
     else:
-        # 极低版本兼容
         def get_lemma(word):
-            return word # 实在不行就返回原词，防止报错
+            return word 
 
-# --- 2. 智能加载词库 ---
+# --- 2. 强力加载词库 (关键修复) ---
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv", "COCA20000词Excel版.xlsx - Sheet1.csv"]
 
 @st.cache_data
@@ -40,22 +35,41 @@ def load_vocab():
         return None
 
     try:
-        try:
-            df = pd.read_csv(file_path)
-        except:
-            df = pd.read_csv(file_path, encoding='gbk')
-
-        df.columns = [str(c).strip().lower().replace('\n', '') for c in df.columns]
+        # 1. 尝试读取 (加强编码兼容性)
+        df = None
+        for enc in ['utf-8', 'gbk', 'gb18030', 'utf-8-sig']:
+            try:
+                df = pd.read_csv(file_path, encoding=enc)
+                # 如果成功读出多列，说明编码对了
+                if len(df.columns) > 1:
+                    break
+            except:
+                continue
         
-        rank_col = next((c for c in df.columns if any(k in c for k in ['rank', '排名', '序号', '词频'])), None)
-        word_col = next((c for c in df.columns if any(k in c for k in ['word', '单词', '词汇'])), None)
-        
-        if not word_col: word_col = df.columns[0]
-        if not rank_col: rank_col = df.columns[3] if len(df.columns) > 3 else df.columns[0]
+        if df is None: return None
 
+        # 2. 暴力锁定列 (不再依赖列名)
+        # 你的文件结构：Column 0 是单词，Column 3 是排名
+        if len(df.columns) >= 4:
+            word_col = df.columns[0] # 第1列
+            rank_col = df.columns[3] # 第4列
+        else:
+            # 兜底：如果用户换了文件，尝试智能查找
+            df.columns = [str(c).strip().lower().replace('\n', '') for c in df.columns]
+            rank_col = next((c for c in df.columns if any(k in c for k in ['rank', '排名', '序号', '词频'])), df.columns[0])
+            word_col = next((c for c in df.columns if any(k in c for k in ['word', '单词', '词汇'])), df.columns[1])
+
+        # 3. 建立字典 (清洗数据)
+        # 强制把排名转为数字，无法转换的(比如表头)变NaN然后填充99999
+        df['rank_clean'] = pd.to_numeric(df[rank_col], errors='coerce').fillna(99999)
+        df['word_clean'] = df[word_col].astype(str).str.lower().str.strip()
+        
+        # 过滤掉无效行
+        df = df[df['rank_clean'] < 99990] 
+        
         vocab_dict = pd.Series(
-            pd.to_numeric(df[rank_col], errors='coerce').fillna(99999).values, 
-            index=df[word_col].astype(str).str.lower().str.strip()
+            df['rank_clean'].values, 
+            index=df['word_clean']
         ).to_dict()
         
         return vocab_dict
@@ -63,7 +77,7 @@ def load_vocab():
         st.error(f"词库加载出错: {e}")
         return None
 
-# --- 3. 核心逻辑 (调用自适应函数) ---
+# --- 3. 核心逻辑 ---
 def process_text_smart(text, vocab_dict, range_start, range_end):
     text_lower = text.lower()
     words = re.findall(r'\b[a-z\']{2,}\b', text_lower)
@@ -82,7 +96,7 @@ def process_text_smart(text, vocab_dict, range_start, range_end):
             rank = vocab_dict[w]
             match_word = w
         else:
-            # 2. 查还原形 (使用自适应函数)
+            # 2. 查还原
             lemma = get_lemma(w)
             if lemma in vocab_dict:
                 rank = vocab_dict[lemma]
@@ -93,34 +107,34 @@ def process_text_smart(text, vocab_dict, range_start, range_end):
                     rank = vocab_dict[w[:-2]]
                     match_word = w[:-2]
 
-        item = {'单词 (Word)': match_word, '原文 (Original)': w, '排名 (Rank)': int(rank)}
+        item = {'单词': match_word, '原文': w, '排名': int(rank)}
         
         if rank <= range_start:
             tier_known.append(item)
         elif range_start < rank <= range_end:
             tier_target.append(item)
         else:
-            if item['单词 (Word)'] == item['原文 (Original)']:
-                item['原文 (Original)'] = '-'
+            if item['单词'] == item['原文']:
+                item['原文'] = '-'
             tier_beyond.append(item)
 
     def to_df(data):
         if not data: return pd.DataFrame()
-        return pd.DataFrame(data).sort_values('排名 (Rank)').drop_duplicates(subset=['单词 (Word)'])
+        return pd.DataFrame(data).sort_values('排名').drop_duplicates(subset=['单词'])
 
     return to_df(tier_known), to_df(tier_target), to_df(tier_beyond)
 
 # --- 4. 界面 UI ---
-st.title("🧠 Vibe Vocab (自适应稳定版)")
-st.caption("Auto-Adapt Engine · 兼容所有版本")
+st.title("🧠 Vibe Vocab v5.1 (强力修复版)")
+st.caption("强制列对齐 · 解决简单词排名错误")
 
 vocab_dict = load_vocab()
 if not vocab_dict:
-    st.error("❌ 找不到词库！请确认 GitHub 上传了 csv 文件。")
+    st.error("❌ 找不到词库或读取失败！")
     st.stop()
 
 st.sidebar.header("⚙️ 学习规划")
-st.sidebar.success(f"📚 词库已就绪")
+st.sidebar.success(f"📚 词库加载成功: {len(vocab_dict)} 词")
 
 st.sidebar.subheader("设定学习区间")
 vocab_range = st.sidebar.slider(
@@ -150,7 +164,7 @@ def show_download_buttons(df, prefix):
     col1, col2 = st.columns(2)
     csv = df.to_csv(index=False).encode('utf-8')
     col1.download_button(f"📥 下载 Excel", csv, f"{prefix}.csv", "text/csv")
-    txt = "\n".join(df['单词 (Word)'].tolist())
+    txt = "\n".join(df['单词'].tolist())
     col2.download_button(f"📄 下载 TXT", txt, f"{prefix}.txt", "text/plain")
 
 if st.button("🚀 开始智能分析", type="primary"):
@@ -177,6 +191,7 @@ if st.button("🚀 开始智能分析", type="primary"):
 
         with t2:
             st.markdown(f"### 🚀 超纲词 (>{range_end})")
+            # 调试信息：如果这里出现了简单的词，说明词库没读对
             if not df_beyond.empty:
                 st.dataframe(df_beyond, use_container_width=True)
                 show_download_buttons(df_beyond, "beyond_words")
