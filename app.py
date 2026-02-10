@@ -4,7 +4,6 @@ import re
 import os
 import lemminflect
 import nltk
-import io
 
 # ==========================================
 # 1. 基础配置
@@ -20,8 +19,6 @@ st.markdown("""
     header {visibility: hidden;}
     footer {visibility: hidden;}
     .block-container { padding-top: 1rem; }
-    
-    /* 优化顶部单选按钮组 */
     div[role="radiogroup"] > label {
         font-weight: bold;
         background-color: #f0f2f6;
@@ -32,7 +29,35 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 内置扩充词库 (Hardcoded Patch)
+# 2. 【核心】内置专业术语库 (Technical Terms)
+# ==========================================
+# 💡 请在这里粘贴您的专业词汇。
+# 无论这些词在词频表中排多少名，都会被强制归类为【🟣 专业术语】
+BUILTIN_TECHNICAL_TERMS = {
+    # --- 示例：计算机/AI ---
+    "algorithm", "recursion", "latency", "throughput", "bandwidth",
+    "API", "json", "backend", "frontend", "fullstack",
+    "neural", "network", "transformer", "embedding", "inference",
+    "python", "java", "docker", "kubernetes", "linux",
+    
+    # --- 示例：商业/金融 ---
+    "stakeholder", "revenue", "margin", "fiscal", "audit",
+    "collateral", "dividend", "equity", "valuation", "leverage",
+    
+    # --- 示例：学术/逻辑 ---
+    "hypothesis", "methodology", "quantitative", "qualitative",
+    "correlation", "causation", "variable", "deviation",
+    
+    # --- 您可以继续往下添加 ---
+    "mitochondria", "photosynthesis", # 生物
+    "plaintiff", "defendant",         # 法律
+}
+
+# 确保全是小写，方便匹配
+BUILTIN_TECHNICAL_TERMS = {w.lower() for w in BUILTIN_TECHNICAL_TERMS}
+
+# ==========================================
+# 3. 内置扩充词库 (Patch)
 # ==========================================
 PROPER_NOUNS_DB = {
     "usa": "USA", "uk": "UK", "uae": "UAE", "prc": "PRC",
@@ -52,8 +77,6 @@ PROPER_NOUNS_DB = {
     "chicago": "Chicago", "seattle": "Seattle", "boston": "Boston", "houston": "Houston",
     "moscow": "Moscow", "cairo": "Cairo", "dubai": "Dubai", "mumbai": "Mumbai",
     "africa": "Africa", "asia": "Asia", "europe": "Europe", "antarctica": "Antarctica",
-    "north america": "North America", "south america": "South America",
-    "pacific": "Pacific", "atlantic": "Atlantic", "indian ocean": "Indian Ocean",
     "monday": "Monday", "tuesday": "Tuesday", "wednesday": "Wednesday", "thursday": "Thursday",
     "friday": "Friday", "saturday": "Saturday", "sunday": "Sunday",
     "january": "January", "february": "February", "march": "March", "april": "April", 
@@ -92,7 +115,7 @@ AMBIGUOUS_WORDS = {
 }
 
 # ==========================================
-# 3. 初始化 NLP
+# 4. 初始化 NLP
 # ==========================================
 @st.cache_resource
 def setup_nltk():
@@ -107,30 +130,24 @@ def setup_nltk():
 
 setup_nltk()
 
-def load_custom_terms(uploaded_file):
-    if uploaded_file is None: return set()
-    terms = set()
-    try:
-        stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
-        for line in stringio:
-            parts = line.replace(',', '\n').split('\n')
-            for p in parts:
-                clean_w = p.strip().lower()
-                if clean_w: terms.add(clean_w)
-    except: pass
-    return terms
-
-def get_word_info(raw_word, custom_terms_set):
+def get_word_info(raw_word):
     word_lower = raw_word.lower()
     word_clean = raw_word.strip()
     
-    if word_lower in custom_terms_set:
+    # 0. 检查内置专业术语 (优先级最高)
+    if word_lower in BUILTIN_TECHNICAL_TERMS:
+        # 即使是小写，也给它标记为 term
         return raw_word.strip(), "term"
+
+    # 1. 检查歧义词
     if word_lower in AMBIGUOUS_WORDS:
         if word_clean[0].isupper(): return word_clean.title(), True
         else: return word_lower, False
+
+    # 2. 检查纯专有名词库
     if word_lower in PROPER_NOUNS_DB:
         return PROPER_NOUNS_DB[word_lower], True
+        
     return word_lower, False
 
 def smart_lemmatize(text):
@@ -150,7 +167,7 @@ def smart_lemmatize(text):
     return " ".join(results)
 
 # ==========================================
-# 4. 词库加载
+# 5. 词库加载
 # ==========================================
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv"]
 
@@ -182,7 +199,7 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 5. AI 指令生成器
+# 6. AI 指令生成器
 # ==========================================
 def generate_ai_prompt(word_list, output_format, is_term_list=False):
     words_str = ", ".join(word_list)
@@ -223,35 +240,27 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
     return prompt
 
 # ==========================================
-# 6. 界面布局 (无侧边栏版)
+# 7. 界面布局 (无侧边栏 + 内置术语版)
 # ==========================================
 st.title("🚀 Vocab Master Pro")
 
-# === 高级设置折叠区 (替代侧边栏) ===
-with st.expander("⚙️ 词库设置与自定义术语 (点击展开)", expanded=False):
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        st.markdown("##### 词库状态")
-        if vocab_dict:
-            total_vocab = len(vocab_dict)
-            st.metric("📊 实际词库容量", f"{total_vocab:,}", delta="含内置补丁")
-        else:
-            st.error("⚠️ 本地词库未加载")
-            
-    with c2:
-        st.markdown("##### 📂 上传专业术语表")
-        uploaded_terms = st.file_uploader("上传 CSV/TXT (强制归类为术语)", type=['csv', 'txt'], label_visibility="collapsed")
-        custom_terms_set = load_custom_terms(uploaded_terms)
-        if custom_terms_set:
-            st.success(f"已加载 {len(custom_terms_set)} 个自定义术语")
+# === 高级设置折叠区 ===
+with st.expander("⚙️ 词库数据统计 (点击展开)", expanded=False):
+    st.markdown("##### 词库状态")
+    if vocab_dict:
+        total_vocab = len(vocab_dict)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("📊 本地词库容量", f"{total_vocab:,}", delta="含补丁")
+        with c2:
+            st.metric("🟣 内置专业术语", f"{len(BUILTIN_TECHNICAL_TERMS)} 个")
+    else:
+        st.error("⚠️ 本地词库未加载")
 
 # === 顶部功能切换 ===
 st.divider()
 app_mode = st.radio("选择功能模式:", ["🛠️ 智能还原", "📊 单词分级 (AI 制卡)"], horizontal=True)
 
-# ---------------------------------------------------------
-# 模式 A: 智能还原
-# ---------------------------------------------------------
 if "智能还原" in app_mode:
     st.caption("功能：输入文章，还原单词原型 (如 went -> go, apples -> apple)")
     c1, c2 = st.columns(2)
@@ -265,30 +274,24 @@ if "智能还原" in app_mode:
             st.caption("👆 点击右上角图标，一键复制还原后的文本")
         elif not raw_text: st.info("👈 请输入文本")
 
-# ---------------------------------------------------------
-# 模式 B: 单词分级
-# ---------------------------------------------------------
 else:
-    # === 将词汇量设置移回主界面 ===
     st.caption("功能：根据词频筛选生词，并生成 AI 制卡指令")
-    
-    # 第一行：设置参数
     col_level1, col_level2, col_space = st.columns([1, 1, 2])
     with col_level1:
-        current_level = st.number_input("当前水平 (词频)", 0, 30000, 9000, 500, help="词频在这个排名以内的词，会被认为是【已掌握】")
+        current_level = st.number_input("当前水平 (词频)", 0, 30000, 9000, 500)
     with col_level2:
-        target_level = st.number_input("目标水平 (词频)", 0, 30000, 15000, 500, help="词频在此范围内的词，会被标记为【重点词】")
+        target_level = st.number_input("目标水平 (词频)", 0, 30000, 15000, 500)
     
-    # 第二行：输入框和按钮
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         input_mode = st.radio("识别模式:", ("自动分词", "按行处理"), horizontal=True)
-        grade_input = st.text_area("input_box", height=400, placeholder="algorithm\nonline\nChina\nshove", label_visibility="collapsed")
+        # algorithm 和 recursion 都是内置词
+        grade_input = st.text_area("input_box", height=400, placeholder="algorithm\nrecursion\nChina\nshove", label_visibility="collapsed")
         btn_grade = st.button("开始分级", type="primary", use_container_width=True)
 
     with g_col2:
         if not vocab_dict:
-            st.error("❌ 词库未加载，请检查 csv 文件")
+            st.error("❌ 词库未加载")
         elif btn_grade and grade_input:
             
             raw_items = []
@@ -312,7 +315,8 @@ else:
                     if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
                     if item_lower in JUNK_WORDS: continue
                     
-                    display_word, info_type = get_word_info(item_cleaned, custom_terms_set)
+                    # === 检查内置专业术语 ===
+                    display_word, info_type = get_word_info(item_cleaned)
                     rank = vocab_dict.get(item_lower, 99999)
                     
                     if info_type == "term": cat = "term"
