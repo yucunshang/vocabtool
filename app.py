@@ -4,40 +4,32 @@ import re
 import os
 import lemminflect
 import nltk
+import json
 
 # ==========================================
 # 1. 基础配置
 # ==========================================
 st.set_page_config(layout="wide", page_title="Vocab Master Pro", page_icon="🚀")
 
-# === CSS 样式优化：适配深色模式 (Dark Mode) ===
 st.markdown("""
 <style>
-    /* 优化代码块字体 */
     .stCode {
         font-family: 'Consolas', 'Courier New', monospace !important;
         font-size: 16px !important;
     }
-    
-    /* 隐藏页眉页脚和侧边栏按钮 */
     header {visibility: hidden;}
     footer {visibility: hidden;}
     .block-container { padding-top: 1rem; }
     [data-testid="stSidebarCollapsedControl"] {display: none;}
-
-    /* === 核心修改：Radio Group 适配深色模式 === */
-    /* 使用 var(--变量名) 代替固定颜色，让 Streamlit 自动接管颜色 */
     div[role="radiogroup"] > label {
         font-weight: bold;
-        background-color: var(--secondary-background-color); /* 自动适配背景色 */
-        color: var(--text-color);                            /* 自动适配文字颜色 */
-        border: 1px solid var(--border-color-light);         /* 增加微弱边框 */
+        background-color: var(--secondary-background-color);
+        color: var(--text-color);
+        border: 1px solid var(--border-color-light);
         padding: 5px 15px;
         border-radius: 8px;
         margin-right: 10px;
     }
-    
-    /* 鼠标悬停效果 */
     div[role="radiogroup"] > label:hover {
         border-color: var(--primary-color);
         color: var(--primary-color);
@@ -46,89 +38,36 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 内置词库
+# 2. 数据加载 (Data Loading) - 核心优化
 # ==========================================
-BUILTIN_TECHNICAL_TERMS = {
-    # 用户指定补充
-    "metal": "Chem", "motion": "Law", "gravity": "Phys", "molecule": "Chem",
-    "vacuum": "Phys", "electron": "Phys", "quantum": "Phys", "velocity": "Phys",
-    "friction": "Phys", "catalyst": "Chem", "equilibrium": "Chem",
-    # CS
-    "algorithm": "CS", "recursion": "CS", "latency": "CS", "throughput": "CS", 
-    "api": "CS", "json": "CS", "backend": "CS", "frontend": "CS", "fullstack": "CS",
-    "neural": "AI", "transformer": "AI", "embedding": "AI", "inference": "AI",
-    # Math
-    "derivative": "Math", "integral": "Math", "matrix": "Math", "vector": "Math",
-    "theorem": "Math", "variance": "Math", "deviation": "Math", "correlation": "Math",
-    # Phys
-    "acceleration": "Phys", "momentum": "Phys", "inertia": "Phys", "thermodynamics": "Phys",
-    "entropy": "Phys", "enthalpy": "Phys", "kinetic": "Phys", "photon": "Phys",
-    # Bio
-    "mitochondria": "Bio", "ribosome": "Bio", "membrane": "Bio", "cytoplasm": "Bio",
-    "dna": "Bio", "rna": "Bio", "chromosome": "Bio", "genome": "Bio",
-    # Biz
-    "revenue": "Biz", "margin": "Biz", "liability": "Biz", "equity": "Biz", "dividend": "Biz",
-    "audit": "Biz", "fiscal": "Biz", "inflation": "Econ", "deflation": "Econ",
-    # Law
-    "plaintiff": "Law", "defendant": "Law", "verdict": "Law", "prosecutor": "Law",
-    "tort": "Law", "felony": "Law", "affidavit": "Law", "subpoena": "Law"
-}
-BUILTIN_TECHNICAL_TERMS = {k.lower(): v for k, v in BUILTIN_TECHNICAL_TERMS.items()}
+@st.cache_data
+def load_knowledge_base():
+    """从 JSON 文件加载静态知识库，极大提升性能"""
+    try:
+        # 1. 术语库
+        with open('data/terms.json', 'r', encoding='utf-8') as f:
+            terms = json.load(f)
+        # 2. 专有名词库
+        with open('data/proper.json', 'r', encoding='utf-8') as f:
+            proper = json.load(f)
+        # 3. 补丁词库
+        with open('data/patch.json', 'r', encoding='utf-8') as f:
+            patch = json.load(f)
+        # 4. 歧义词 (列表转集合)
+        with open('data/ambiguous.json', 'r', encoding='utf-8') as f:
+            ambiguous = set(json.load(f))
+            
+        # 确保术语 key 全小写，防止匹配失败
+        terms = {k.lower(): v for k, v in terms.items()}
+        proper = {k.lower(): v for k, v in proper.items()}
+        
+        return terms, proper, patch, ambiguous
+    except FileNotFoundError:
+        st.error("⚠️ 缺少数据文件！请确保 `data/` 文件夹下包含 terms.json, proper.json, patch.json, ambiguous.json")
+        return {}, {}, {}, set()
 
-PROPER_NOUNS_DB = {
-    "usa": "USA", "uk": "UK", "uae": "UAE", "prc": "PRC",
-    "america": "America", "england": "England", "scotland": "Scotland", "wales": "Wales",
-    "japan": "Japan", "korea": "Korea", "france": "France", "germany": "Germany", "italy": "Italy",
-    "spain": "Spain", "russia": "Russia", "india": "India", "brazil": "Brazil", "canada": "Canada",
-    "australia": "Australia", "mexico": "Mexico", "egypt": "Egypt", "china": "China",
-    "switzerland": "Switzerland", "sweden": "Sweden", "norway": "Norway", "denmark": "Denmark",
-    "finland": "Finland", "netherlands": "Netherlands", "belgium": "Belgium", "austria": "Austria",
-    "greece": "Greece", "turkey": "Turkey", "israel": "Israel", "saudi arabia": "Saudi Arabia",
-    "singapore": "Singapore", "malaysia": "Malaysia", "thailand": "Thailand", "vietnam": "Vietnam",
-    "indonesia": "Indonesia", "philippines": "Philippines",
-    "london": "London", "paris": "Paris", "tokyo": "Tokyo", "beijing": "Beijing",
-    "shanghai": "Shanghai", "hong kong": "Hong Kong", "sydney": "Sydney", 
-    "melbourne": "Melbourne", "berlin": "Berlin", "rome": "Rome", "madrid": "Madrid",
-    "new york": "New York", "los angeles": "Los Angeles", "san francisco": "San Francisco",
-    "chicago": "Chicago", "seattle": "Seattle", "boston": "Boston", "houston": "Houston",
-    "moscow": "Moscow", "cairo": "Cairo", "dubai": "Dubai", "mumbai": "Mumbai",
-    "africa": "Africa", "asia": "Asia", "europe": "Europe", "antarctica": "Antarctica",
-    "monday": "Monday", "tuesday": "Tuesday", "wednesday": "Wednesday", "thursday": "Thursday",
-    "friday": "Friday", "saturday": "Saturday", "sunday": "Sunday",
-    "january": "January", "february": "February", "march": "March", "april": "April", 
-    "may": "May", "june": "June", "july": "July", "august": "August", 
-    "september": "September", "october": "October", "november": "November", "december": "December",
-    "christmas": "Christmas", "easter": "Easter", "thanksgiving": "Thanksgiving", "halloween": "Halloween",
-    "google": "Google", "apple": "Apple", "microsoft": "Microsoft", "tesla": "Tesla",
-    "amazon": "Amazon", "facebook": "Facebook", "twitter": "Twitter", "youtube": "YouTube", "instagram": "Instagram",
-    "tiktok": "TikTok", "netflix": "Netflix", "spotify": "Spotify", "zoom": "Zoom",
-    "nasa": "NASA", "fbi": "FBI", "cia": "CIA", "un": "UN", "eu": "EU", "nato": "NATO", "wto": "WTO", "who": "WHO",
-    "iphone": "iPhone", "ipad": "iPad", "mac": "Mac", "windows": "Windows", "android": "Android",
-    "wifi": "Wi-Fi", "internet": "Internet", "bluetooth": "Bluetooth",
-    "mr": "Mr.", "mrs": "Mrs.", "ms": "Ms.", "dr": "Dr.", "prof": "Prof.",
-    "phd": "PhD", "mba": "MBA", "ceo": "CEO", "cfo": "CFO", "cto": "CTO", "vip": "VIP"
-}
-
-BUILTIN_PATCH_VOCAB = {
-    "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
-    "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
-    "cloud": 3000, "algorithm": 6000, "database": 5000, "interface": 5000,
-    "digital": 3000, "virtual": 4000, "smart": 2000, "mobile": 2500,
-    "email": 2000, "text": 1000, "chat": 2000, "video": 1500, "audio": 3000,
-    "link": 2000, "click": 2000, "search": 1500, "share": 1500, "post": 1500,
-    "analysis": 2500, "strategy": 2500, "method": 2000, "theory": 2500,
-    "research": 1500, "evidence": 2000, "significant": 2000, "factor": 1500,
-    "process": 1000, "system": 1000, "available": 1500, "similar": 1500,
-    "specific": 2000, "issue": 1000, "policy": 1500, "community": 1500,
-    "development": 1500, "economic": 2000, "global": 2500, "environment": 2000,
-    "challenge": 2500, "opportunity": 2000, "solution": 2500, "management": 2500,
-    "okay": 500, "hey": 500, "yeah": 500, "wow": 1000, "cool": 1500,
-    "super": 2000, "extra": 2500, "plus": 2000
-}
-
-AMBIGUOUS_WORDS = {
-    "china", "turkey", "march", "may", "august", "polish"
-}
+# 全局变量加载
+BUILTIN_TECHNICAL_TERMS, PROPER_NOUNS_DB, BUILTIN_PATCH_VOCAB, AMBIGUOUS_WORDS = load_knowledge_base()
 
 # ==========================================
 # 3. 初始化 NLP
@@ -163,7 +102,7 @@ def smart_lemmatize(text):
     return " ".join(results)
 
 # ==========================================
-# 4. 词库加载
+# 4. 词库加载 (CSV)
 # ==========================================
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv"]
 
@@ -185,13 +124,7 @@ def load_vocab():
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
         except: pass
     
-    BUILTIN_PATCH_VOCAB = {
-        "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
-        "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
-        "cloud": 3000, "algorithm": 6000, "database": 5000, "interface": 5000,
-        "analysis": 2500, "strategy": 2500, "method": 2000, "theory": 2500,
-        "research": 1500, "evidence": 2000, "significant": 2000, "factor": 1500
-    }
+    # 注入 JSON 加载的补丁
     for word, rank in BUILTIN_PATCH_VOCAB.items():
         if word not in vocab: vocab[word] = rank
         else:
@@ -206,19 +139,15 @@ vocab_dict = load_vocab()
 def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list=False):
     words_str = ", ".join(word_list)
     
-    # === 构建动态指令 ===
     definition_instruction = ""
-    
     if is_term_list or def_mode == "term":
         definition_instruction = "- **领域锁定**：单词带有 (Domain) 标签，**必须**仅提供符合该领域背景的专业释义。"
-    
     elif def_mode == "split":
         definition_instruction = """- **熟词深挖 (Polymsey Splitting)**：这些是高频常用词，为了掌握其不同用法，**请将不同的含义拆分为多条独立的数据（多张卡片）**。
     - 例如 'fair' 应拆分为：
       1. fair (adj) - reasonable/impartial (公平的)
       2. fair (n) - gathering/market (集市)
     - 不要把所有意思挤在一张卡片里。"""
-    
     else: # single
         definition_instruction = "- **极简速记 (Minimalist)**：这些是生词，请**仅提供 1 个最核心、最常用的释义**。严禁罗列多个义项，减轻记忆负担。"
 
@@ -287,10 +216,11 @@ def analyze_text(raw_text, mode="auto"):
                 "raw": item_lower
             })
         
-        # 2. 专名身份
-        if item_lower in PROPER_NOUNS_DB:
+        # 2. 专名身份 (Rank 1, 方便过滤)
+        if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
+            display = PROPER_NOUNS_DB.get(item_lower, item_cleaned.title())
             unique_items.append({
-                "word": PROPER_NOUNS_DB[item_lower],
+                "word": display,
                 "rank": 1, 
                 "cat": "proper",
                 "raw": item_lower
@@ -373,7 +303,6 @@ elif "单词分级" in app_mode:
                             with st.expander("👁️ 查看列表", expanded=False): st.code("\n".join(words))
                             
                             st.markdown(f"**🤖 AI 指令 ({label})**")
-                            
                             has_term = (cat_key == 'term')
                             
                             p_csv = generate_ai_prompt(words, 'csv', def_mode, is_term_list=has_term)
@@ -428,7 +357,7 @@ elif "Top N" in app_mode:
             st.divider()
             col_win, col_rest = st.columns(2)
             
-            # === 左栏：精选词汇 (Top N) ===
+            # === 左栏 ===
             with col_win:
                 st.success(f"🔥 精选 Top {len(top_df)}")
                 if not top_df.empty:
@@ -437,7 +366,6 @@ elif "Top N" in app_mode:
                     
                     st.markdown("**🤖 AI 指令 (核心单义)**")
                     has_term = any('(' in w for w in words)
-                    
                     mode = "single" if not has_term else "term"
                     
                     p_csv = generate_ai_prompt(words, 'csv', mode, is_term_list=has_term)
@@ -448,7 +376,7 @@ elif "Top N" in app_mode:
                     with t2: st.code(p_txt, language='markdown')
                 else: st.warning("无")
 
-            # === 右栏：剩余词汇 ===
+            # === 右栏 ===
             with col_rest:
                 st.subheader(f"💤 剩余 {len(rest_df)} 个")
                 if not rest_df.empty:
