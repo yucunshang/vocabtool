@@ -32,106 +32,39 @@ st.markdown("""
 # ==========================================
 # 2. 内置词库 (数据层)
 # ==========================================
-
-# 1. 专业术语库 (Technical Terms)
-# 策略优化：移除了 gravity, velocity, friction 等常用物理词，让它们走普通词频过滤。
-# 保留了真正的生僻术语。
 BUILTIN_TECHNICAL_TERMS = {
-    # 用户指定补充 (高难)
-    "catalyst": "Chem", "equilibrium": "Chem", "molecule": "Chem",
-    "quantum": "Phys", "vacuum": "Phys", "electron": "Phys", 
-    "plaintiff": "Law", "defendant": "Law", "tort": "Law",
-    
-    # CS (生僻)
-    "recursion": "CS", "latency": "CS", "throughput": "CS", "bandwidth": "CS",
-    "backend": "CS", "frontend": "CS", "fullstack": "CS", "middleware": "CS",
+    # 用户指定补充
+    "metal": "Chem", "motion": "Law", "gravity": "Phys", "molecule": "Chem",
+    "vacuum": "Phys", "electron": "Phys", "quantum": "Phys", "velocity": "Phys",
+    "friction": "Phys", "catalyst": "Chem", "equilibrium": "Chem",
+    # CS
+    "algorithm": "CS", "recursion": "CS", "latency": "CS", "throughput": "CS", 
+    "api": "CS", "json": "CS", "backend": "CS", "frontend": "CS", "fullstack": "CS",
     "neural": "AI", "transformer": "AI", "embedding": "AI", "inference": "AI",
-    "kubernetes": "CS", "encryption": "CS", "authentication": "CS", "authorization": "CS",
-    "repository": "CS", "deployment": "CS", "instantiation": "CS", "polymorphism": "CS",
-    
-    # Math (生僻)
-    "derivative": "Math", "integral": "Math", "calculus": "Math", "matrix": "Math", 
-    "vector": "Math", "tensor": "Math", "theorem": "Math", "axiom": "Math", 
-    "variance": "Math", "deviation": "Math", "correlation": "Math", "regression": "Math",
-    "polynomial": "Math", "logarithm": "Math", "exponential": "Math", "permutation": "Math",
-    
-    # Phys (仅保留生僻，移除 gravity/velocity/force 等)
-    "thermodynamics": "Phys", "entropy": "Phys", "enthalpy": "Phys", 
-    "kinetic": "Phys", "photon": "Phys", "positron": "Phys", "neutron": "Phys",
-    "relativity": "Phys", "optics": "Phys", "refraction": "Phys", "diffraction": "Phys",
-    
-    # Bio (生僻)
+    # Math
+    "derivative": "Math", "integral": "Math", "matrix": "Math", "vector": "Math",
+    "theorem": "Math", "variance": "Math", "deviation": "Math", "correlation": "Math",
+    # Phys
+    "acceleration": "Phys", "momentum": "Phys", "inertia": "Phys", "thermodynamics": "Phys",
+    "entropy": "Phys", "enthalpy": "Phys", "kinetic": "Phys", "photon": "Phys",
+    # Bio
     "mitochondria": "Bio", "ribosome": "Bio", "membrane": "Bio", "cytoplasm": "Bio",
-    "chromosome": "Bio", "genome": "Bio", "photosynthesis": "Bio", "metabolism": "Bio",
-    
-    # Biz/Econ (生僻)
-    "liability": "Biz", "equity": "Biz", "dividend": "Biz", "fiscal": "Biz",
-    "inflation": "Econ", "deflation": "Econ", "recession": "Econ", "collateral": "Biz",
-    
-    # Law (生僻)
-    "verdict": "Law", "prosecutor": "Law", "felony": "Law", "misdemeanor": "Law",
-    "affidavit": "Law", "subpoena": "Law", "indictment": "Law", "litigation": "Law",
-    "jurisdiction": "Law", "arbitration": "Law", "statute": "Law"
+    "dna": "Bio", "rna": "Bio", "chromosome": "Bio", "genome": "Bio",
+    # Biz
+    "revenue": "Biz", "margin": "Biz", "liability": "Biz", "equity": "Biz", "dividend": "Biz",
+    "audit": "Biz", "fiscal": "Biz", "inflation": "Econ", "deflation": "Econ",
+    # Law
+    "plaintiff": "Law", "defendant": "Law", "verdict": "Law", "prosecutor": "Law",
+    "tort": "Law", "felony": "Law", "affidavit": "Law", "subpoena": "Law"
 }
 BUILTIN_TECHNICAL_TERMS = {k.lower(): v for k, v in BUILTIN_TECHNICAL_TERMS.items()}
 
-# 2. 专有名词库 (Proper Nouns) - 权重将被设为 1 (视为极简单)
 PROPER_NOUNS_DB = {
-    "usa": "USA", "uk": "UK", "uae": "UAE", "prc": "PRC",
-    "america": "America", "england": "England", "scotland": "Scotland", "wales": "Wales",
-    "japan": "Japan", "korea": "Korea", "france": "France", "germany": "Germany", "italy": "Italy",
-    "spain": "Spain", "russia": "Russia", "india": "India", "brazil": "Brazil", "canada": "Canada",
-    "australia": "Australia", "mexico": "Mexico", "egypt": "Egypt", "china": "China",
-    "switzerland": "Switzerland", "sweden": "Sweden", "norway": "Norway", "denmark": "Denmark",
-    "finland": "Finland", "netherlands": "Netherlands", "belgium": "Belgium", "austria": "Austria",
-    "greece": "Greece", "turkey": "Turkey", "israel": "Israel", "saudi arabia": "Saudi Arabia",
-    "singapore": "Singapore", "malaysia": "Malaysia", "thailand": "Thailand", "vietnam": "Vietnam",
-    "indonesia": "Indonesia", "philippines": "Philippines",
-    "london": "London", "paris": "Paris", "tokyo": "Tokyo", "beijing": "Beijing",
-    "shanghai": "Shanghai", "hong kong": "Hong Kong", "sydney": "Sydney", 
-    "melbourne": "Melbourne", "berlin": "Berlin", "rome": "Rome", "madrid": "Madrid",
-    "new york": "New York", "los angeles": "Los Angeles", "san francisco": "San Francisco",
-    "chicago": "Chicago", "seattle": "Seattle", "boston": "Boston", "houston": "Houston",
-    "moscow": "Moscow", "cairo": "Cairo", "dubai": "Dubai", "mumbai": "Mumbai",
-    "africa": "Africa", "asia": "Asia", "europe": "Europe", "antarctica": "Antarctica",
-    "monday": "Monday", "tuesday": "Tuesday", "wednesday": "Wednesday", "thursday": "Thursday",
-    "friday": "Friday", "saturday": "Saturday", "sunday": "Sunday",
-    "january": "January", "february": "February", "march": "March", "april": "April", 
-    "may": "May", "june": "June", "july": "July", "august": "August", 
-    "september": "September", "october": "October", "november": "November", "december": "December",
-    "christmas": "Christmas", "easter": "Easter", "thanksgiving": "Thanksgiving", "halloween": "Halloween",
-    "google": "Google", "apple": "Apple", "microsoft": "Microsoft", "tesla": "Tesla",
-    "amazon": "Amazon", "facebook": "Facebook", "twitter": "Twitter", "youtube": "YouTube", "instagram": "Instagram",
-    "tiktok": "TikTok", "netflix": "Netflix", "spotify": "Spotify", "zoom": "Zoom",
-    "nasa": "NASA", "fbi": "FBI", "cia": "CIA", "un": "UN", "eu": "EU", "nato": "NATO", "wto": "WTO", "who": "WHO",
-    "iphone": "iPhone", "ipad": "iPad", "mac": "Mac", "windows": "Windows", "android": "Android",
-    "wifi": "Wi-Fi", "internet": "Internet", "bluetooth": "Bluetooth",
-    "mr": "Mr.", "mrs": "Mrs.", "ms": "Ms.", "dr": "Dr.", "prof": "Prof.",
-    "phd": "PhD", "mba": "MBA", "ceo": "CEO", "cfo": "CFO", "cto": "CTO", "vip": "VIP"
+    "usa": "USA", "uk": "UK", "china": "China", "japan": "Japan", "korea": "Korea", 
+    "google": "Google", "apple": "Apple", "microsoft": "Microsoft", "monday": "Monday"
 }
 
-# 3. 补丁词库 (User Patch) - 会赋予特定 rank
-BUILTIN_PATCH_VOCAB = {
-    "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
-    "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
-    "cloud": 3000, "algorithm": 6000, "database": 5000, "interface": 5000,
-    "digital": 3000, "virtual": 4000, "smart": 2000, "mobile": 2500,
-    "email": 2000, "text": 1000, "chat": 2000, "video": 1500, "audio": 3000,
-    "link": 2000, "click": 2000, "search": 1500, "share": 1500, "post": 1500,
-    "analysis": 2500, "strategy": 2500, "method": 2000, "theory": 2500,
-    "research": 1500, "evidence": 2000, "significant": 2000, "factor": 1500,
-    "process": 1000, "system": 1000, "available": 1500, "similar": 1500,
-    "specific": 2000, "issue": 1000, "policy": 1500, "community": 1500,
-    "development": 1500, "economic": 2000, "global": 2500, "environment": 2000,
-    "challenge": 2500, "opportunity": 2000, "solution": 2500, "management": 2500,
-    "okay": 500, "hey": 500, "yeah": 500, "wow": 1000, "cool": 1500,
-    "super": 2000, "extra": 2500, "plus": 2000
-}
-
-# 4. 歧义词 (Ambiguous) - 权重将被设为 1
-AMBIGUOUS_WORDS = {
-    "china", "turkey", "march", "may", "august", "polish"
-}
+AMBIGUOUS_WORDS = {"china", "turkey", "march", "may", "august", "polish"}
 
 # ==========================================
 # 3. 初始化 NLP
@@ -188,7 +121,13 @@ def load_vocab():
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
         except: pass
     
-    # 注入补丁词汇
+    BUILTIN_PATCH_VOCAB = {
+        "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
+        "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
+        "cloud": 3000, "algorithm": 6000, "database": 5000, "interface": 5000,
+        "analysis": 2500, "strategy": 2500, "method": 2000, "theory": 2500,
+        "research": 1500, "evidence": 2000, "significant": 2000, "factor": 1500
+    }
     for word, rank in BUILTIN_PATCH_VOCAB.items():
         if word not in vocab: vocab[word] = rank
         else:
@@ -198,14 +137,14 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 5. AI 指令生成器
+# 5. AI 指令生成器 (核心Prompt修改)
 # ==========================================
 def generate_ai_prompt(word_list, output_format, is_term_list=False):
     words_str = ", ".join(word_list)
     
     context_instruction = ""
     if is_term_list:
-        context_instruction = "\n- 注意：这些单词是【带领域标签的专业术语 (e.g. word (Domain))】。**英文释义**请务必根据括号内的领域（如 Math, CS）提供该领域的精确释义。**中文解析**部分请优先拆解【词源、词根、词缀】以辅助记忆。"
+        context_instruction = "\n- 注意：列表中包含【带领域标签的专业术语 (e.g. word (Domain))】，请严格按照领域解释。"
 
     if output_format == 'csv':
         format_req = "CSV Code Block (后缀名 .csv)"
@@ -214,13 +153,13 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
         format_req = "TXT Code Block (后缀名 .txt)"
         format_desc = "请输出纯文本 TXT 代码块。"
 
+    # === Prompt 更新部分：核心原则 ===
     prompt = f"""
-请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表{context_instruction}，请严格按照以下【终极制卡标准】为我生成导入文件。
+请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表{context_instruction}，请严格按照以下标准为我生成导入文件。
 
-1. 核心原则：原子性 (Atomicity)
-- 含义拆分：若单词有多个不同含义，拆分为多条数据。
-- 严禁堆砌：每张卡片只承载一个特定语境下的含义。
-- **领域匹配**：如果单词带有 (Domain) 标签，解释必须符合该领域背景。
+1. 核心原则：极简释义 (Minimalist Definition)
+- **单一释义**：对于无标签的普通单词，请**仅提供 1 个最常用、最核心的释义** (The Single Most Common Definition)。严禁罗列多个义项，严禁拆分成多张卡片，确保记忆负担最小化。
+- **领域匹配**：如果单词带有 (Domain) 标签（如 Math, Law），**必须**仅提供符合该领域背景的专业释义。
 
 2. 卡片正面 (Column 1: Front)
 - 内容：提供自然的短语或搭配 (Phrase/Collocation)。
@@ -228,7 +167,7 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
 
 3. 卡片背面 (Column 2: Back)
 - 格式：HTML 排版，包含三部分，必须使用 <br><br> 分隔。
-- 结构：英文释义<br><br><em>斜体例句</em><br><br>【词源/词根词缀】中文助记
+- 结构：英文释义<br><br><em>斜体例句</em><br><br>【词源/词根词缀】中文助记 (词源优先)
 
 4. 输出格式标准 ({format_req})
 - {format_desc}
@@ -240,7 +179,7 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
     return prompt
 
 # ==========================================
-# 6. 通用分析函数 (Core Logic)
+# 6. 通用分析函数
 # ==========================================
 def analyze_text(raw_text, mode="auto"):
     raw_items = []
@@ -264,31 +203,26 @@ def analyze_text(raw_text, mode="auto"):
         if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
         if item_lower in JUNK_WORDS: continue
         
-        # 1. 术语身份 (Rank 0 - 最高优先级)
-        # 注意：这里已经移除了 gravity/velocity 等词，它们不会命中这里
+        # 1. 术语身份
         if item_lower in BUILTIN_TECHNICAL_TERMS:
             domain = BUILTIN_TECHNICAL_TERMS[item_lower]
             unique_items.append({
                 "word": f"{item_cleaned} ({domain})", 
-                "rank": 0, 
+                "rank": 0,
                 "cat": "term",
                 "raw": item_lower
             })
         
-        # 2. 专名身份 (Rank 1 - 视为"简单词")
-        # 3. 歧义词 (Rank 1 - 视为"简单词")
-        if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
-            # 获取显示名称 (如果是歧义词，尝试保持原样或 Title Case，这里简化统一处理)
-            display = PROPER_NOUNS_DB.get(item_lower, item_cleaned.title())
+        # 2. 专名身份
+        if item_lower in PROPER_NOUNS_DB:
             unique_items.append({
-                "word": display,
-                "rank": 1, # <--- 强制 Rank 1，方便被 Min Rank 过滤
+                "word": PROPER_NOUNS_DB[item_lower],
+                "rank": 1, 
                 "cat": "proper",
                 "raw": item_lower
             })
             
-        # 3. 普通身份 (查询 CSV + Patch)
-        # 注意：gravity 等词会在这里被查到，Rank 约为 2500 左右
+        # 3. 普通身份
         rank = vocab_dict.get(item_lower, 99999)
         if rank != 99999:
             unique_items.append({
@@ -390,7 +324,6 @@ elif "Top N" in app_mode:
     with c_set1:
         top_n = st.number_input("🎯 筛选数量", 10, 500, 50, 10)
     with c_set2:
-        # 核心修改：起点设置，Rank 1 的专名会被自动过滤
         min_rank_threshold = st.number_input("📉 忽略前 N 词 (起点)", 0, 20000, 3000, 500, help="Rank小于此数的词(含专名)会被过滤。")
     with c_set3:
         st.write("") 
@@ -407,26 +340,14 @@ elif "Top N" in app_mode:
         if not df.empty:
             df['rank'] = pd.to_numeric(df['rank'], errors='coerce').fillna(99999)
             
-            # === Top N 核心逻辑 (v52.0) ===
-            
-            # 1. 术语 (Rank 0)：始终保留，视为高价值
-            # (注意：gravity 已经从术语库移除了，所以它不在这里)
+            # Top N 核心逻辑
             term_mask = (df['cat'] == 'term')
-            
-            # 2. 普通词 & 专名：必须 >= min_rank_threshold
-            # monday/uk 的 Rank 是 1，如果 min_rank_threshold 是 3000，它们就被过滤了！
-            # gravity 的 Rank 约 2500，如果 min_rank 是 3000，它也被过滤了！
             general_mask = (df['cat'].isin(['general', 'proper'])) & (df['rank'] >= min_rank_threshold)
             
             valid_candidates = df[term_mask | general_mask].copy()
-            
-            # 排序：由易到难
             sorted_df = valid_candidates.sort_values(by='rank', ascending=True)
-            
-            # 切割 Top N
             top_df = sorted_df.head(top_n)
             
-            # 剩余词
             all_ids = set(df.index)
             top_ids = set(top_df.index)
             rest_ids = all_ids - top_ids
