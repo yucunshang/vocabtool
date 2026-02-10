@@ -1,0 +1,16 @@
+{
+    "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
+    "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
+    "cloud": 3000, "algorithm": 6000, "database": 5000, "interface": 5000,
+    "digital": 3000, "virtual": 4000, "smart": 2000, "mobile": 2500,
+    "email": 2000, "text": 1000, "chat": 2000, "video": 1500, "audio": 3000,
+    "link": 2000, "click": 2000, "search": 1500, "share": 1500, "post": 1500,
+    "analysis": 2500, "strategy": 2500, "method": 2000, "theory": 2500,
+    "research": 1500, "evidence": 2000, "significant": 2000, "factor": 1500,
+    "process": 1000, "system": 1000, "available": 1500, "similar": 1500,
+    "specific": 2000, "issue": 1000, "policy": 1500, "community": 1500,
+    "development": 1500, "economic": 2000, "global": 2500, "environment": 2000,
+    "challenge": 2500, "opportunity": 2000, "solution": 2500, "management": 2500,
+    "okay": 500, "hey": 500, "yeah": 500, "wow": 1000, "cool": 1500,
+    "super": 2000, "extra": 2500, "plus": 2000
+}
