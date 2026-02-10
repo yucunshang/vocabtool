@@ -2,13 +2,12 @@ import streamlit as st
 import pandas as pd
 import re
 import os
-import simplemma  # 新增：智能还原库
+import simplemma
 
 st.set_page_config(page_title="Vibe Vocab Studio", page_icon="🧠", layout="wide")
 
 # --- 1. 智能加载配置 ---
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv", "COCA20000词Excel版.xlsx - Sheet1.csv"]
-LANG_DATA = simplemma.load_data('en') # 加载英语数据
 
 @st.cache_data
 def load_vocab():
@@ -27,18 +26,14 @@ def load_vocab():
         except:
             df = pd.read_csv(file_path, encoding='gbk')
 
-        # 智能清洗列名
         df.columns = [str(c).strip().lower().replace('\n', '') for c in df.columns]
         
-        # 模糊匹配列名
         rank_col = next((c for c in df.columns if any(k in c for k in ['rank', '排名', '序号', '词频'])), None)
         word_col = next((c for c in df.columns if any(k in c for k in ['word', '单词', '词汇'])), None)
         
-        # 兜底
         if not word_col: word_col = df.columns[0]
         if not rank_col: rank_col = df.columns[3] if len(df.columns) > 3 else df.columns[0]
 
-        # 建立字典: word -> rank
         vocab_dict = pd.Series(
             pd.to_numeric(df[rank_col], errors='coerce').fillna(99999).values, 
             index=df[word_col].astype(str).str.lower().str.strip()
@@ -49,10 +44,9 @@ def load_vocab():
         st.error(f"词库加载出错: {e}")
         return None
 
-# --- 2. 核心逻辑 (v4.0 智能还原) ---
+# --- 2. 核心逻辑 (v5.0 适配最新版 simplemma) ---
 def process_text_smart(text, vocab_dict, range_start, range_end):
     text_lower = text.lower()
-    # 提取单词 (支持带撇号如 user's)
     words = re.findall(r'\b[a-z\']{2,}\b', text_lower)
     unique_words = sorted(list(set(words)))
     
@@ -64,37 +58,40 @@ def process_text_smart(text, vocab_dict, range_start, range_end):
         rank = 999999
         match_word = w
         
-        # === 智能查词三部曲 ===
         # 1. 查原形
         if w in vocab_dict:
             rank = vocab_dict[w]
             match_word = w
         else:
-            # 2. 查还原形 (went -> go)
-            lemma = simplemma.lemmatize(w, LANG_DATA)
+            # 2. 查还原形 (新版写法：直接传 lang='en')
+            try:
+                lemma = simplemma.lemmatize(w, lang='en')
+            except:
+                # 兼容旧版本写法 (万一有人装了旧版)
+                import simplemma.langdetect
+                langdata = simplemma.load_data('en')
+                lemma = simplemma.lemmatize(w, langdata)
+
             if lemma in vocab_dict:
                 rank = vocab_dict[lemma]
-                match_word = lemma # 显示为原形
+                match_word = lemma
             else:
-                # 3. 查简单变体 (处理 's 等)
+                # 3. 查简单变体
                 if w.endswith("'s") and w[:-2] in vocab_dict:
                     rank = vocab_dict[w[:-2]]
                     match_word = w[:-2]
 
         item = {'单词 (Word)': match_word, '原文 (Original)': w, '排名 (Rank)': int(rank)}
         
-        # 分级
         if rank <= range_start:
             tier_known.append(item)
         elif range_start < rank <= range_end:
             tier_target.append(item)
         else:
-            # 如果原文和单词一样，原文列显示横线，保持表格整洁
             if item['单词 (Word)'] == item['原文 (Original)']:
                 item['原文 (Original)'] = '-'
             tier_beyond.append(item)
 
-    # 转 DataFrame
     def to_df(data):
         if not data: return pd.DataFrame()
         return pd.DataFrame(data).sort_values('排名 (Rank)').drop_duplicates(subset=['单词 (Word)'])
@@ -102,8 +99,8 @@ def process_text_smart(text, vocab_dict, range_start, range_end):
     return to_df(tier_known), to_df(tier_target), to_df(tier_beyond)
 
 # --- 3. 界面 UI ---
-st.title("🧠 Vibe Vocab v4.0 (智能还原版)")
-st.caption("Simplemma 驱动 · 完美解决不规则动词问题")
+st.title("🧠 Vibe Vocab (Final)")
+st.caption("智能还原 · 兼容最新版")
 
 vocab_dict = load_vocab()
 if not vocab_dict:
@@ -111,7 +108,7 @@ if not vocab_dict:
     st.stop()
 
 st.sidebar.header("⚙️ 学习规划")
-st.sidebar.success(f"📚 词库加载成功")
+st.sidebar.success(f"📚 词库已就绪")
 
 st.sidebar.subheader("设定学习区间")
 vocab_range = st.sidebar.slider(
@@ -164,7 +161,7 @@ if st.button("🚀 开始智能分析", type="primary"):
                 st.dataframe(df_target, use_container_width=True)
                 show_download_buttons(df_target, "target_words")
             else:
-                st.info("太棒了！此区间无生词。")
+                st.info("此区间无生词。")
 
         with t2:
             st.markdown(f"### 🚀 超纲词 (>{range_end})")
