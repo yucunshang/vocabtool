@@ -19,14 +19,18 @@ st.markdown("""
     header {visibility: hidden;}
     footer {visibility: hidden;}
     .block-container { padding-top: 1rem; }
+    
+    /* 强调用途提示框 */
+    .stAlert {
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 内置词库 (白名单：仅限地名/时间/品牌)
+# 2. 内置词库 (地名/时间/品牌白名单)
 # ==========================================
 PROPER_NOUNS_DB = {
-    # 国家/城市
     "usa": "USA", "uk": "UK", "america": "America", "england": "England",
     "japan": "Japan", "korea": "Korea", "france": "France", "germany": "Germany", "italy": "Italy",
     "spain": "Spain", "russia": "Russia", "india": "India", "brazil": "Brazil", "canada": "Canada",
@@ -39,20 +43,17 @@ PROPER_NOUNS_DB = {
     "chicago": "Chicago", "seattle": "Seattle", "boston": "Boston",
     "moscow": "Moscow", "cairo": "Cairo", "dubai": "Dubai",
     "africa": "Africa", "asia": "Asia", "europe": "Europe", "antarctica": "Antarctica",
-    # 时间
     "monday": "Monday", "tuesday": "Tuesday", "wednesday": "Wednesday", "thursday": "Thursday",
     "friday": "Friday", "saturday": "Saturday", "sunday": "Sunday",
     "january": "January", "february": "February", "april": "April", 
     "june": "June", "july": "July", "september": "September", 
     "october": "October", "november": "November", "december": "December",
-    # 品牌
     "google": "Google", "apple": "Apple", "microsoft": "Microsoft", "tesla": "Tesla",
     "amazon": "Amazon", "facebook": "Facebook", "twitter": "Twitter", "youtube": "YouTube",
     "nasa": "NASA", "fbi": "FBI", "cia": "CIA", "un": "UN", "eu": "EU", "nato": "NATO",
     "iphone": "iPhone", "ipad": "iPad", "wifi": "Wi-Fi", "internet": "Internet"
 }
 
-# 歧义词
 AMBIGUOUS_WORDS = {
     "china", "turkey", "march", "may", "august", "polish"
 }
@@ -124,7 +125,7 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 5. 核心：AI 指令生成器
+# 5. 核心：AI 指令生成器 (优化版)
 # ==========================================
 def generate_ai_prompt(word_list):
     """
@@ -133,7 +134,7 @@ def generate_ai_prompt(word_list):
     words_str = ", ".join(word_list)
     
     prompt = f"""
-这是为您整理的最新、最完整的 Anki 制卡核心指令标准。请严格遵守此准则处理单词列表：
+请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表，请严格按照以下【终极制卡标准】为我生成导入内容。
 
 1. 核心原则：原子性 (Atomicity)
 - 含义拆分：若单词有多个不同含义，拆分为多条数据。
@@ -144,15 +145,14 @@ def generate_ai_prompt(word_list):
 - 样式：纯文本，不加粗。
 
 3. 卡片背面 (Column 2: Back)
-- 格式：HTML 排版，包含三部分，用 <br><br> 分隔。
+- 格式：HTML 排版，包含三部分，必须使用 <br><br> 分隔。
 - 结构：英文释义<br><br><em>斜体例句</em><br><br>【词根词缀】中文解析
 
-4. 输出格式标准 (TXT/CSV)
-- 代码块输出。
-- 英文逗号分隔字段。
-- 每个字段用双引号 ("...") 包裹。
+4. 输出格式标准 (CSV Code Block)
+- 请直接输出 CSV 代码块。
+- 英文逗号分隔，每个字段用双引号包裹。
 
-请为以下单词生成内容：
+待处理单词：
 {words_str}
 """
     return prompt
@@ -160,9 +160,9 @@ def generate_ai_prompt(word_list):
 # ==========================================
 # 6. 界面布局
 # ==========================================
-st.title("🚀 Vocab Master Pro (AI Prompt)")
+st.title("🚀 Vocab Master Pro (AI Command)")
 
-tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原", "📊 2. 单词分级 (生成指令)"])
+tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原", "📊 2. 单词分级 (含指令)"])
 
 # --- Tab 1 ---
 with tab_lemma:
@@ -174,7 +174,7 @@ with tab_lemma:
         if btn_restore and raw_text:
             res = smart_lemmatize(raw_text)
             st.code(res, language='text')
-            st.caption("👆 一键复制")
+            st.caption("👆 点击右上角图标，一键复制还原后的文本")
         elif not raw_text: st.info("👈 请输入文本")
 
 # --- Tab 2 ---
@@ -244,15 +244,25 @@ with tab_grade:
                     if sub.empty: 
                         st.info("无")
                     else:
-                        # 1. 显示单词列表
+                        # 1. 单词列表 (一键复制)
+                        st.markdown(f"**1. {label} 列表**")
                         words = sub['word'].tolist()
                         st.code("\n".join(words), language='text')
                         
-                        # 2. 生成 AI 指令
-                        with st.expander(f"🧠 生成 {label} AI 制卡指令 (点击展开)"):
-                            prompt = generate_ai_prompt(words)
-                            st.text_area("复制下方指令发给 AI:", value=prompt, height=300)
-                            st.caption("👆 全选复制，发送给 ChatGPT/Gemini，即可获得完美 Anki 导入文件")
+                        # 2. AI 指令 (核心优化点)
+                        st.divider()
+                        st.markdown(f"**2. AI 制卡指令 ({label})**")
+                        
+                        # 提示语
+                        st.info("💡 适用于：DeepSeek / ChatGPT / Claude / Gemini / Kimi 等任意 AI")
+                        
+                        # 生成指令
+                        prompt = generate_ai_prompt(words)
+                        
+                        # === 关键优化：使用 st.code 实现一键复制 ===
+                        # 以前是 text_area 需要全选，现在点击右上角图标即可
+                        st.code(prompt, language='markdown')
+                        st.caption("👆 点击右上角图标，一键复制完整指令，发送给 AI 即可。")
 
                 with t1: show("target", "重点词")
                 with t2: show("proper", "专有名词")
