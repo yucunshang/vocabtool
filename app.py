@@ -25,38 +25,35 @@ st.markdown("""
         padding: 0 15px;
         border-radius: 5px;
     }
+    /* 侧边栏样式优化 */
+    [data-testid="stSidebar"] {
+        background-color: #f8f9fa;
+        border-right: 1px solid #dee2e6;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 【核心】内置专业术语库 (用户指定补充版)
+# 2. 内置数据 (Technical Terms & Proper Nouns)
 # ==========================================
 BUILTIN_TECHNICAL_TERMS = {
-    # === 用户指定补充 (User Specific) ===
-    "metal": "Chem",
-    "motion": "Law",
-    "gravity": "Phys",
-    "molecule": "Chem",
-    "vacuum": "Phys",
-    "electron": "Phys",
-    "quantum": "Phys",
-    "velocity": "Phys",
-    "friction": "Phys",
-    "catalyst": "Chem",
-    "equilibrium": "Chem",
-
-    # === Computer Science (CS/AI) ===
+    # 用户指定补充
+    "metal": "Chem", "motion": "Law", "gravity": "Phys", "molecule": "Chem",
+    "vacuum": "Phys", "electron": "Phys", "quantum": "Phys", "velocity": "Phys",
+    "friction": "Phys", "catalyst": "Chem", "equilibrium": "Chem",
+    
+    # CS
     "algorithm": "CS", "recursion": "CS", "latency": "CS", "throughput": "CS", "bandwidth": "CS",
     "api": "CS", "json": "CS", "backend": "CS", "frontend": "CS", "fullstack": "CS",
     "neural": "AI", "transformer": "AI", "embedding": "AI", "inference": "AI",
     "python": "CS", "java": "CS", "docker": "CS", "kubernetes": "CS", "linux": "CS",
-    "database": "CS", "cache": "CS", "compiler": "CS", "framework": "CS", "protocol": "CS",
+    "database": "CS", "cache": "CS", "compiler": "CS", "framework": "CS",
     "encryption": "CS", "hash": "CS", "authentication": "CS", "authorization": "CS",
     "kernel": "CS", "shell": "CS", "terminal": "CS", "repository": "CS", "commit": "CS",
     "deployment": "CS", "iteration": "CS", "agile": "CS", "polymorphism": "CS",
     "inheritance": "CS", "instantiation": "CS", "middleware": "CS", "scalability": "CS",
 
-    # === Mathematics (Math) ===
+    # Math
     "derivative": "Math", "integral": "Math", "limit": "Math", "calculus": "Math",
     "matrix": "Math", "vector": "Math", "scalar": "Math", "tensor": "Math",
     "theorem": "Math", "axiom": "Math", "hypothesis": "Math", "lemma": "Math",
@@ -65,7 +62,7 @@ BUILTIN_TECHNICAL_TERMS = {
     "integer": "Math", "fraction": "Math", "decimal": "Math", "coefficient": "Math",
     "probability": "Math", "statistics": "Math", "permutation": "Math", "combination": "Math",
 
-    # === Physics (Phys) ===
+    # Phys
     "acceleration": "Phys", "momentum": "Phys", "inertia": "Phys",
     "thermodynamics": "Phys", "entropy": "Phys", "enthalpy": "Phys", "kinetic": "Phys",
     "resonance": "Phys", "photon": "Phys", "positron": "Phys",
@@ -73,7 +70,7 @@ BUILTIN_TECHNICAL_TERMS = {
     "relativity": "Phys", "magnetism": "Phys", "voltage": "Phys", "amperage": "Phys",
     "resistance": "Phys", "optics": "Phys", "refraction": "Phys", "reflection": "Phys",
 
-    # === Chemistry (Chem) ===
+    # Chem
     "compound": "Chem", "solvent": "Chem", "solute": "Chem", "concentration": "Chem",
     "alkali": "Chem", "enzyme": "Chem", "substrate": "Chem", "reagent": "Chem",
     "covalent": "Chem", "ionic": "Chem", "oxidation": "Chem", "reduction": "Chem",
@@ -81,7 +78,7 @@ BUILTIN_TECHNICAL_TERMS = {
     "monomer": "Chem", "organic": "Chem", "inorganic": "Chem", "distillation": "Chem",
     "titration": "Chem", "filtration": "Chem", "hydrocarbon": "Chem",
 
-    # === Biology/Medicine (Bio/Med) ===
+    # Bio
     "tissue": "Bio", "organ": "Bio", "organism": "Bio",
     "mitochondria": "Bio", "ribosome": "Bio", "membrane": "Bio", "cytoplasm": "Bio",
     "dna": "Bio", "rna": "Bio", "chromosome": "Bio", "genome": "Bio",
@@ -91,27 +88,22 @@ BUILTIN_TECHNICAL_TERMS = {
     "inflammation": "Med", "diagnosis": "Med", "prognosis": "Med", "symptom": "Med",
     "anatomy": "Med", "physiology": "Med", "pathology": "Med", "pharmacology": "Med",
 
-    # === Business/Finance (Biz) ===
+    # Biz
     "revenue": "Biz", "margin": "Biz", "liability": "Biz", "equity": "Biz", "dividend": "Biz",
     "audit": "Biz", "fiscal": "Biz", "budget": "Biz", "forecast": "Biz",
     "stakeholder": "Biz", "shareholder": "Biz", "acquisition": "Biz", "ipo": "Biz",
     "inflation": "Econ", "deflation": "Econ", "recession": "Econ", "gdp": "Econ",
     "collateral": "Biz", "liquidity": "Biz", "bankruptcy": "Biz", "portfolio": "Biz",
 
-    # === Law (Law) ===
+    # Law
     "plaintiff": "Law", "defendant": "Law", "verdict": "Law", "prosecutor": "Law",
     "appeal": "Law", "petition": "Law", "motion": "Law", "tort": "Law",
     "felony": "Law", "misdemeanor": "Law", "affidavit": "Law", "subpoena": "Law",
     "indictment": "Law", "litigation": "Law", "attorney": "Law", "jurisdiction": "Law",
     "arbitration": "Law", "statute": "Law", "constitution": "Law"
 }
-
-# 确保全小写匹配
 BUILTIN_TECHNICAL_TERMS = {k.lower(): v for k, v in BUILTIN_TECHNICAL_TERMS.items()}
 
-# ==========================================
-# 3. 内置扩充词库 (Patch) & 专有名词
-# ==========================================
 PROPER_NOUNS_DB = {
     "usa": "USA", "uk": "UK", "uae": "UAE", "prc": "PRC",
     "america": "America", "england": "England", "scotland": "Scotland", "wales": "Wales",
@@ -167,27 +159,8 @@ AMBIGUOUS_WORDS = {
     "china", "turkey", "march", "may", "august", "polish"
 }
 
-BUILTIN_PATCH_VOCAB = {
-    "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
-    "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
-    "cloud": 3000, "algorithm": 6000, "database": 5000, "interface": 5000,
-    "digital": 3000, "virtual": 4000, "smart": 2000, "mobile": 2500,
-    "email": 2000, "text": 1000, "chat": 2000, "video": 1500, "audio": 3000,
-    "link": 2000, "click": 2000, "search": 1500, "share": 1500, "post": 1500,
-    "analysis": 2500, "strategy": 2500, "method": 2000, "theory": 2500,
-    "research": 1500, "evidence": 2000, "significant": 2000, "factor": 1500,
-    "process": 1000, "system": 1000, "available": 1500, "similar": 1500,
-    "specific": 2000, "issue": 1000, "policy": 1500, "community": 1500,
-    "development": 1500, "economic": 2000, "global": 2500, "environment": 2000,
-    "challenge": 2500, "opportunity": 2000, "solution": 2500, "management": 2500,
-    "okay": 500, "hey": 500, "yeah": 500, "wow": 1000, "cool": 1500,
-    "super": 2000, "extra": 2500, "plus": 2000
-}
-
-AMBIGUOUS_WORDS = {"china", "turkey", "march", "may", "august", "polish"}
-
 # ==========================================
-# 4. 初始化 NLP
+# 3. 初始化 NLP
 # ==========================================
 @st.cache_resource
 def setup_nltk():
@@ -219,7 +192,7 @@ def smart_lemmatize(text):
     return " ".join(results)
 
 # ==========================================
-# 5. 词库加载
+# 4. 词库加载
 # ==========================================
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv"]
 
@@ -241,6 +214,24 @@ def load_vocab():
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
         except: pass
     
+    # 内置补丁
+    BUILTIN_PATCH_VOCAB = {
+        "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
+        "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
+        "cloud": 3000, "algorithm": 6000, "database": 5000, "interface": 5000,
+        "digital": 3000, "virtual": 4000, "smart": 2000, "mobile": 2500,
+        "email": 2000, "text": 1000, "chat": 2000, "video": 1500, "audio": 3000,
+        "link": 2000, "click": 2000, "search": 1500, "share": 1500, "post": 1500,
+        "analysis": 2500, "strategy": 2500, "method": 2000, "theory": 2500,
+        "research": 1500, "evidence": 2000, "significant": 2000, "factor": 1500,
+        "process": 1000, "system": 1000, "available": 1500, "similar": 1500,
+        "specific": 2000, "issue": 1000, "policy": 1500, "community": 1500,
+        "development": 1500, "economic": 2000, "global": 2500, "environment": 2000,
+        "challenge": 2500, "opportunity": 2000, "solution": 2500, "management": 2500,
+        "okay": 500, "hey": 500, "yeah": 500, "wow": 1000, "cool": 1500,
+        "super": 2000, "extra": 2500, "plus": 2000
+    }
+    
     for word, rank in BUILTIN_PATCH_VOCAB.items():
         if word not in vocab:
             vocab[word] = rank
@@ -251,20 +242,21 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 6. AI 指令生成器
+# 5. AI 指令生成器
 # ==========================================
 def generate_ai_prompt(word_list, output_format, is_term_list=False):
     words_str = ", ".join(word_list)
+    
+    context_instruction = ""
+    if is_term_list:
+        context_instruction = "\n- 注意：这些单词是【带领域标签的专业术语 (e.g. word (Domain))】。**英文释义**请务必根据括号内的领域（如 Math, CS）提供该领域的精确释义。**中文解析**部分请优先拆解【词源、词根、词缀】以辅助记忆；只有当英文释义非常晦涩难懂时，才补充中文领域解释，否则请聚焦于词源分析。"
+
     if output_format == 'csv':
         format_req = "CSV Code Block (后缀名 .csv)"
         format_desc = "请直接输出标准 CSV 代码块。"
     else:
         format_req = "TXT Code Block (后缀名 .txt)"
         format_desc = "请输出纯文本 TXT 代码块。"
-
-    context_instruction = ""
-    if is_term_list:
-        context_instruction = "\n- 注意：这些单词是【带领域标签的专业术语 (e.g. word (Domain))】。**英文释义**请务必根据括号内的领域（如 Math, CS）提供该领域的精确释义。**中文解析**部分请优先拆解【词源、词根、词缀】以辅助记忆；只有当英文释义非常晦涩难懂时，才补充中文领域解释，否则请聚焦于词源分析。"
 
     prompt = f"""
 请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表{context_instruction}，请严格按照以下【终极制卡标准】为我生成导入文件。
@@ -292,20 +284,58 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
     return prompt
 
 # ==========================================
+# 6. 辅助函数：智能精选 (Top N Selector)
+# ==========================================
+def get_top_n_words(df, n_count, current_level):
+    """
+    筛选逻辑：
+    1. 排除 Rank < 2000 的词 (太简单)
+    2. 排除 Rank > 20000 的词 (太生僻, 除非是术语)
+    3. 优先选择 Rank 在 current_level 附近的词 (学习区)
+    4. 按 Rank 由易到难排序
+    """
+    # 过滤掉非普通词 (术语和专有名词单算，这里只筛选普通词)
+    candidates = df[df['cat'].isin(['target', 'beyond', 'known'])].copy()
+    
+    # 强制类型转换，防止 rank 是字符串
+    candidates['rank'] = pd.to_numeric(candidates['rank'], errors='coerce').fillna(99999)
+    
+    # 核心过滤：只看 2000 ~ 20000 之间的词 (黄金区间)
+    mask = (candidates['rank'] >= 2000) & (candidates['rank'] <= 22000)
+    golden_candidates = candidates[mask]
+    
+    # 如果黄金区间不够数，就放宽限制
+    if len(golden_candidates) < n_count:
+        final_list = candidates.sort_values(by='rank').head(n_count)
+    else:
+        # 在黄金区间里，按 rank 排序
+        final_list = golden_candidates.sort_values(by='rank').head(n_count)
+        
+    return final_list['word'].tolist()
+
+# ==========================================
 # 7. 界面布局
 # ==========================================
-st.title("🚀 Vocab Master Pro (Dual Identity)")
+st.title("🚀 Vocab Master Pro (Smart Select)")
 
-with st.expander("⚙️ 词库与术语统计 (点击展开)", expanded=False):
-    c1, c2 = st.columns(2)
-    with c1:
-        if vocab_dict:
-            st.metric("📊 本地词库", f"{len(vocab_dict):,} 词")
-        else:
-            st.error("⚠️ 本地词库未加载")
-    with c2:
-        st.metric("🟣 内置术语库", f"{len(BUILTIN_TECHNICAL_TERMS)} 词", help="涵盖 CS, Math, Phys, Chem, Bio, Biz, Law")
+# === 侧边栏：智能精选入口 ===
+with st.sidebar:
+    st.header("🎯 智能精选 (Top N)")
+    st.info("当文章太长、生词太多时，用这个功能筛选出“性价比最高”的词汇。")
+    top_n_num = st.number_input("筛选数量", 10, 500, 50, 10)
+    # 使用 session_state 来触发筛选
+    if st.button("🎲 生成精选词单", type="primary"):
+        st.session_state['trigger_top_n'] = True
+    else:
+        # 保持状态，除非重新分析
+        if 'trigger_top_n' not in st.session_state:
+            st.session_state['trigger_top_n'] = False
 
+    st.divider()
+    if vocab_dict:
+        st.caption(f"📚 本地词库: {len(vocab_dict):,} 词")
+
+# === 顶部 Tab ===
 st.divider()
 app_mode = st.radio("选择功能模式:", ["🛠️ 智能还原", "📊 单词分级 (AI 制卡)"], horizontal=True)
 
@@ -322,7 +352,7 @@ if "智能还原" in app_mode:
         elif not raw_text: st.info("👈 请输入文本")
 
 else:
-    st.caption("功能：根据词频筛选生词，并生成 AI 制卡指令")
+    # 分级模式
     col_level1, col_level2, col_space = st.columns([1, 1, 2])
     with col_level1:
         current_level = st.number_input("当前水平 (词频)", 0, 30000, 9000, 500)
@@ -332,15 +362,18 @@ else:
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         input_mode = st.radio("识别模式:", ("自动分词", "按行处理"), horizontal=True)
-        # 测试用例：既包含通用词义，又包含专业词义
-        grade_input = st.text_area("input_box", height=400, placeholder="motion\nmetal\nenergy\nrevenue", label_visibility="collapsed")
-        btn_grade = st.button("开始分级", type="primary", use_container_width=True)
-
+        grade_input = st.text_area("input_box", height=400, placeholder="motion\nmetal\nenergy\nrevenue\nabacus\nabandon", label_visibility="collapsed")
+        
+        # 当点击“开始分级”时，重置 Top N 状态
+        if st.button("开始分级", type="primary", use_container_width=True):
+            st.session_state['run_analysis'] = True
+            st.session_state['trigger_top_n'] = False # 重置筛选
+        
     with g_col2:
-        if not vocab_dict:
-            st.error("❌ 词库未加载")
-        elif btn_grade and grade_input:
+        # 检查是否需要运行分析
+        if st.session_state.get('run_analysis', False) and grade_input and vocab_dict:
             
+            # --- 数据处理逻辑 ---
             raw_items = []
             if "按行" in input_mode:
                 lines = grade_input.split('\n')
@@ -362,89 +395,79 @@ else:
                     if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
                     if item_lower in JUNK_WORDS: continue
                     
-                    # === 逻辑升级：分身术 (Dual Identity) ===
-                    # 1. 先检查是否为专业术语 (Term Identity)
-                    is_technical = False
+                    # 1. 术语
                     if item_lower in BUILTIN_TECHNICAL_TERMS:
-                        is_technical = True
                         domain = BUILTIN_TECHNICAL_TERMS[item_lower]
-                        # 作为一个术语添加
-                        unique_items.append({
-                            "word": f"{item_cleaned} ({domain})", 
-                            "rank": 0, # 术语置顶
-                            "cat": "term"
-                        })
+                        unique_items.append({"word": f"{item_cleaned} ({domain})", "rank": 0, "cat": "term"})
                     
-                    # 2. 再检查是否为专有名词 (Proper Identity)
-                    is_proper = False
+                    # 2. 专名
                     if item_lower in PROPER_NOUNS_DB:
-                        is_proper = True
-                        proper_display = PROPER_NOUNS_DB[item_lower]
-                        unique_items.append({
-                            "word": proper_display,
-                            "rank": 0,
-                            "cat": "proper"
-                        })
+                        unique_items.append({"word": PROPER_NOUNS_DB[item_lower], "rank": 0, "cat": "proper"})
                         
-                    # 3. 最后检查是否为普通词 (Common Identity)
-                    # 规则：即使是术语，如果它在词频表里有排名，也要作为一个普通词再添加一次
-                    # 除非它是纯粹的专有名词(如China)，通常不作为普通词解释(虽然china瓷器例外，这里简化处理)
+                    # 3. 普通词
                     rank = vocab_dict.get(item_lower, 99999)
                     if rank != 99999:
-                        # 这是一个普通词
                         if rank <= current_level: cat = "known"
                         elif rank <= target_level: cat = "target"
                         else: cat = "beyond"
-                        
-                        # 添加普通词条目
-                        unique_items.append({
-                            "word": item_cleaned, # 保持原词展示
-                            "rank": rank,
-                            "cat": cat
-                        })
+                        unique_items.append({"word": item_cleaned, "rank": rank, "cat": cat})
                     
                     seen.add(item_lower)
             
+            # 保存到 session_state 以便复用
             df = pd.DataFrame(unique_items)
-            if not df.empty:
-                # 排序：rank 升序
-                df = df.sort_values(by='rank', ascending=True)
-                
-                t_term, t_target, t_proper, t_beyond, t_known = st.tabs([
-                    f"🟣 专业术语 ({len(df[df['cat']=='term'])})",
-                    f"🟡 重点 ({len(df[df['cat']=='target'])})", 
-                    f"🔵 专有名词 ({len(df[df['cat']=='proper'])})", 
-                    f"🔴 超纲 ({len(df[df['cat']=='beyond'])})", 
-                    f"🟢 已掌握 ({len(df[df['cat']=='known'])})"
-                ])
-                
-                def show(cat_name, label, is_term=False):
-                    sub = df[df['cat'] == cat_name]
-                    if sub.empty: 
-                        st.info("无")
-                    else:
-                        words = sub['word'].tolist()
-                        count = len(words)
-                        with st.expander(f"👁️ 查看/复制 {label} 列表 (共 {count} 个)", expanded=False):
-                            st.code("\n".join(words), language='text')
-                            st.caption("👆 复制单词列表")
-                        
-                        st.markdown(f"**🤖 AI 制卡指令 ({label})**")
-                        prompt_csv = generate_ai_prompt(words, 'csv', is_term_list=is_term)
-                        prompt_txt = generate_ai_prompt(words, 'txt', is_term_list=is_term)
-                        
-                        ac1, ac2 = st.columns(2)
-                        with ac1:
-                            st.markdown("##### 📋 CSV 版")
-                            st.code(prompt_csv, language='markdown')
-                        with ac2:
-                            st.markdown("##### 📝 TXT 版")
-                            st.code(prompt_txt, language='markdown')
+            st.session_state['df_result'] = df
 
-                with t_term: show("term", "专业术语", is_term=True)
-                with t_target: show("target", "重点词")
-                with t_proper: show("proper", "专有名词")
-                with t_beyond: show("beyond", "超纲词")
-                with t_known: show("known", "熟词")
-            else:
-                st.warning("无有效单词")
+        # --- 展示结果逻辑 ---
+        if 'df_result' in st.session_state and not st.session_state['df_result'].empty:
+            df = st.session_state['df_result']
+            
+            # 如果用户点击了侧边栏的“生成精选词单”
+            if st.session_state.get('trigger_top_n', False):
+                st.success(f"🎯 已为您精选 Top {top_n_num} 个最值得学习的单词 (Rank 2000+)")
+                top_words = get_top_n_words(df, top_n_num, current_level)
+                
+                if top_words:
+                    with st.expander(f"🔥 精选词单 ({len(top_words)} 个)", expanded=True):
+                        st.code("\n".join(top_words), language='text')
+                        st.markdown("**🤖 AI 制卡指令 (精选版)**")
+                        p_csv = generate_ai_prompt(top_words, 'csv')
+                        p_txt = generate_ai_prompt(top_words, 'txt')
+                        c1, c2 = st.columns(2)
+                        with c1: st.code(p_csv, language='markdown')
+                        with c2: st.code(p_txt, language='markdown')
+                else:
+                    st.warning("词汇太简单或太少，无法筛选。")
+                st.divider()
+
+            # 常规展示 (Tabs)
+            df = df.sort_values(by='rank', ascending=True)
+            t_term, t_target, t_proper, t_beyond, t_known = st.tabs([
+                f"🟣 专业术语 ({len(df[df['cat']=='term'])})",
+                f"🟡 重点 ({len(df[df['cat']=='target'])})", 
+                f"🔵 专有名词 ({len(df[df['cat']=='proper'])})", 
+                f"🔴 超纲 ({len(df[df['cat']=='beyond'])})", 
+                f"🟢 已掌握 ({len(df[df['cat']=='known'])})"
+            ])
+            
+            def show(cat_name, label, is_term=False):
+                sub = df[df['cat'] == cat_name]
+                if sub.empty: 
+                    st.info("无")
+                else:
+                    words = sub['word'].tolist()
+                    with st.expander(f"👁️ 查看 {label} ({len(words)})", expanded=False):
+                        st.code("\n".join(words), language='text')
+                    
+                    st.markdown(f"**🤖 AI 指令 ({label})**")
+                    prompt_csv = generate_ai_prompt(words, 'csv', is_term_list=is_term)
+                    prompt_txt = generate_ai_prompt(words, 'txt', is_term_list=is_term)
+                    c1, c2 = st.columns(2)
+                    with c1: st.code(prompt_csv, language='markdown')
+                    with c2: st.code(prompt_txt, language='markdown')
+
+            with t_term: show("term", "专业术语", is_term=True)
+            with t_target: show("target", "重点词")
+            with t_proper: show("proper", "专有名词")
+            with t_beyond: show("beyond", "超纲词")
+            with t_known: show("known", "熟词")
