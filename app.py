@@ -29,88 +29,85 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 【核心】内置专业术语库 (带学科标签)
+# 2. 【核心】内置专业术语库 (用户指定补充版)
 # ==========================================
 BUILTIN_TECHNICAL_TERMS = {
+    # === 用户指定补充 (User Specific) ===
+    "metal": "Chem",
+    "motion": "Law",
+    "gravity": "Phys",
+    "molecule": "Chem",
+    "vacuum": "Phys",
+    "electron": "Phys",
+    "quantum": "Phys",
+    "velocity": "Phys",
+    "friction": "Phys",
+    "catalyst": "Chem",
+    "equilibrium": "Chem",
+
     # === Computer Science (CS/AI) ===
     "algorithm": "CS", "recursion": "CS", "latency": "CS", "throughput": "CS", "bandwidth": "CS",
     "api": "CS", "json": "CS", "backend": "CS", "frontend": "CS", "fullstack": "CS",
-    "neural": "AI", "transformer": "AI", "embedding": "AI", "inference": "AI", "perceptron": "AI",
+    "neural": "AI", "transformer": "AI", "embedding": "AI", "inference": "AI",
     "python": "CS", "java": "CS", "docker": "CS", "kubernetes": "CS", "linux": "CS",
     "database": "CS", "cache": "CS", "compiler": "CS", "framework": "CS", "protocol": "CS",
-    "encryption": "CS", "hash": "CS", "authentication": "CS", "authorization": "CS", "cryptography": "CS",
+    "encryption": "CS", "hash": "CS", "authentication": "CS", "authorization": "CS",
     "kernel": "CS", "shell": "CS", "terminal": "CS", "repository": "CS", "commit": "CS",
-    "deployment": "CS", "iteration": "CS", "agile": "CS", "polymorphism": "CS", "encapsulation": "CS",
-    "inheritance": "CS", "instantiation": "CS", "middleware": "CS", "scalability": "CS", "redundancy": "CS",
-    "virtualization": "CS", "hypervisor": "CS", "container": "CS", "microservice": "CS", "serverless": "CS",
-    "debugging": "CS", "syntax": "CS", "variable": "CS", "boolean": "CS", "integer": "CS",
-    "array": "CS", "pointer": "CS", "reference": "CS", "memory": "CS", "cpu": "CS",
-    "gpu": "CS", "binary": "CS", "hexadecimal": "CS", "bit": "CS", "byte": "CS",
+    "deployment": "CS", "iteration": "CS", "agile": "CS", "polymorphism": "CS",
+    "inheritance": "CS", "instantiation": "CS", "middleware": "CS", "scalability": "CS",
 
     # === Mathematics (Math) ===
-    "derivative": "Math", "integral": "Math", "limit": "Math", "calculus": "Math", "differential": "Math",
-    "matrix": "Math", "vector": "Math", "scalar": "Math", "tensor": "Math", "determinant": "Math",
-    "theorem": "Math", "axiom": "Math", "hypothesis": "Math", "lemma": "Math", "corollary": "Math",
-    "variance": "Math", "deviation": "Math", "correlation": "Math", "regression": "Math", "covariance": "Math",
-    "polynomial": "Math", "quadratic": "Math", "logarithm": "Math", "exponential": "Math", "arithmetic": "Math",
-    "fraction": "Math", "decimal": "Math", "coefficient": "Math", "denominator": "Math", "numerator": "Math",
-    "probability": "Math", "statistics": "Math", "permutation": "Math", "combination": "Math", "factorial": "Math",
-    "geometry": "Math", "algebra": "Math", "trigonometry": "Math", "hypotenuse": "Math", "perimeter": "Math",
-    "circumference": "Math", "radius": "Math", "diameter": "Math", "tangent": "Math", "cosine": "Math",
-    "sine": "Math", "asymptote": "Math", "parabola": "Math", "ellipse": "Math", "hyperbola": "Math",
+    "derivative": "Math", "integral": "Math", "limit": "Math", "calculus": "Math",
+    "matrix": "Math", "vector": "Math", "scalar": "Math", "tensor": "Math",
+    "theorem": "Math", "axiom": "Math", "hypothesis": "Math", "lemma": "Math",
+    "variance": "Math", "deviation": "Math", "correlation": "Math", "regression": "Math",
+    "polynomial": "Math", "quadratic": "Math", "logarithm": "Math", "exponential": "Math",
+    "integer": "Math", "fraction": "Math", "decimal": "Math", "coefficient": "Math",
+    "probability": "Math", "statistics": "Math", "permutation": "Math", "combination": "Math",
 
     # === Physics (Phys) ===
-    "velocity": "Phys", "acceleration": "Phys", "momentum": "Phys", "inertia": "Phys", "trajectory": "Phys",
-    "thermodynamics": "Phys", "entropy": "Phys", "enthalpy": "Phys", "kinetic": "Phys", "static": "Phys",
-    "quantum": "Phys", "resonance": "Phys", "photon": "Phys", "electron": "Phys", "positron": "Phys",
-    "proton": "Phys", "neutron": "Phys", "nucleus": "Phys", "atom": "Phys", "molecule": "Phys",
-    "relativity": "Phys", "magnetism": "Phys", "voltage": "Phys", "amperage": "Phys", "capacitance": "Phys",
-    "resistance": "Phys", "optics": "Phys", "refraction": "Phys", "reflection": "Phys", "diffraction": "Phys",
-    "fission": "Phys", "fusion": "Phys", "radioactivity": "Phys", "isotope": "Phys", "half-life": "Phys",
-    "gravity": "Phys", "friction": "Phys", "torque": "Phys", "oscillation": "Phys", "frequency": "Phys",
-    "wavelength": "Phys", "amplitude": "Phys", "doppler": "Phys", "spectrum": "Phys", "vacuum": "Phys",
+    "acceleration": "Phys", "momentum": "Phys", "inertia": "Phys",
+    "thermodynamics": "Phys", "entropy": "Phys", "enthalpy": "Phys", "kinetic": "Phys",
+    "resonance": "Phys", "photon": "Phys", "positron": "Phys",
+    "proton": "Phys", "neutron": "Phys", "nucleus": "Phys", "atom": "Phys",
+    "relativity": "Phys", "magnetism": "Phys", "voltage": "Phys", "amperage": "Phys",
+    "resistance": "Phys", "optics": "Phys", "refraction": "Phys", "reflection": "Phys",
 
     # === Chemistry (Chem) ===
-    "compound": "Chem", "solvent": "Chem", "solute": "Chem", "concentration": "Chem", "precipitate": "Chem",
-    "alkali": "Chem", "catalyst": "Chem", "enzyme": "Chem", "substrate": "Chem", "reagent": "Chem",
-    "covalent": "Chem", "ionic": "Chem", "oxidation": "Chem", "reduction": "Chem", "electrolysis": "Chem",
-    "anion": "Chem", "cation": "Chem", "polymer": "Chem", "monomer": "Chem", "molecule": "Chem",
-    "organic": "Chem", "inorganic": "Chem", "distillation": "Chem", "titration": "Chem", "filtration": "Chem",
-    "hydrocarbon": "Chem", "carbohydrate": "Chem", "protein": "Chem", "lipid": "Chem", "amino": "Chem",
-    "stoichiometry": "Chem", "equilibrium": "Chem", "thermodynamics": "Chem", "kinetics": "Chem", "activation": "Chem",
-    "periodic": "Chem", "element": "Chem", "halogen": "Chem", "noble": "Chem", "metal": "Chem",
-    
+    "compound": "Chem", "solvent": "Chem", "solute": "Chem", "concentration": "Chem",
+    "alkali": "Chem", "enzyme": "Chem", "substrate": "Chem", "reagent": "Chem",
+    "covalent": "Chem", "ionic": "Chem", "oxidation": "Chem", "reduction": "Chem",
+    "isotope": "Chem", "anion": "Chem", "cation": "Chem", "polymer": "Chem",
+    "monomer": "Chem", "organic": "Chem", "inorganic": "Chem", "distillation": "Chem",
+    "titration": "Chem", "filtration": "Chem", "hydrocarbon": "Chem",
+
     # === Biology/Medicine (Bio/Med) ===
-    "tissue": "Bio", "organ": "Bio", "organism": "Bio", "species": "Bio", "genus": "Bio",
-    "mitochondria": "Bio", "ribosome": "Bio", "membrane": "Bio", "cytoplasm": "Bio", "chloroplast": "Bio",
-    "dna": "Bio", "rna": "Bio", "chromosome": "Bio", "genome": "Bio", "allele": "Bio",
-    "metabolism": "Bio", "photosynthesis": "Bio", "respiration": "Bio", "fermentation": "Bio", "homeostasis": "Bio",
-    "evolution": "Bio", "mutation": "Bio", "selection": "Bio", "adaptation": "Bio", "symbiosis": "Bio",
-    "pathogen": "Med", "antibody": "Med", "antigen": "Med", "vaccine": "Med", "immunity": "Med",
-    "inflammation": "Med", "diagnosis": "Med", "prognosis": "Med", "symptom": "Med", "syndrome": "Med",
-    "anatomy": "Med", "physiology": "Med", "pathology": "Med", "pharmacology": "Med", "toxicology": "Med",
-    "cardiovascular": "Med", "respiratory": "Med", "neurology": "Med", "oncology": "Med", "pediatrics": "Med",
+    "tissue": "Bio", "organ": "Bio", "organism": "Bio",
+    "mitochondria": "Bio", "ribosome": "Bio", "membrane": "Bio", "cytoplasm": "Bio",
+    "dna": "Bio", "rna": "Bio", "chromosome": "Bio", "genome": "Bio",
+    "protein": "Bio", "lipid": "Bio", "carbohydrate": "Bio", "vitamin": "Bio",
+    "photosynthesis": "Bio", "metabolism": "Bio", "evolution": "Bio", "mutation": "Bio",
+    "pathogen": "Med", "antibody": "Med", "antigen": "Med", "vaccine": "Med",
+    "inflammation": "Med", "diagnosis": "Med", "prognosis": "Med", "symptom": "Med",
+    "anatomy": "Med", "physiology": "Med", "pathology": "Med", "pharmacology": "Med",
 
     # === Business/Finance (Biz) ===
     "revenue": "Biz", "margin": "Biz", "liability": "Biz", "equity": "Biz", "dividend": "Biz",
-    "audit": "Biz", "fiscal": "Biz", "budget": "Biz", "forecast": "Biz", "overhead": "Biz",
-    "stakeholder": "Biz", "shareholder": "Biz", "acquisition": "Biz", "ipo": "Biz", "merger": "Biz",
-    "inflation": "Econ", "deflation": "Econ", "recession": "Econ", "gdp": "Econ", "macroeconomics": "Econ",
-    "collateral": "Biz", "liquidity": "Biz", "bankruptcy": "Biz", "portfolio": "Biz", "diversification": "Biz",
-    "amortization": "Biz", "depreciation": "Biz", "asset": "Biz", "capital": "Biz", "investment": "Biz",
-    "arbitrage": "Biz", "derivative": "Biz", "hedge": "Biz", "leverage": "Biz", "valuation": "Biz",
-    "entrepreneur": "Biz", "startup": "Biz", "venture": "Biz", "incubator": "Biz", "accelerator": "Biz",
+    "audit": "Biz", "fiscal": "Biz", "budget": "Biz", "forecast": "Biz",
+    "stakeholder": "Biz", "shareholder": "Biz", "acquisition": "Biz", "ipo": "Biz",
+    "inflation": "Econ", "deflation": "Econ", "recession": "Econ", "gdp": "Econ",
+    "collateral": "Biz", "liquidity": "Biz", "bankruptcy": "Biz", "portfolio": "Biz",
 
     # === Law (Law) ===
-    "plaintiff": "Law", "defendant": "Law", "verdict": "Law", "prosecutor": "Law", "juror": "Law",
-    "appeal": "Law", "petition": "Law", "motion": "Law", "tort": "Law", "litigation": "Law",
-    "felony": "Law", "misdemeanor": "Law", "affidavit": "Law", "subpoena": "Law", "warrant": "Law",
-    "indictment": "Law", "arraignment": "Law", "acquittal": "Law", "conviction": "Law", "probation": "Law",
-    "attorney": "Law", "jurisdiction": "Law", "arbitration": "Law", "mediation": "Law", "statute": "Law",
-    "constitution": "Law", "amendment": "Law", "treaty": "Law", "contract": "Law", "clause": "Law",
-    "liability": "Law", "negligence": "Law", "malpractice": "Law", "damages": "Law", "compensation": "Law",
-    "intellectual": "Law", "copyright": "Law", "trademark": "Law", "patent": "Law", "infringement": "Law"
+    "plaintiff": "Law", "defendant": "Law", "verdict": "Law", "prosecutor": "Law",
+    "appeal": "Law", "petition": "Law", "motion": "Law", "tort": "Law",
+    "felony": "Law", "misdemeanor": "Law", "affidavit": "Law", "subpoena": "Law",
+    "indictment": "Law", "litigation": "Law", "attorney": "Law", "jurisdiction": "Law",
+    "arbitration": "Law", "statute": "Law", "constitution": "Law"
 }
+
+# 确保全小写匹配
+BUILTIN_TECHNICAL_TERMS = {k.lower(): v for k, v in BUILTIN_TECHNICAL_TERMS.items()}
 
 # ==========================================
 # 3. 内置扩充词库 (Patch) & 专有名词
@@ -187,10 +184,7 @@ BUILTIN_PATCH_VOCAB = {
     "super": 2000, "extra": 2500, "plus": 2000
 }
 
-AMBIGUOUS_WORDS = {
-    "china", "turkey", "march", "may", "august", "polish"
-}
-
+AMBIGUOUS_WORDS = {"china", "turkey", "march", "may", "august", "polish"}
 
 # ==========================================
 # 4. 初始化 NLP
@@ -207,26 +201,6 @@ def setup_nltk():
         except: pass
 
 setup_nltk()
-
-def get_word_info(raw_word):
-    word_lower = raw_word.lower()
-    word_clean = raw_word.strip()
-    
-    # 0. 检查内置专业术语 (返回 word + domain)
-    if word_lower in BUILTIN_TECHNICAL_TERMS:
-        domain = BUILTIN_TECHNICAL_TERMS[word_lower]
-        return raw_word.strip(), f"term:{domain}"
-
-    # 1. 检查歧义词
-    if word_lower in AMBIGUOUS_WORDS:
-        if word_clean[0].isupper(): return word_clean.title(), True
-        else: return word_lower, False
-
-    # 2. 检查纯专有名词库
-    if word_lower in PROPER_NOUNS_DB:
-        return PROPER_NOUNS_DB[word_lower], True
-        
-    return word_lower, False
 
 def smart_lemmatize(text):
     words = re.findall(r"[a-zA-Z']+", text)
@@ -266,12 +240,18 @@ def load_vocab():
             df = df.drop_duplicates(subset=[w_col], keep='first')
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
         except: pass
+    
+    for word, rank in BUILTIN_PATCH_VOCAB.items():
+        if word not in vocab:
+            vocab[word] = rank
+        else:
+            if vocab[word] > 20000: vocab[word] = rank
     return vocab
 
 vocab_dict = load_vocab()
 
 # ==========================================
-# 6. AI 指令生成器 (核心优化)
+# 6. AI 指令生成器
 # ==========================================
 def generate_ai_prompt(word_list, output_format, is_term_list=False):
     words_str = ", ".join(word_list)
@@ -282,7 +262,6 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
         format_req = "TXT Code Block (后缀名 .txt)"
         format_desc = "请输出纯文本 TXT 代码块。"
 
-    # === 关键优化：针对术语列表的 Prompt ===
     context_instruction = ""
     if is_term_list:
         context_instruction = "\n- 注意：这些单词是【带领域标签的专业术语 (e.g. word (Domain))】。**英文释义**请务必根据括号内的领域（如 Math, CS）提供该领域的精确释义。**中文解析**部分请优先拆解【词源、词根、词缀】以辅助记忆；只有当英文释义非常晦涩难懂时，才补充中文领域解释，否则请聚焦于词源分析。"
@@ -315,9 +294,8 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
 # ==========================================
 # 7. 界面布局
 # ==========================================
-st.title("🚀 Vocab Master Pro (Etymology)")
+st.title("🚀 Vocab Master Pro (Dual Identity)")
 
-# === 高级设置折叠区 ===
 with st.expander("⚙️ 词库与术语统计 (点击展开)", expanded=False):
     c1, c2 = st.columns(2)
     with c1:
@@ -328,7 +306,6 @@ with st.expander("⚙️ 词库与术语统计 (点击展开)", expanded=False):
     with c2:
         st.metric("🟣 内置术语库", f"{len(BUILTIN_TECHNICAL_TERMS)} 词", help="涵盖 CS, Math, Phys, Chem, Bio, Biz, Law")
 
-# === 顶部功能切换 ===
 st.divider()
 app_mode = st.radio("选择功能模式:", ["🛠️ 智能还原", "📊 单词分级 (AI 制卡)"], horizontal=True)
 
@@ -355,8 +332,8 @@ else:
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         input_mode = st.radio("识别模式:", ("自动分词", "按行处理"), horizontal=True)
-        # 示例词现在展示了不同领域的
-        grade_input = st.text_area("input_box", height=400, placeholder="variable\nlatency\ncell\ntort", label_visibility="collapsed")
+        # 测试用例：既包含通用词义，又包含专业词义
+        grade_input = st.text_area("input_box", height=400, placeholder="motion\nmetal\nenergy\nrevenue", label_visibility="collapsed")
         btn_grade = st.button("开始分级", type="primary", use_container_width=True)
 
     with g_col2:
@@ -385,35 +362,52 @@ else:
                     if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
                     if item_lower in JUNK_WORDS: continue
                     
-                    # === 获取信息 ===
-                    display_word, info_type = get_word_info(item_cleaned)
+                    # === 逻辑升级：分身术 (Dual Identity) ===
+                    # 1. 先检查是否为专业术语 (Term Identity)
+                    is_technical = False
+                    if item_lower in BUILTIN_TECHNICAL_TERMS:
+                        is_technical = True
+                        domain = BUILTIN_TECHNICAL_TERMS[item_lower]
+                        # 作为一个术语添加
+                        unique_items.append({
+                            "word": f"{item_cleaned} ({domain})", 
+                            "rank": 0, # 术语置顶
+                            "cat": "term"
+                        })
                     
-                    # 默认值
-                    cat = "known" # 默认
+                    # 2. 再检查是否为专有名词 (Proper Identity)
+                    is_proper = False
+                    if item_lower in PROPER_NOUNS_DB:
+                        is_proper = True
+                        proper_display = PROPER_NOUNS_DB[item_lower]
+                        unique_items.append({
+                            "word": proper_display,
+                            "rank": 0,
+                            "cat": "proper"
+                        })
+                        
+                    # 3. 最后检查是否为普通词 (Common Identity)
+                    # 规则：即使是术语，如果它在词频表里有排名，也要作为一个普通词再添加一次
+                    # 除非它是纯粹的专有名词(如China)，通常不作为普通词解释(虽然china瓷器例外，这里简化处理)
                     rank = vocab_dict.get(item_lower, 99999)
-                    
-                    # 术语处理
-                    if isinstance(info_type, str) and info_type.startswith("term:"):
-                        cat = "term"
-                        # 提取 domain
-                        domain_str = info_type.split(":")[1]
-                        display_word = f"{display_word} ({domain_str})"
-                    
-                    # 专有名词处理
-                    elif info_type == True: 
-                        cat = "proper"
-                    
-                    # 普通词处理
-                    else:
+                    if rank != 99999:
+                        # 这是一个普通词
                         if rank <= current_level: cat = "known"
                         elif rank <= target_level: cat = "target"
                         else: cat = "beyond"
+                        
+                        # 添加普通词条目
+                        unique_items.append({
+                            "word": item_cleaned, # 保持原词展示
+                            "rank": rank,
+                            "cat": cat
+                        })
                     
                     seen.add(item_lower)
-                    unique_items.append({"word": display_word, "rank": rank, "cat": cat})
             
             df = pd.DataFrame(unique_items)
             if not df.empty:
+                # 排序：rank 升序
                 df = df.sort_values(by='rank', ascending=True)
                 
                 t_term, t_target, t_proper, t_beyond, t_known = st.tabs([
@@ -436,7 +430,6 @@ else:
                             st.caption("👆 复制单词列表")
                         
                         st.markdown(f"**🤖 AI 制卡指令 ({label})**")
-                        # 传入 is_term
                         prompt_csv = generate_ai_prompt(words, 'csv', is_term_list=is_term)
                         prompt_txt = generate_ai_prompt(words, 'txt', is_term_list=is_term)
                         
