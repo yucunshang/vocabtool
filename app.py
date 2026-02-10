@@ -6,21 +6,19 @@ import simplemma
 
 st.set_page_config(page_title="Vibe Vocab Studio", page_icon="🧠", layout="wide")
 
-# --- 1. 自动适配 Simplemma 版本 ---
+# --- 1. 自动适配 Simplemma (保持不变) ---
 try:
-    test_res = simplemma.lemmatize("testing", lang="en")
-    def get_lemma(word):
-        return simplemma.lemmatize(word, lang="en")
+    simplemma.lemmatize("t", lang="en")
+    def get_lemma(word): return simplemma.lemmatize(word, lang="en")
 except TypeError:
     if hasattr(simplemma, 'load_data'):
         lang_data = simplemma.load_data('en')
-        def get_lemma(word):
-            return simplemma.lemmatize(word, lang_data)
+        def get_lemma(word): return simplemma.lemmatize(word, lang_data)
     else:
-        def get_lemma(word):
-            return word 
+        def get_lemma(word): return word 
 
-# --- 2. 强力加载词库 (关键修复) ---
+# --- 2. 智能分流加载 (核心修复) ---
+# 优先读取 coca_cleaned.csv
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv", "COCA20000词Excel版.xlsx - Sheet1.csv"]
 
 @st.cache_data
@@ -31,53 +29,71 @@ def load_vocab():
             file_path = f
             break
             
-    if not file_path:
-        return None
+    if not file_path: return None, "未找到文件"
 
     try:
-        # 1. 尝试读取 (加强编码兼容性)
+        # 尝试读取 (优先 utf-8-sig 去除 BOM 头)
         df = None
-        for enc in ['utf-8', 'gbk', 'gb18030', 'utf-8-sig']:
+        for enc in ['utf-8-sig', 'utf-8', 'gbk']:
             try:
                 df = pd.read_csv(file_path, encoding=enc)
-                # 如果成功读出多列，说明编码对了
-                if len(df.columns) > 1:
-                    break
-            except:
-                continue
+                if len(df) > 10: break
+            except: continue
         
-        if df is None: return None
+        if df is None: return None, "读取失败"
 
-        # 2. 暴力锁定列 (不再依赖列名)
-        # 你的文件结构：Column 0 是单词，Column 3 是排名
-        if len(df.columns) >= 4:
-            word_col = df.columns[0] # 第1列
-            rank_col = df.columns[3] # 第4列
-        else:
-            # 兜底：如果用户换了文件，尝试智能查找
-            df.columns = [str(c).strip().lower().replace('\n', '') for c in df.columns]
-            rank_col = next((c for c in df.columns if any(k in c for k in ['rank', '排名', '序号', '词频'])), df.columns[0])
-            word_col = next((c for c in df.columns if any(k in c for k in ['word', '单词', '词汇'])), df.columns[1])
+        # === 核心修复逻辑 ===
+        cols = [str(c).strip().lower() for c in df.columns]
+        df.columns = cols # 重命名列名以便查找
 
-        # 3. 建立字典 (清洗数据)
-        # 强制把排名转为数字，无法转换的(比如表头)变NaN然后填充99999
-        df['rank_clean'] = pd.to_numeric(df[rank_col], errors='coerce').fillna(99999)
+        word_col = None
+        rank_col = None
+
+        # 情况 A: 清洗过的文件 (通常只有 word, rank 两列)
+        if 'rank' in cols and 'word' in cols:
+            word_col = 'word'
+            rank_col = 'rank'
+        # 情况 B: 只有两列，且列名不对 (盲猜)
+        elif len(cols) == 2:
+            # 假设第1列是词，第2列是排名(数字)
+            word_col = df.columns[0]
+            rank_col = df.columns[1]
+        # 情况 C: 原始乱文件 (多列)
+        elif len(cols) >= 4:
+            # 原始文件第1列是单词，第4列(索引3)是排名
+            word_col = df.columns[0]
+            rank_col = df.columns[3]
+        
+        # 如果还是没找到，尝试关键词搜索
+        if not rank_col:
+            rank_col = next((c for c in df.columns if any(k in c for k in ['rank', '排名', '序号', '词频'])), None)
+        if not word_col:
+            word_col = next((c for c in df.columns if any(k in c for k in ['word', '单词', '词汇'])), None)
+
+        if not word_col or not rank_col:
+            return None, f"无法识别列名。检测到的列: {cols}"
+
+        # === 数据清洗 ===
+        # 强制转小写，去空格
         df['word_clean'] = df[word_col].astype(str).str.lower().str.strip()
+        # 强制转数字
+        df['rank_clean'] = pd.to_numeric(df[rank_col], errors='coerce').fillna(99999)
         
-        # 过滤掉无效行
-        df = df[df['rank_clean'] < 99990] 
-        
+        # 再次过滤：确保 rank 是有效数字且 > 0
+        df = df[df['rank_clean'] > 0]
+        df = df[df['rank_clean'] < 99999]
+
         vocab_dict = pd.Series(
             df['rank_clean'].values, 
             index=df['word_clean']
         ).to_dict()
         
-        return vocab_dict
-    except Exception as e:
-        st.error(f"词库加载出错: {e}")
-        return None
+        return vocab_dict, f"已加载: {file_path} (单词列:{word_col}, 排名列:{rank_col})"
 
-# --- 3. 核心逻辑 ---
+    except Exception as e:
+        return None, str(e)
+
+# --- 3. 核心处理逻辑 ---
 def process_text_smart(text, vocab_dict, range_start, range_end):
     text_lower = text.lower()
     words = re.findall(r'\b[a-z\']{2,}\b', text_lower)
@@ -125,16 +141,20 @@ def process_text_smart(text, vocab_dict, range_start, range_end):
     return to_df(tier_known), to_df(tier_target), to_df(tier_beyond)
 
 # --- 4. 界面 UI ---
-st.title("🧠 Vibe Vocab v5.1 (强力修复版)")
-st.caption("强制列对齐 · 解决简单词排名错误")
+st.title("🧠 Vibe Vocab v5.2 (智能双核版)")
+st.caption("完美适配 coca_cleaned.csv")
 
-vocab_dict = load_vocab()
-if not vocab_dict:
-    st.error("❌ 找不到词库或读取失败！")
+vocab_dict, status_msg = load_vocab()
+
+# 侧边栏显示加载状态，方便调试
+st.sidebar.header("⚙️ 系统状态")
+if vocab_dict:
+    st.sidebar.success(f"✅ 成功! {len(vocab_dict)}词")
+    st.sidebar.caption(f"详情: {status_msg}")
+else:
+    st.sidebar.error("❌ 词库加载失败")
+    st.sidebar.code(status_msg)
     st.stop()
-
-st.sidebar.header("⚙️ 学习规划")
-st.sidebar.success(f"📚 词库加载成功: {len(vocab_dict)} 词")
 
 st.sidebar.subheader("设定学习区间")
 vocab_range = st.sidebar.slider(
@@ -167,7 +187,7 @@ def show_download_buttons(df, prefix):
     txt = "\n".join(df['单词'].tolist())
     col2.download_button(f"📄 下载 TXT", txt, f"{prefix}.txt", "text/plain")
 
-if st.button("🚀 开始智能分析", type="primary"):
+if st.button("🚀 开始分析", type="primary"):
     if not final_text.strip():
         st.warning("请先输入文本！")
     else:
@@ -191,7 +211,6 @@ if st.button("🚀 开始智能分析", type="primary"):
 
         with t2:
             st.markdown(f"### 🚀 超纲词 (>{range_end})")
-            # 调试信息：如果这里出现了简单的词，说明词库没读对
             if not df_beyond.empty:
                 st.dataframe(df_beyond, use_container_width=True)
                 show_download_buttons(df_beyond, "beyond_words")
