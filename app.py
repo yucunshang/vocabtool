@@ -30,9 +30,7 @@ def smart_lemmatize(text):
     使用 lemminflect 进行精准还原。
     保留形容词 (excited -> excited)，还原动词 (went -> go)
     """
-    # 简单的分词 (保留单词和撇号)
     words = re.findall(r"[a-zA-Z']+", text)
-    
     results = []
     for w in words:
         lemmas_dict = lemminflect.getAllLemmas(w)
@@ -40,7 +38,6 @@ def smart_lemmatize(text):
             results.append(w.lower())
             continue
             
-        # 优先保留形容词 (ADJ) 和 副词 (ADV)
         if 'ADJ' in lemmas_dict: lemma = lemmas_dict['ADJ'][0]
         elif 'ADV' in lemmas_dict: lemma = lemmas_dict['ADV'][0]
         elif 'VERB' in lemmas_dict: lemma = lemmas_dict['VERB'][0]
@@ -48,11 +45,10 @@ def smart_lemmatize(text):
         else: lemma = list(lemmas_dict.values())[0][0]
             
         results.append(lemma)
-        
     return " ".join(results)
 
 # ==========================================
-# 3. 词库加载 (核心修复：强制保留最小排名)
+# 3. 词库加载 (强制保留最小排名)
 # ==========================================
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv"]
 
@@ -70,10 +66,8 @@ def load_vocab():
         df[w_col] = df[w_col].astype(str).str.lower().str.strip()
         df[r_col] = pd.to_numeric(df[r_col], errors='coerce').fillna(99999)
         
-        # === 核心修复逻辑 ===
-        # 1. 按排名从小到大排序 (确保 Rank 152 排在 Rank 17797 前面)
+        # 核心修复：按排名升序排，去重保留第一个（最小的rank）
         df = df.sort_values(r_col, ascending=True)
-        # 2. 去重，保留第一个出现的 (也就是排名最小的那个)
         df = df.drop_duplicates(subset=[w_col], keep='first')
         
         return pd.Series(df[r_col].values, index=df[w_col]).to_dict()
@@ -84,7 +78,7 @@ vocab_dict = load_vocab()
 # ==========================================
 # 4. 界面布局
 # ==========================================
-st.title("🚀 Vocab Master Pro (Fixed)")
+st.title("🚀 Vocab Master Pro")
 
 tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原 (Restore)", "📊 2. 单词分级 (Grade)"])
 
@@ -105,10 +99,10 @@ with tab_lemma:
             st.info("👈 请输入文本")
 
 # ---------------------------------------------------------
-# Tab 2: 单词分级 (修复版)
+# Tab 2: 单词分级 (升序排列，不显示数字)
 # ---------------------------------------------------------
 with tab_grade:
-    st.caption("功能：查单词排名。已修复常用词排名过高的问题。")
+    st.caption("功能：查单词排名。结果按常用度排序。")
     
     col_a, col_b, col_c = st.columns([1, 1, 2])
     with col_a: current_level = st.number_input("当前水平", 0, 20000, 9000, 500)
@@ -128,6 +122,7 @@ with tab_grade:
             st.error("❌ 词库未加载")
         elif btn_grade and grade_input:
             
+            # 处理输入
             items_to_check = []
             if "按行处理" in input_mode:
                 lines = grade_input.split('\n')
@@ -136,10 +131,10 @@ with tab_grade:
             else:
                 items_to_check = grade_input.split()
             
+            # 查词
             data = []
             for item in items_to_check:
                 lookup_key = item.lower()
-                # 这里查到的 rank 一定是最小的那个 (例如 old -> 152)
                 rank = vocab_dict.get(lookup_key, 99999)
                 
                 cat = "beyond"
@@ -148,20 +143,26 @@ with tab_grade:
                 
                 data.append({"word": item, "rank": rank, "cat": cat})
             
+            # 排序：按 rank 升序 (数字越小越靠前)
             df = pd.DataFrame(data)
             if not df.empty:
-                # 按分类分Tab显示
+                df = df.sort_values(by='rank', ascending=True)
+                
+                # 分Tab显示
                 t1, t2, t3 = st.tabs([
                     f"🟡 重点 ({len(df[df['cat']=='target'])})", 
                     f"🔴 超纲 ({len(df[df['cat']=='beyond'])})", 
                     f"🟢 已掌握 ({len(df[df['cat']=='known'])})"
                 ])
+                
                 def show(cat_name):
                     sub = df[df['cat'] == cat_name]
                     if sub.empty: st.info("无")
                     else:
-                        txt = "\n".join([f"{r['word']} ({r['rank'] if r['rank']!=99999 else '-'})" for _, r in sub.iterrows()])
+                        # 只显示单词，不显示 rank
+                        txt = "\n".join(sub['word'].tolist())
                         st.text_area(f"{cat_name}_res", value=txt, height=400, label_visibility="collapsed")
+
                 with t1: show("target")
                 with t2: show("beyond")
                 with t3: show("known")
