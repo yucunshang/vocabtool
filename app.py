@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import os
 import lemminflect
+import nltk
 
 # ==========================================
 # 1. 基础配置
@@ -11,10 +12,9 @@ st.set_page_config(layout="wide", page_title="Vocab Master Pro", page_icon="🚀
 
 st.markdown("""
 <style>
-    .stTextArea textarea {
+    .stCode {
+        font-family: 'Consolas', 'Courier New', monospace !important;
         font-size: 16px !important;
-        font-family: 'Consolas', 'Courier New', monospace;
-        line-height: 1.6;
     }
     header {visibility: hidden;}
     footer {visibility: hidden;}
@@ -23,8 +23,42 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 智能还原引擎 (Lemminflect)
+# 2. 初始化 NLP 引擎 (NLTK + Lemminflect)
 # ==========================================
+@st.cache_resource
+def download_nltk_resources():
+    """下载必要的 NLTK 数据包 (只运行一次)"""
+    try:
+        nltk.data.find('taggers/averaged_perceptron_tagger')
+    except LookupError:
+        nltk.download('averaged_perceptron_tagger')
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')
+
+download_nltk_resources()
+
+def get_display_case(word):
+    """
+    智能判断大小写：
+    1. Sydney -> Sydney (专有名词保留大写)
+    2. ANTI -> anti (普通词强制小写)
+    3. Table -> table (普通词强制小写)
+    """
+    # 先把词变成 Title Case (首字母大写) 去测试，这样 NLTK 判断最准
+    test_word = word.title()
+    
+    # 获取词性标注
+    # NNP/NNPS 代表专有名词 (Proper Noun)
+    tags = nltk.pos_tag([test_word])
+    pos_tag = tags[0][1]
+    
+    if pos_tag.startswith('NNP'):
+        return test_word # 是人名/地名，返回 Sydney
+    else:
+        return word.lower() # 是普通词，返回 anti
+
 def smart_lemmatize(text):
     words = re.findall(r"[a-zA-Z']+", text)
     results = []
@@ -62,7 +96,7 @@ def load_vocab():
         df[w_col] = df[w_col].astype(str).str.lower().str.strip()
         df[r_col] = pd.to_numeric(df[r_col], errors='coerce').fillna(99999)
         
-        # 排序并去重，保留最小rank
+        # 排序并去重
         df = df.sort_values(r_col, ascending=True)
         df = df.drop_duplicates(subset=[w_col], keep='first')
         
@@ -74,7 +108,7 @@ vocab_dict = load_vocab()
 # ==========================================
 # 4. 界面布局
 # ==========================================
-st.title("🚀 Vocab Master Pro (Clean)")
+st.title("🚀 Vocab Master Pro (Smart Case)")
 
 tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原 (Restore)", "📊 2. 单词分级 (Grade)"])
 
@@ -89,12 +123,13 @@ with tab_lemma:
     with c2:
         if btn_restore and raw_text:
             res = smart_lemmatize(raw_text)
-            st.text_area("还原结果", value=res, height=400)
+            st.code(res, language='text')
+            st.caption("👆 点击右上角图标一键复制")
         elif not raw_text:
             st.info("👈 请输入文本")
 
 # ---------------------------------------------------------
-# Tab 2: 单词分级 (去重 + 降噪)
+# Tab 2: 单词分级 (智能大小写)
 # ---------------------------------------------------------
 with tab_grade:
     col_a, col_b, col_c = st.columns([1, 1, 2])
@@ -105,7 +140,7 @@ with tab_grade:
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         input_mode = st.radio("识别模式:", ("自动分词 (Word Mode)", "按行处理 (Phrase Mode)"), horizontal=True)
-        grade_input = st.text_area("input_box", height=400, placeholder="anti\nanti\ns\nt\nhave", label_visibility="collapsed")
+        grade_input = st.text_area("input_box", height=400, placeholder="ANTI\nSydney\nTable", label_visibility="collapsed")
         btn_grade = st.button("开始分级", type="primary", use_container_width=True)
 
     with g_col2:
@@ -122,35 +157,27 @@ with tab_grade:
             else:
                 raw_items = grade_input.split()
             
-            # 2. 核心清洗逻辑：去重 + 过滤垃圾词
-            # 使用 set 进行去重，但为了保持单词原本的大小写格式（如果有的话），我们稍微做点处理
+            # 2. 清洗与大小写处理
             seen = set()
             unique_items = []
-            
-            # 定义垃圾词黑名单 (常见缩写残留)
             JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're'}
             
             for item in raw_items:
-                # 转小写用于判断重复和黑名单
-                item_lower = item.lower()
+                item_cleaned = item.strip()
+                item_lower = item_cleaned.lower()
                 
-                # 过滤1：去重
-                if item_lower in seen:
-                    continue
+                # 过滤重复和垃圾词
+                if item_lower in seen: continue
+                if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
+                if item_lower in JUNK_WORDS: continue
                 
-                # 过滤2：去除单字母垃圾词 (保留 'a' 和 'i')
-                # 逻辑：如果长度小于2，且不是 'a' 或 'i'，就丢掉
-                if len(item) < 2 and item_lower not in ['a', 'i']:
-                    continue
-                    
-                # 过滤3：精确匹配黑名单 (防止漏网之鱼)
-                if item_lower in JUNK_WORDS:
-                    continue
+                # === 核心修改：智能判断显示的大小写 ===
+                display_word = get_display_case(item_cleaned)
                 
                 seen.add(item_lower)
-                unique_items.append(item)
+                unique_items.append(display_word)
             
-            # 3. 查词
+            # 3. 查词 (统一用小写查)
             data = []
             for item in unique_items:
                 lookup_key = item.lower()
@@ -160,12 +187,12 @@ with tab_grade:
                 if rank <= current_level: cat = "known"
                 elif rank <= target_level: cat = "target"
                 
+                # data 里存的是 display_word (Sydney / anti)
                 data.append({"word": item, "rank": rank, "cat": cat})
             
             # 4. 排序与展示
             df = pd.DataFrame(data)
             if not df.empty:
-                # 排序：rank 升序 (常用在前)
                 df = df.sort_values(by='rank', ascending=True)
                 
                 t1, t2, t3 = st.tabs([
@@ -176,13 +203,15 @@ with tab_grade:
                 
                 def show(cat_name):
                     sub = df[df['cat'] == cat_name]
-                    if sub.empty: st.info("无")
+                    if sub.empty: 
+                        st.info("无")
                     else:
                         txt = "\n".join(sub['word'].tolist())
-                        st.text_area(f"{cat_name}_res", value=txt, height=400, label_visibility="collapsed")
+                        st.code(txt, language='text')
+                        st.caption("👆 点击右上角图标一键复制")
 
                 with t1: show("target")
                 with t2: show("beyond")
                 with t3: show("known")
             else:
-                st.warning("无有效单词 (已自动过滤所有单字母和重复项)")
+                st.warning("无有效单词")
