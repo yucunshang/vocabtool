@@ -4,223 +4,230 @@ import re
 import os
 import simplemma
 
-st.set_page_config(page_title="Vibe Vocab Studio", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Vibe Vocab Studio", page_icon="🐞", layout="wide")
 
-# --- 1. 自动适配 Simplemma (保持不变) ---
+# ==========================================
+# 🐞 v6.0 核心修复与诊断模块
+# ==========================================
+
+# 1. 强力 Simplemma 加载 (带自我检测)
+LEMMA_STATUS = "未知"
 try:
-    simplemma.lemmatize("t", lang="en")
+    # 尝试新版 (v1.0+)
+    test = simplemma.lemmatize("went", lang="en")
     def get_lemma(word): return simplemma.lemmatize(word, lang="en")
+    if test == "go": 
+        LEMMA_STATUS = "✅ 正常 (v1.x)"
+    else:
+        LEMMA_STATUS = f"⚠️ 异常 (返回: {test})"
 except TypeError:
-    if hasattr(simplemma, 'load_data'):
+    # 尝试旧版
+    try:
         lang_data = simplemma.load_data('en')
         def get_lemma(word): return simplemma.lemmatize(word, lang_data)
-    else:
-        def get_lemma(word): return word 
+        if get_lemma("went") == "go":
+            LEMMA_STATUS = "✅ 正常 (v0.9)"
+        else:
+            LEMMA_STATUS = "⚠️ 异常 (旧版加载失败)"
+    except:
+        def get_lemma(word): return word
+        LEMMA_STATUS = "❌ 失败 (无法加载库)"
 
-# --- 2. 智能分流加载 (核心修复) ---
-# 优先读取 coca_cleaned.csv
+# 2. 强力词库加载 (指定列名读取)
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv", "COCA20000词Excel版.xlsx - Sheet1.csv"]
 
 @st.cache_data
-def load_vocab():
+def load_vocab_debug():
     file_path = None
     for f in POSSIBLE_FILES:
         if os.path.exists(f):
             file_path = f
             break
-            
-    if not file_path: return None, "未找到文件"
+    
+    if not file_path: return None, "未找到任何 csv 文件", {}
 
     try:
-        # 尝试读取 (优先 utf-8-sig 去除 BOM 头)
         df = None
-        for enc in ['utf-8-sig', 'utf-8', 'gbk']:
+        # 专门针对 coca_cleaned.csv 的优化读取
+        if "cleaned" in file_path:
+            # 既然是 cleaned，我们假定它没有表头，或者表头是标准英文
+            # 尝试直接指定列名读取，强制修复
             try:
-                df = pd.read_csv(file_path, encoding=enc)
-                if len(df) > 10: break
-            except: continue
+                # 尝试当作无表头读取
+                df_test = pd.read_csv(file_path, header=None)
+                # 检查第一行是不是 word, rank
+                first_cell = str(df_test.iloc[0,0])
+                if 'word' in first_cell.lower():
+                     # 有表头
+                     df = pd.read_csv(file_path)
+                else:
+                     # 无表头，手动指定
+                     df = pd.read_csv(file_path, header=None, names=['word', 'rank'])
+            except:
+                pass
+
+        # 如果上面的专用读取没跑通，走通用读取
+        if df is None:
+            for enc in ['utf-8-sig', 'utf-8', 'gbk']:
+                try:
+                    df = pd.read_csv(file_path, encoding=enc)
+                    if len(df) > 10: break
+                except: continue
+
+        if df is None: return None, "文件读取失败 (编码错误?)", {}
+
+        # 统一列名
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        cols = list(df.columns)
+
+        # 寻找 word 和 rank
+        w_col, r_col = None, None
         
-        if df is None: return None, "读取失败"
-
-        # === 核心修复逻辑 ===
-        cols = [str(c).strip().lower() for c in df.columns]
-        df.columns = cols # 重命名列名以便查找
-
-        word_col = None
-        rank_col = None
-
-        # 情况 A: 清洗过的文件 (通常只有 word, rank 两列)
-        if 'rank' in cols and 'word' in cols:
-            word_col = 'word'
-            rank_col = 'rank'
-        # 情况 B: 只有两列，且列名不对 (盲猜)
+        # 策略1: 精确匹配
+        if 'word' in cols and 'rank' in cols:
+            w_col, r_col = 'word', 'rank'
+        # 策略2: 位置猜测 (针对 coca_cleaned)
         elif len(cols) == 2:
-            # 假设第1列是词，第2列是排名(数字)
-            word_col = df.columns[0]
-            rank_col = df.columns[1]
-        # 情况 C: 原始乱文件 (多列)
+            w_col, r_col = df.columns[0], df.columns[1]
+        # 策略3: 原始文件猜测
         elif len(cols) >= 4:
-            # 原始文件第1列是单词，第4列(索引3)是排名
-            word_col = df.columns[0]
-            rank_col = df.columns[3]
+            w_col, r_col = df.columns[0], df.columns[3]
         
-        # 如果还是没找到，尝试关键词搜索
-        if not rank_col:
-            rank_col = next((c for c in df.columns if any(k in c for k in ['rank', '排名', '序号', '词频'])), None)
-        if not word_col:
-            word_col = next((c for c in df.columns if any(k in c for k in ['word', '单词', '词汇'])), None)
+        # 策略4: 关键词搜索
+        if not w_col: w_col = next((c for c in df.columns if 'word' in c or '单词' in c), None)
+        if not r_col: r_col = next((c for c in df.columns if 'rank' in c or '排序' in c or '词频' in c), None)
 
-        if not word_col or not rank_col:
-            return None, f"无法识别列名。检测到的列: {cols}"
+        if not w_col or not r_col:
+            return df, f"列名识别失败: {cols}", {}
 
-        # === 数据清洗 ===
-        # 强制转小写，去空格
-        df['word_clean'] = df[word_col].astype(str).str.lower().str.strip()
-        # 强制转数字
-        df['rank_clean'] = pd.to_numeric(df[rank_col], errors='coerce').fillna(99999)
+        # 提取数据
+        df['word_clean'] = df[w_col].astype(str).str.lower().str.strip()
+        df['rank_clean'] = pd.to_numeric(df[r_col], errors='coerce').fillna(99999)
         
-        # 再次过滤：确保 rank 是有效数字且 > 0
+        # 过滤
         df = df[df['rank_clean'] > 0]
         df = df[df['rank_clean'] < 99999]
-
-        vocab_dict = pd.Series(
-            df['rank_clean'].values, 
-            index=df['word_clean']
-        ).to_dict()
         
-        return vocab_dict, f"已加载: {file_path} (单词列:{word_col}, 排名列:{rank_col})"
+        vocab_dict = pd.Series(df['rank_clean'].values, index=df['word_clean']).to_dict()
+        
+        # 诊断信息
+        debug_info = {
+            "file": file_path,
+            "cols": cols,
+            "used_cols": (w_col, r_col),
+            "sample_the": vocab_dict.get('the', '未找到'),
+            "sample_good": vocab_dict.get('good', '未找到'),
+            "count": len(vocab_dict)
+        }
+        
+        return df, "成功", vocab_dict
 
     except Exception as e:
-        return None, str(e)
+        return None, str(e), {}
 
-# --- 3. 核心处理逻辑 ---
-def process_text_smart(text, vocab_dict, range_start, range_end):
+# 加载数据
+df_raw, status, vocab_dict = load_vocab_debug()
+
+# ==========================================
+# 🔍 侧边栏：诊断面板 (Debug Panel)
+# ==========================================
+st.sidebar.title("🛠️ 诊断面板")
+st.sidebar.info("如果结果不对，请截图这里发给我！")
+
+with st.sidebar.expander("1. 还原引擎检测", expanded=True):
+    st.write(f"状态: {LEMMA_STATUS}")
+    st.caption("测试: went -> " + get_lemma("went"))
+
+with st.sidebar.expander("2. 词库读取检测", expanded=True):
+    if vocab_dict:
+        debug = load_vocab_debug()[2] # 重新获取debug info
+        st.write(f"📂 文件: `{debug['file']}`")
+        st.write(f"🔢 总词数: `{debug['count']}`")
+        
+        st.markdown("---")
+        st.write("**关键词排名检查:**")
+        
+        # 检查 'the'
+        rank_the = debug['sample_the']
+        icon_the = "✅" if rank_the == 1 else "❌"
+        st.write(f"🔹 'the': {rank_the} {icon_the}")
+        
+        # 检查 'good'
+        rank_good = debug['sample_good']
+        st.write(f"🔹 'good': {rank_good}")
+        
+        if rank_the == '未找到' or rank_the > 100:
+            st.error("🚨 严重错误：基础词排名不对！一定是列读取错了。")
+    else:
+        st.error(f"加载失败: {status}")
+
+# ==========================================
+# 主程序逻辑
+# ==========================================
+
+st.sidebar.divider()
+st.sidebar.subheader("学习设置")
+vocab_range = st.sidebar.slider("选择区间", 1, 20000, (6000, 8000), 500)
+range_start, range_end = vocab_range
+
+st.title("🐞 Vibe Vocab v6.0 (诊断版)")
+
+if not vocab_dict:
+    st.warning("⚠️ 请先解决左侧的报错")
+    st.stop()
+
+def process_text_debug(text, vocab_dict, r_start, r_end):
     text_lower = text.lower()
     words = re.findall(r'\b[a-z\']{2,}\b', text_lower)
     unique_words = sorted(list(set(words)))
     
-    tier_known = []   
-    tier_target = []  
-    tier_beyond = []  
+    known, target, beyond = [], [], []
     
     for w in unique_words:
-        rank = 999999
-        match_word = w
+        rank = 99999
+        match = w
         
         # 1. 查原形
         if w in vocab_dict:
             rank = vocab_dict[w]
-            match_word = w
         else:
             # 2. 查还原
             lemma = get_lemma(w)
             if lemma in vocab_dict:
                 rank = vocab_dict[lemma]
-                match_word = lemma
+                match = lemma
             else:
                 # 3. 查变体
                 if w.endswith("'s") and w[:-2] in vocab_dict:
                     rank = vocab_dict[w[:-2]]
-                    match_word = w[:-2]
+                    match = w[:-2]
 
-        item = {'单词': match_word, '原文': w, '排名': int(rank)}
+        item = {'单词': match, '原文': w, '排名': int(rank)}
         
-        if rank <= range_start:
-            tier_known.append(item)
-        elif range_start < rank <= range_end:
-            tier_target.append(item)
+        if rank <= r_start: known.append(item)
+        elif r_start < rank <= r_end: target.append(item)
         else:
-            if item['单词'] == item['原文']:
-                item['原文'] = '-'
-            tier_beyond.append(item)
+            if match == w: item['原文'] = '-'
+            beyond.append(item)
+            
+    return pd.DataFrame(known), pd.DataFrame(target), pd.DataFrame(beyond)
 
-    def to_df(data):
-        if not data: return pd.DataFrame()
-        return pd.DataFrame(data).sort_values('排名').drop_duplicates(subset=['单词'])
+# 输入区
+text_input = st.text_area("在此粘贴文本:", height=150)
 
-    return to_df(tier_known), to_df(tier_target), to_df(tier_beyond)
-
-# --- 4. 界面 UI ---
-st.title("🧠 Vibe Vocab v5.2 (智能双核版)")
-st.caption("完美适配 coca_cleaned.csv")
-
-vocab_dict, status_msg = load_vocab()
-
-# 侧边栏显示加载状态，方便调试
-st.sidebar.header("⚙️ 系统状态")
-if vocab_dict:
-    st.sidebar.success(f"✅ 成功! {len(vocab_dict)}词")
-    st.sidebar.caption(f"详情: {status_msg}")
-else:
-    st.sidebar.error("❌ 词库加载失败")
-    st.sidebar.code(status_msg)
-    st.stop()
-
-st.sidebar.subheader("设定学习区间")
-vocab_range = st.sidebar.slider(
-    "拖动滑块：", 1, 20000, (6000, 8000), 500
-)
-range_start, range_end = vocab_range
-
-st.sidebar.info(
-    f"🟢 **熟词**: 1 - {range_start}\n\n"
-    f"🟡 **重点**: {range_start} - {range_end}\n\n"
-    f"🔴 **超纲**: {range_end}+"
-)
-
-with st.expander("📝 文本输入", expanded=True):
-    tab_paste, tab_upload = st.tabs(["粘贴文本", "上传 TXT"])
-    with tab_paste:
-        text_input = st.text_area("在此粘贴:", height=150)
-    with tab_upload:
-        uploaded = st.file_uploader("上传文件", type="txt")
-        if uploaded:
-            text_input = uploaded.read().decode("utf-8")
-
-final_text = text_input if text_input else ""
-
-def show_download_buttons(df, prefix):
-    if df.empty: return
-    col1, col2 = st.columns(2)
-    csv = df.to_csv(index=False).encode('utf-8')
-    col1.download_button(f"📥 下载 Excel", csv, f"{prefix}.csv", "text/csv")
-    txt = "\n".join(df['单词'].tolist())
-    col2.download_button(f"📄 下载 TXT", txt, f"{prefix}.txt", "text/plain")
-
-if st.button("🚀 开始分析", type="primary"):
-    if not final_text.strip():
-        st.warning("请先输入文本！")
+if st.button("🚀 开始分析"):
+    if not text_input.strip():
+        st.warning("请输入文本")
     else:
-        df_known, df_target, df_beyond = process_text_smart(final_text, vocab_dict, range_start, range_end)
+        df_k, df_t, df_b = process_text_debug(text_input, vocab_dict, range_start, range_end)
         
-        st.success(f"分析完成！")
-        
+        st.success("分析完成")
         t1, t2, t3 = st.tabs([
-            f"🟡 重点突破 ({len(df_target)})", 
-            f"🔴 超纲/生词 ({len(df_beyond)})", 
-            f"🟢 已掌握 ({len(df_known)})"
+            f"🟡 重点 ({len(df_t)})", 
+            f"🔴 超纲 ({len(df_b)})", 
+            f"🟢 熟词 ({len(df_k)})"
         ])
         
-        with t1:
-            st.markdown(f"### 🎯 重点学习 ({range_start}-{range_end})")
-            if not df_target.empty:
-                st.dataframe(df_target, use_container_width=True)
-                show_download_buttons(df_target, "target_words")
-            else:
-                st.info("此区间无生词。")
-
-        with t2:
-            st.markdown(f"### 🚀 超纲词 (>{range_end})")
-            if not df_beyond.empty:
-                st.dataframe(df_beyond, use_container_width=True)
-                show_download_buttons(df_beyond, "beyond_words")
-            else:
-                st.info("没有超纲词。")
-
-        with t3:
-            st.markdown(f"### ✅ 已掌握 (<{range_start})")
-            if not df_known.empty:
-                st.dataframe(df_known, use_container_width=True)
-                show_download_buttons(df_known, "known_words")
-            else:
-                st.info("无熟词。")
+        with t1: st.dataframe(df_t, use_container_width=True)
+        with t2: st.dataframe(df_b, use_container_width=True)
+        with t3: st.dataframe(df_k, use_container_width=True)
