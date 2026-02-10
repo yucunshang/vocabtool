@@ -30,36 +30,52 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 内置词库
+# 2. 内置词库 (数据层)
 # ==========================================
+
+# 1. 专业术语库 (Technical Terms)
+# 策略优化：移除了 gravity, velocity, friction 等常用物理词，让它们走普通词频过滤。
+# 保留了真正的生僻术语。
 BUILTIN_TECHNICAL_TERMS = {
-    # 用户指定补充
-    "metal": "Chem", "motion": "Law", "gravity": "Phys", "molecule": "Chem",
-    "vacuum": "Phys", "electron": "Phys", "quantum": "Phys", "velocity": "Phys",
-    "friction": "Phys", "catalyst": "Chem", "equilibrium": "Chem",
-    # CS
-    "algorithm": "CS", "recursion": "CS", "latency": "CS", "throughput": "CS", 
-    "api": "CS", "json": "CS", "backend": "CS", "frontend": "CS", "fullstack": "CS",
+    # 用户指定补充 (高难)
+    "catalyst": "Chem", "equilibrium": "Chem", "molecule": "Chem",
+    "quantum": "Phys", "vacuum": "Phys", "electron": "Phys", 
+    "plaintiff": "Law", "defendant": "Law", "tort": "Law",
+    
+    # CS (生僻)
+    "recursion": "CS", "latency": "CS", "throughput": "CS", "bandwidth": "CS",
+    "backend": "CS", "frontend": "CS", "fullstack": "CS", "middleware": "CS",
     "neural": "AI", "transformer": "AI", "embedding": "AI", "inference": "AI",
-    # Math
-    "derivative": "Math", "integral": "Math", "matrix": "Math", "vector": "Math",
-    "theorem": "Math", "variance": "Math", "deviation": "Math", "correlation": "Math",
-    # Phys
-    "acceleration": "Phys", "momentum": "Phys", "inertia": "Phys", "thermodynamics": "Phys",
-    "entropy": "Phys", "enthalpy": "Phys", "kinetic": "Phys", "photon": "Phys",
-    # Bio
+    "kubernetes": "CS", "encryption": "CS", "authentication": "CS", "authorization": "CS",
+    "repository": "CS", "deployment": "CS", "instantiation": "CS", "polymorphism": "CS",
+    
+    # Math (生僻)
+    "derivative": "Math", "integral": "Math", "calculus": "Math", "matrix": "Math", 
+    "vector": "Math", "tensor": "Math", "theorem": "Math", "axiom": "Math", 
+    "variance": "Math", "deviation": "Math", "correlation": "Math", "regression": "Math",
+    "polynomial": "Math", "logarithm": "Math", "exponential": "Math", "permutation": "Math",
+    
+    # Phys (仅保留生僻，移除 gravity/velocity/force 等)
+    "thermodynamics": "Phys", "entropy": "Phys", "enthalpy": "Phys", 
+    "kinetic": "Phys", "photon": "Phys", "positron": "Phys", "neutron": "Phys",
+    "relativity": "Phys", "optics": "Phys", "refraction": "Phys", "diffraction": "Phys",
+    
+    # Bio (生僻)
     "mitochondria": "Bio", "ribosome": "Bio", "membrane": "Bio", "cytoplasm": "Bio",
-    "dna": "Bio", "rna": "Bio", "chromosome": "Bio", "genome": "Bio",
-    # Biz
-    "revenue": "Biz", "margin": "Biz", "liability": "Biz", "equity": "Biz", "dividend": "Biz",
-    "audit": "Biz", "fiscal": "Biz", "inflation": "Econ", "deflation": "Econ",
-    # Law
-    "plaintiff": "Law", "defendant": "Law", "verdict": "Law", "prosecutor": "Law",
-    "tort": "Law", "felony": "Law", "affidavit": "Law", "subpoena": "Law"
+    "chromosome": "Bio", "genome": "Bio", "photosynthesis": "Bio", "metabolism": "Bio",
+    
+    # Biz/Econ (生僻)
+    "liability": "Biz", "equity": "Biz", "dividend": "Biz", "fiscal": "Biz",
+    "inflation": "Econ", "deflation": "Econ", "recession": "Econ", "collateral": "Biz",
+    
+    # Law (生僻)
+    "verdict": "Law", "prosecutor": "Law", "felony": "Law", "misdemeanor": "Law",
+    "affidavit": "Law", "subpoena": "Law", "indictment": "Law", "litigation": "Law",
+    "jurisdiction": "Law", "arbitration": "Law", "statute": "Law"
 }
 BUILTIN_TECHNICAL_TERMS = {k.lower(): v for k, v in BUILTIN_TECHNICAL_TERMS.items()}
 
-# 专有名词 (White List)
+# 2. 专有名词库 (Proper Nouns) - 权重将被设为 1 (视为极简单)
 PROPER_NOUNS_DB = {
     "usa": "USA", "uk": "UK", "uae": "UAE", "prc": "PRC",
     "america": "America", "england": "England", "scotland": "Scotland", "wales": "Wales",
@@ -94,6 +110,7 @@ PROPER_NOUNS_DB = {
     "phd": "PhD", "mba": "MBA", "ceo": "CEO", "cfo": "CFO", "cto": "CTO", "vip": "VIP"
 }
 
+# 3. 补丁词库 (User Patch) - 会赋予特定 rank
 BUILTIN_PATCH_VOCAB = {
     "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
     "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
@@ -111,6 +128,7 @@ BUILTIN_PATCH_VOCAB = {
     "super": 2000, "extra": 2500, "plus": 2000
 }
 
+# 4. 歧义词 (Ambiguous) - 权重将被设为 1
 AMBIGUOUS_WORDS = {
     "china", "turkey", "march", "may", "august", "polish"
 }
@@ -170,13 +188,7 @@ def load_vocab():
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
         except: pass
     
-    # 补丁
-    BUILTIN_PATCH_VOCAB = {
-        "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
-        "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
-        "cloud": 3000, "algorithm": 6000, "database": 5000, "interface": 5000,
-        "analysis": 2500, "strategy": 2500, "method": 2000, "theory": 2500
-    }
+    # 注入补丁词汇
     for word, rank in BUILTIN_PATCH_VOCAB.items():
         if word not in vocab: vocab[word] = rank
         else:
@@ -228,20 +240,15 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
     return prompt
 
 # ==========================================
-# 6. 通用分析函数
+# 6. 通用分析函数 (Core Logic)
 # ==========================================
 def analyze_text(raw_text, mode="auto"):
-    # 增加简单的 CamelCase/紧凑字符串处理，防止 MondayWHONovember 被当成一个词
-    # 如果用户粘贴 "MondayWHONovember"，这里尝试简单拆分，或者用户自行保证有空格
-    # 这里保持稳健，暂不强行拆分 CamelCase，假设用户输入是有分隔符的
-    
     raw_items = []
     if "按行" in mode:
         lines = raw_text.split('\n')
         for line in lines:
             if line.strip(): raw_items.append(line.strip())
     else:
-        # 将逗号、句号等替换为空格再切割，防止 "Monday,Tuesday" 连在一起
         clean_text = re.sub(r'[,.\n\t]', ' ', raw_text)
         raw_items = clean_text.split()
     
@@ -258,26 +265,30 @@ def analyze_text(raw_text, mode="auto"):
         if item_lower in JUNK_WORDS: continue
         
         # 1. 术语身份 (Rank 0 - 最高优先级)
+        # 注意：这里已经移除了 gravity/velocity 等词，它们不会命中这里
         if item_lower in BUILTIN_TECHNICAL_TERMS:
             domain = BUILTIN_TECHNICAL_TERMS[item_lower]
             unique_items.append({
                 "word": f"{item_cleaned} ({domain})", 
-                "rank": 0, # 术语永远置顶，不受普通 MinRank 影响（除非特殊过滤）
+                "rank": 0, 
                 "cat": "term",
                 "raw": item_lower
             })
         
-        # 2. 专名身份 (Rank 1 - 视为“简单词”)
-        # 修改点：将专有名词的 Rank 设为 1，这样如果 MinRank > 1，它们就会被过滤掉
-        if item_lower in PROPER_NOUNS_DB:
+        # 2. 专名身份 (Rank 1 - 视为"简单词")
+        # 3. 歧义词 (Rank 1 - 视为"简单词")
+        if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
+            # 获取显示名称 (如果是歧义词，尝试保持原样或 Title Case，这里简化统一处理)
+            display = PROPER_NOUNS_DB.get(item_lower, item_cleaned.title())
             unique_items.append({
-                "word": PROPER_NOUNS_DB[item_lower],
-                "rank": 1, # <--- 关键修改：专名视为极简单词 (Rank 1)
+                "word": display,
+                "rank": 1, # <--- 强制 Rank 1，方便被 Min Rank 过滤
                 "cat": "proper",
                 "raw": item_lower
             })
             
-        # 3. 普通身份
+        # 3. 普通身份 (查询 CSV + Patch)
+        # 注意：gravity 等词会在这里被查到，Rank 约为 2500 左右
         rank = vocab_dict.get(item_lower, 99999)
         if rank != 99999:
             unique_items.append({
@@ -372,23 +383,21 @@ elif "单词分级" in app_mode:
 # 模式 C: 智能精选 (Top N)
 # ---------------------------------------------------------
 elif "Top N" in app_mode:
-    st.info("💡 此模式自动过滤掉 **太简单** 的词，然后按 **由易到难** 挑选出前 N 个。")
+    st.info("💡 此模式可自动过滤掉 **太简单** 的词 (包括常见专有名词)，然后按 **由易到难** 挑选出前 N 个。")
     
     # === 参数设置区 ===
     c_set1, c_set2, c_set3 = st.columns([1, 1, 1])
     with c_set1:
         top_n = st.number_input("🎯 筛选数量", 10, 500, 50, 10)
     with c_set2:
-        # 核心修改：让用户定义“简单”的门槛
-        min_rank_threshold = st.number_input("📉 忽略前 N 词 (起点)", 0, 20000, 2500, 500, help="Rank小于此数的词会被视为【简单词】并过滤。")
+        # 核心修改：起点设置，Rank 1 的专名会被自动过滤
+        min_rank_threshold = st.number_input("📉 忽略前 N 词 (起点)", 0, 20000, 3000, 500, help="Rank小于此数的词(含专名)会被过滤。")
     with c_set3:
-        # 空白占位或将来加按钮
         st.write("") 
         
     c_input, c_btn = st.columns([3, 1])
     with c_input:
-        # 默认输入包含了专有名词(Monday, UK)进行测试
-        topn_input = st.text_area("输入", height=150, placeholder="Monday WHO November UK Wednesday\nmotion\nenergy", label_visibility="collapsed")
+        topn_input = st.text_area("输入", height=150, placeholder="Monday WHO November UK Wednesday\nmotion\nenergy\ngravity", label_visibility="collapsed")
     with c_btn:
         btn_topn = st.button("🎲 生成精选", type="primary", use_container_width=True)
 
@@ -398,13 +407,15 @@ elif "Top N" in app_mode:
         if not df.empty:
             df['rank'] = pd.to_numeric(df['rank'], errors='coerce').fillna(99999)
             
-            # === Top N 核心逻辑 (v51.0) ===
+            # === Top N 核心逻辑 (v52.0) ===
+            
             # 1. 术语 (Rank 0)：始终保留，视为高价值
+            # (注意：gravity 已经从术语库移除了，所以它不在这里)
             term_mask = (df['cat'] == 'term')
             
             # 2. 普通词 & 专名：必须 >= min_rank_threshold
-            # 注意：因为我们把 Proper Nouns 的 rank 设为了 1，
-            # 所以只要 min_rank_threshold > 1 (比如 2500)，专有名词就会被自动过滤！
+            # monday/uk 的 Rank 是 1，如果 min_rank_threshold 是 3000，它们就被过滤了！
+            # gravity 的 Rank 约 2500，如果 min_rank 是 3000，它也被过滤了！
             general_mask = (df['cat'].isin(['general', 'proper'])) & (df['rank'] >= min_rank_threshold)
             
             valid_candidates = df[term_mask | general_mask].copy()
@@ -415,7 +426,7 @@ elif "Top N" in app_mode:
             # 切割 Top N
             top_df = sorted_df.head(top_n)
             
-            # 剩余词 (被过滤掉的简单词 + 没选上的难词)
+            # 剩余词
             all_ids = set(df.index)
             top_ids = set(top_df.index)
             rest_ids = all_ids - top_ids
@@ -442,11 +453,11 @@ elif "Top N" in app_mode:
                     with t_csv: st.code(p_csv, language='markdown')
                     with t_txt: st.code(p_txt, language='markdown')
                 else:
-                    st.warning("没有符合条件的单词 (都太简单了?)")
+                    st.warning("无符合条件的单词 (都被过滤了)")
 
             # === 右栏：剩余词汇 ===
             with col_rest:
-                st.subheader(f"💤 剩余 {len(rest_df)} 个 (太简单/未入选)")
+                st.subheader(f"💤 剩余 {len(rest_df)} 个 (简单/未入选)")
                 if not rest_df.empty:
                     words_rest = rest_df['word'].tolist()
                     with st.expander("👁️ 查看剩余列表", expanded=False):
