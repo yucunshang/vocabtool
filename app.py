@@ -177,7 +177,7 @@ def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list
     return prompt
 
 # ==========================================
-# 6. 通用分析函数 (赋予真实权重)
+# 6. 通用分析函数
 # ==========================================
 def analyze_text(raw_text, mode="auto"):
     raw_items = []
@@ -201,23 +201,22 @@ def analyze_text(raw_text, mode="auto"):
         if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
         if item_lower in JUNK_WORDS: continue
         
-        # 获取该词在词典中的真实 Rank
         actual_rank = vocab_dict.get(item_lower, 99999)
         
-        # 1. 术语身份 (不再是 rank 0，而是赋予真实词频，若词频缺失则赋予 15000 默认偏难值)
+        # 1. 术语身份 (作为普通词分类)
         if item_lower in BUILTIN_TECHNICAL_TERMS:
             domain = BUILTIN_TECHNICAL_TERMS[item_lower]
             term_rank = actual_rank if actual_rank != 99999 else 15000
             unique_items.append({
                 "word": f"{item_cleaned} ({domain})", 
                 "rank": term_rank,
-                "cat": "term",
+                "cat": "general", # 视为普通词参与分级
                 "raw": item_lower
             })
         
         is_proper_only = False
         
-        # 2. 专名身份 (不再是 rank 1，而是赋予真实词频，若词频缺失则赋予 1000 默认偏易值)
+        # 2. 专名身份 
         if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
             display = PROPER_NOUNS_DB.get(item_lower, item_cleaned.title())
             proper_rank = actual_rank if actual_rank != 99999 else 1000
@@ -229,7 +228,7 @@ def analyze_text(raw_text, mode="auto"):
             })
             is_proper_only = True
             
-        # 3. 普通身份 (如果有真实词频，且不是纯专名)
+        # 3. 普通身份
         if not is_proper_only:
             if actual_rank != 99999:
                 unique_items.append({
@@ -264,9 +263,12 @@ if "智能还原" in app_mode:
             st.caption("👆 一键复制")
 
 elif "单词分级" in app_mode:
-    col_level1, col_level2, _ = st.columns([1, 1, 2])
+    col_level1, col_level2, col_level3 = st.columns([1, 1, 1])
     with col_level1: current_level = st.number_input("当前水平", 0, 30000, 9000, 500)
     with col_level2: target_level = st.number_input("目标水平", 0, 30000, 15000, 500)
+    with col_level3: 
+        st.write("") # 占位换行
+        show_rank = st.checkbox("🔢 显示单词词频 (Rank)", value=False)
     
     g_col1, g_col2 = st.columns(2)
     with g_col1:
@@ -279,7 +281,6 @@ elif "单词分级" in app_mode:
             df = analyze_text(grade_input, input_mode)
             if not df.empty:
                 def categorize(row):
-                    if row['cat'] == 'term': return 'term'
                     if row['cat'] == 'proper': return 'proper'
                     r = row['rank']
                     if r <= current_level: return "known"
@@ -289,42 +290,51 @@ elif "单词分级" in app_mode:
                 df['final_cat'] = df.apply(categorize, axis=1)
                 df = df.sort_values(by='rank')
 
-                # === 核心修改：重新排布 Tab 顺序，符合复习直觉 ===
-                t_known, t_target, t_beyond, t_proper, t_term = st.tabs([
+                # 移除术语Tab，按照逻辑顺序排序
+                t_known, t_target, t_beyond, t_proper = st.tabs([
                     f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
                     f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
                     f"🔴 超纲 ({len(df[df['final_cat']=='beyond'])})", 
-                    f"🔵 专有名词 ({len(df[df['final_cat']=='proper'])})", 
-                    f"🟣 专业术语 ({len(df[df['final_cat']=='term'])})"
+                    f"🔵 专有名词 ({len(df[df['final_cat']=='proper'])})"
                 ])
                 
                 def render_tab(tab_obj, cat_key, label, def_mode):
                     with tab_obj:
                         sub = df[df['final_cat'] == cat_key]
                         if not sub.empty:
-                            words = sub['word'].tolist()
+                            pure_words = sub['word'].tolist()
                             
-                            # === 核心修改：取消 expander，直接显示单词，所见即所得 ===
-                            st.code("\n".join(words), language='text')
+                            # 拼接用于展示的列表 (附带 Rank)
+                            display_lines = []
+                            for _, row in sub.iterrows():
+                                if show_rank:
+                                    # 处理 rank=99999 的显示
+                                    rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
+                                    display_lines.append(f"{row['word']} [Rank: {rank_str}]")
+                                else:
+                                    display_lines.append(row['word'])
+                            
+                            # 恢复折叠框
+                            with st.expander("👁️ 查看列表", expanded=False):
+                                st.code("\n".join(display_lines), language='text')
                             
                             st.markdown(f"**🤖 AI 指令 ({label})**")
-                            has_term = (cat_key == 'term')
+                            # 检查该列表中是否混入了术语
+                            has_term = any('(' in w for w in pure_words)
                             
-                            p_csv = generate_ai_prompt(words, 'csv', def_mode, is_term_list=has_term)
-                            p_txt = generate_ai_prompt(words, 'txt', def_mode, is_term_list=has_term)
+                            # 生成 Prompt (依然传递纯净单词 pure_words)
+                            p_csv = generate_ai_prompt(pure_words, 'csv', def_mode, is_term_list=has_term)
+                            p_txt = generate_ai_prompt(pure_words, 'txt', def_mode, is_term_list=has_term)
                             
                             t_csv, t_txt = st.tabs(["📋 CSV 指令", "📝 TXT 指令"])
                             with t_csv: st.code(p_csv, language='markdown')
                             with t_txt: st.code(p_txt, language='markdown')
-                        else: 
-                            st.info("该分类下暂无单词")
+                        else: st.info("暂无单词")
 
-                # 按新的顺序调用渲染
                 render_tab(t_known, "known", "熟词", def_mode="split")  
                 render_tab(t_target, "target", "重点", def_mode="single") 
                 render_tab(t_beyond, "beyond", "超纲", def_mode="single") 
                 render_tab(t_proper, "proper", "专名", def_mode="single")
-                render_tab(t_term, "term", "术语", def_mode="term")   
 
 elif "Top N" in app_mode:
     st.info("💡 此模式自动过滤简单词，按 **由易到难** 挑选。所有单词(含专名/术语)均采用真实词频过滤。")
@@ -332,7 +342,9 @@ elif "Top N" in app_mode:
     c_set1, c_set2, c_set3 = st.columns([1, 1, 1])
     with c_set1: top_n = st.number_input("🎯 筛选数量", 10, 500, 50, 10)
     with c_set2: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3000, 500)
-    with c_set3: st.write("") 
+    with c_set3: 
+        st.write("") 
+        show_rank_topn = st.checkbox("🔢 显示单词词频 (Rank)", value=False)
         
     c_input, c_btn = st.columns([3, 1])
     with c_input:
@@ -346,9 +358,7 @@ elif "Top N" in app_mode:
         if not df.empty:
             df['rank'] = pd.to_numeric(df['rank'], errors='coerce').fillna(99999)
             
-            # === Top N 逻辑：不再给术语开后门，全部用真实词频过滤 ===
             valid_candidates = df[df['rank'] >= min_rank_threshold].copy()
-            
             sorted_df = valid_candidates.sort_values(by='rank', ascending=True)
             top_df = sorted_df.head(top_n)
             
@@ -363,17 +373,25 @@ elif "Top N" in app_mode:
             with col_win:
                 st.success(f"🔥 精选 Top {len(top_df)}")
                 if not top_df.empty:
-                    words = top_df['word'].tolist()
+                    pure_words = top_df['word'].tolist()
                     
-                    # 取消 expander，直接显示
-                    st.code("\n".join(words), language='text')
+                    display_lines = []
+                    for _, row in top_df.iterrows():
+                        if show_rank_topn:
+                            r_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
+                            display_lines.append(f"{row['word']} [Rank: {r_str}]")
+                        else:
+                            display_lines.append(row['word'])
+                            
+                    with st.expander("👁️ 查看列表", expanded=True):
+                        st.code("\n".join(display_lines), language='text')
                     
                     st.markdown("**🤖 AI 指令 (核心单义)**")
-                    has_term = any('(' in w for w in words)
+                    has_term = any('(' in w for w in pure_words)
                     mode = "single" if not has_term else "term"
                     
-                    p_csv = generate_ai_prompt(words, 'csv', mode, is_term_list=has_term)
-                    p_txt = generate_ai_prompt(words, 'txt', mode, is_term_list=has_term)
+                    p_csv = generate_ai_prompt(pure_words, 'csv', mode, is_term_list=has_term)
+                    p_txt = generate_ai_prompt(pure_words, 'txt', mode, is_term_list=has_term)
                     
                     t1, t2 = st.tabs(["CSV", "TXT"])
                     with t1: st.code(p_csv, language='markdown')
@@ -383,14 +401,23 @@ elif "Top N" in app_mode:
             with col_rest:
                 st.subheader(f"💤 剩余 {len(rest_df)} 个")
                 if not rest_df.empty:
-                    words_rest = rest_df['word'].tolist()
+                    pure_words_r = rest_df['word'].tolist()
                     
-                    # 取消 expander，直接显示
-                    st.code("\n".join(words_rest), language='text')
+                    display_lines_r = []
+                    for _, row in rest_df.iterrows():
+                        if show_rank_topn:
+                            r_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
+                            display_lines_r.append(f"{row['word']} [Rank: {r_str}]")
+                        else:
+                            display_lines_r.append(row['word'])
+                            
+                    with st.expander("👁️ 查看列表", expanded=False):
+                        st.code("\n".join(display_lines_r), language='text')
                     
                     st.markdown("**🤖 AI 指令 (备用)**")
-                    p_csv_r = generate_ai_prompt(words_rest, 'csv', "single")
-                    p_txt_r = generate_ai_prompt(words_rest, 'txt', "single")
+                    has_term_r = any('(' in w for w in pure_words_r)
+                    p_csv_r = generate_ai_prompt(pure_words_r, 'csv', "single", is_term_list=has_term_r)
+                    p_txt_r = generate_ai_prompt(pure_words_r, 'txt', "single", is_term_list=has_term_r)
                     
                     rt1, rt2 = st.tabs(["CSV", "TXT"])
                     with rt1: st.code(p_csv_r, language='markdown')
