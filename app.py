@@ -2,53 +2,46 @@ import streamlit as st
 import pandas as pd
 import re
 import os
+from io import BytesIO
 
 st.set_page_config(page_title="Vibe Vocab Studio", page_icon="⚡", layout="wide")
 
-# --- 核心配置 ---
-# 这里写死文件名，因为你已经把它传到 GitHub 了
+# --- 1. 配置与加载 ---
 DEFAULT_VOCAB_FILE = "coca_cleaned.csv" 
-
-# --- 核心逻辑 ---
-def get_sentence_context(text, word):
-    """提取原句"""
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    for sent in sentences:
-        if re.search(r'\b' + re.escape(word) + r'\b', sent, re.IGNORECASE):
-            return sent.strip()[:300]
-    return "未找到原句"
 
 @st.cache_data
 def load_vocab():
-    """自动加载内置词库"""
+    """读取内置词库"""
     if not os.path.exists(DEFAULT_VOCAB_FILE):
         return None
     try:
-        # 读取 CSV，标准化列名
         df = pd.read_csv(DEFAULT_VOCAB_FILE)
+        # 标准化列名
         df.columns = [c.strip().lower() for c in df.columns]
-        return df
-    except Exception as e:
-        st.error(f"内置词库读取失败: {e}")
+        # 建立字典加速查找: word -> rank
+        if 'word' in df.columns and 'rank' in df.columns:
+            return pd.Series(df['rank'].values, index=df['word'].astype(str)).to_dict()
+        else:
+            return None
+    except:
         return None
 
-def process_text_lite(text, vocab_df, user_limit):
+# --- 2. 核心逻辑 (纯净版) ---
+def process_text_pure(text, vocab_dict, user_limit):
+    # 转小写
     text_lower = text.lower()
+    # 正则提取单词 (至少2个字母)
     words = re.findall(r'\b[a-z]{2,}\b', text_lower)
     unique_words = sorted(list(set(words)))
     
-    # 建立字典加速
-    if 'word' in vocab_df.columns and 'rank' in vocab_df.columns:
-        vocab_dict = pd.Series(vocab_df['rank'].values, index=vocab_df['word'].astype(str)).to_dict()
-    else:
-        return pd.DataFrame(), pd.DataFrame()
-
-    found_items = []
+    unknown_list = []
+    known_list = []
+    
     for w in unique_words:
         rank = 999999
         match_word = w
         
-        # 匹配逻辑
+        # 查词逻辑
         if w in vocab_dict:
             rank = vocab_dict[w]
         elif w.endswith('s') and w[:-1] in vocab_dict:
@@ -61,74 +54,94 @@ def process_text_lite(text, vocab_df, user_limit):
             match_word = w[:-3]
             rank = vocab_dict[match_word]
             
-        is_unknown = rank > user_limit
-        context = get_sentence_context(text, w) if is_unknown else ""
-            
-        found_items.append({
-            'word': match_word,
-            'rank': rank,
-            'is_known': not is_unknown,
-            'context': context
-        })
+        # 分组
+        item = {'单词 (Word)': match_word, '排名 (Rank)': rank}
+        
+        if rank <= user_limit:
+            known_list.append(item)
+        else:
+            unknown_list.append(item)
 
-    df = pd.DataFrame(found_items)
-    if not df.empty:
-        return df[~df['is_known']].sort_values('rank'), df[df['is_known']].sort_values('rank')
-    return pd.DataFrame(), pd.DataFrame()
+    # 转为 DataFrame 并按排名排序
+    df_unknown = pd.DataFrame(unknown_list)
+    if not df_unknown.empty:
+        df_unknown = df_unknown.sort_values('排名 (Rank)')
+        
+    df_known = pd.DataFrame(known_list)
+    if not df_known.empty:
+        df_known = df_known.sort_values('排名 (Rank)')
+        
+    return df_unknown, df_known
 
-# --- 界面 UI ---
+# --- 3. 界面 UI ---
 st.title("⚡ Vibe Vocab Studio")
-st.caption("内置 COCA 20000 词表 · 自动分级 · Anki 制卡")
+st.caption("纯净版：无上下文 · 极速分析 · 双格式下载")
 
 # 加载数据
-vocab_df = load_vocab()
+vocab_dict = load_vocab()
 
-if vocab_df is None:
-    st.error(f"❌ 错误：在仓库中找不到 {DEFAULT_VOCAB_FILE} 文件！请确认你已经上传了该文件。")
+if vocab_dict is None:
+    st.error(f"❌ 错误：找不到 {DEFAULT_VOCAB_FILE}，请确保已上传该文件到 GitHub！")
     st.stop()
 
-# 侧边栏 (简化了，不需要上传文件)
+# 侧边栏
 st.sidebar.header("⚙️ 设置")
-st.sidebar.success("✅ 内置词库已加载")
+st.sidebar.success("✅ 词库已就绪")
 user_vocab = st.sidebar.slider("你的词汇量阈值", 1000, 20000, 6000, 500)
 
 # 输入区
-with st.expander("📝 文本输入 (支持长文本)", expanded=True):
-    tab1, tab2 = st.tabs(["粘贴文本", "上传文件"])
-    with tab1:
-        text_input_raw = st.text_area("在此粘贴:", height=150)
-    with tab2:
-        uploaded_txt = st.file_uploader("上传 .txt 小说/文章", type="txt")
-        if uploaded_txt:
-            text_input_raw = uploaded_txt.read().decode("utf-8")
+with st.expander("📝 文本输入", expanded=True):
+    tab_paste, tab_upload = st.tabs(["粘贴文本", "上传 TXT"])
+    with tab_paste:
+        text_input = st.text_area("在此粘贴内容:", height=150)
+    with tab_upload:
+        uploaded = st.file_uploader("上传文件", type="txt")
+        if uploaded:
+            text_input = uploaded.read().decode("utf-8")
 
-final_text = text_input_raw if text_input_raw else ""
+final_text = text_input if text_input else ""
 
+# 分析按钮
 if st.button("🚀 开始分析", type="primary"):
     if not final_text.strip():
-        st.warning("请输入文本内容！")
+        st.warning("请先输入文本！")
     else:
-        with st.spinner("正在分析..."):
-            unknown_df, known_df = process_text_lite(final_text, vocab_df, user_vocab)
+        # 执行分析
+        unk_df, kn_df = process_text_pure(final_text, vocab_dict, user_vocab)
         
-        st.success(f"分析完成！发现 {len(unknown_df)} 个生词。")
+        st.success(f"分析完成！生词: {len(unk_df)} | 熟词: {len(kn_df)}")
         
-        tab_unk, tab_kn, tab_anki = st.tabs(["🔴 生词表", "🟢 熟词表", "🎴 Anki 制卡"])
+        # 结果展示区
+        tab1, tab2 = st.tabs([f"🔴 生词表 ({len(unk_df)})", f"🟢 熟词表 ({len(kn_df)})"])
         
-        with tab_unk:
-            st.dataframe(unknown_df[['word', 'rank', 'context']], use_container_width=True)
-            csv = unknown_df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 下载生词 CSV", csv, "unknown.csv", "text/csv")
-
-        with tab_kn:
-            st.dataframe(known_df[['word', 'rank']], use_container_width=True)
-
-        with tab_anki:
-            st.info("已自动生成 Anki 导入格式 (正面:单词 | 背面:原句+排名)")
-            if not unknown_df.empty:
-                anki_df = pd.DataFrame()
-                anki_df['Front'] = unknown_df['word']
-                anki_df['Back'] = unknown_df['context'] + "<br><br>Rank: #" + unknown_df['rank'].astype(str)
+        # --- 生词 Tab ---
+        with tab1:
+            if not unk_df.empty:
+                st.dataframe(unk_df, use_container_width=True)
                 
-                anki_csv = anki_df.to_csv(index=False, header=False).encode('utf-8')
-                st.download_button("⚡ 下载 Anki 牌组", anki_csv, "anki_deck.csv", "text/csv")
+                col1, col2 = st.columns(2)
+                # 下载 CSV
+                csv_unk = unk_df.to_csv(index=False).encode('utf-8')
+                col1.download_button("📥 下载 CSV (Excel)", csv_unk, "unknown_words.csv", "text/csv")
+                
+                # 下载 TXT (只包含单词，一行一个，方便导入背单词软件)
+                txt_unk = "\n".join(unk_df['单词 (Word)'].tolist())
+                col2.download_button("📄 下载 TXT (纯单词)", txt_unk, "unknown_words.txt", "text/plain")
+            else:
+                st.info("太棒了！没有发现生词。")
+
+        # --- 熟词 Tab ---
+        with tab2:
+            if not kn_df.empty:
+                st.dataframe(kn_df, use_container_width=True)
+                
+                col3, col4 = st.columns(2)
+                # 下载 CSV
+                csv_kn = kn_df.to_csv(index=False).encode('utf-8')
+                col3.download_button("📥 下载 CSV (Excel)", csv_kn, "known_words.csv", "text/csv")
+                
+                # 下载 TXT
+                txt_kn = "\n".join(kn_df['单词 (Word)'].tolist())
+                col4.download_button("📄 下载 TXT (纯单词)", txt_kn, "known_words.txt", "text/plain")
+            else:
+                st.info("没有发现熟词（可能是阈值设置太低？）")
