@@ -23,41 +23,55 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 初始化 NLP 引擎 (NLTK + Lemminflect)
+# 2. 初始化 NLP 引擎 (强制本地路径修复)
 # ==========================================
 @st.cache_resource
-def download_nltk_resources():
-    """下载必要的 NLTK 数据包 (只运行一次)"""
-    try:
-        nltk.data.find('taggers/averaged_perceptron_tagger')
-    except LookupError:
-        nltk.download('averaged_perceptron_tagger')
-    try:
-        nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        nltk.download('punkt')
+def setup_nltk():
+    """
+    修复 Streamlit Cloud 找不到 NLTK 数据的问题。
+    强制下载数据到项目目录下的 nltk_data 文件夹。
+    """
+    # 1. 设置本地下载目录
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    nltk_data_dir = os.path.join(root_dir, 'nltk_data')
+    
+    if not os.path.exists(nltk_data_dir):
+        os.makedirs(nltk_data_dir)
+    
+    # 2. 告诉 NLTK 去这里找数据
+    nltk.data.path.append(nltk_data_dir)
+    
+    # 3. 强制下载所需包
+    packages = ['averaged_perceptron_tagger', 'punkt', 'averaged_perceptron_tagger_eng']
+    
+    for pkg in packages:
+        try:
+            # 尝试静默下载
+            nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
+        except:
+            pass # 如果某个包名字不对（比如新旧版本差异），跳过，防止卡死
 
-download_nltk_resources()
+setup_nltk()
 
 def get_display_case(word):
     """
-    智能判断大小写：
-    1. Sydney -> Sydney (专有名词保留大写)
-    2. ANTI -> anti (普通词强制小写)
-    3. Table -> table (普通词强制小写)
+    智能判断大小写 (带防崩溃机制)
     """
-    # 先把词变成 Title Case (首字母大写) 去测试，这样 NLTK 判断最准
-    test_word = word.title()
-    
-    # 获取词性标注
-    # NNP/NNPS 代表专有名词 (Proper Noun)
-    tags = nltk.pos_tag([test_word])
-    pos_tag = tags[0][1]
-    
-    if pos_tag.startswith('NNP'):
-        return test_word # 是人名/地名，返回 Sydney
-    else:
-        return word.lower() # 是普通词，返回 anti
+    # 兜底逻辑：如果 NLTK 还没准备好，默认全小写，防止报错
+    try:
+        test_word = word.title()
+        # 获取词性
+        tags = nltk.pos_tag([test_word])
+        pos_tag = tags[0][1]
+        
+        # NNP/NNPS 是专有名词
+        if pos_tag.startswith('NNP'):
+            return test_word
+        else:
+            return word.lower()
+    except Exception:
+        # 万一报错，优雅降级为小写
+        return word.lower()
 
 def smart_lemmatize(text):
     words = re.findall(r"[a-zA-Z']+", text)
@@ -96,7 +110,6 @@ def load_vocab():
         df[w_col] = df[w_col].astype(str).str.lower().str.strip()
         df[r_col] = pd.to_numeric(df[r_col], errors='coerce').fillna(99999)
         
-        # 排序并去重
         df = df.sort_values(r_col, ascending=True)
         df = df.drop_duplicates(subset=[w_col], keep='first')
         
@@ -108,7 +121,7 @@ vocab_dict = load_vocab()
 # ==========================================
 # 4. 界面布局
 # ==========================================
-st.title("🚀 Vocab Master Pro (Smart Case)")
+st.title("🚀 Vocab Master Pro (Fixed)")
 
 tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原 (Restore)", "📊 2. 单词分级 (Grade)"])
 
@@ -148,7 +161,6 @@ with tab_grade:
             st.error("❌ 词库未加载")
         elif btn_grade and grade_input:
             
-            # 1. 获取输入列表
             raw_items = []
             if "按行处理" in input_mode:
                 lines = grade_input.split('\n')
@@ -157,59 +169,50 @@ with tab_grade:
             else:
                 raw_items = grade_input.split()
             
-            # 2. 清洗与大小写处理
             seen = set()
             unique_items = []
             JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're'}
             
-            for item in raw_items:
-                item_cleaned = item.strip()
-                item_lower = item_cleaned.lower()
-                
-                # 过滤重复和垃圾词
-                if item_lower in seen: continue
-                if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
-                if item_lower in JUNK_WORDS: continue
-                
-                # === 核心修改：智能判断显示的大小写 ===
-                display_word = get_display_case(item_cleaned)
-                
-                seen.add(item_lower)
-                unique_items.append(display_word)
+            # 使用 NLTK 处理前，给个加载提示
+            with st.spinner("正在分析大小写..."):
+                for item in raw_items:
+                    item_cleaned = item.strip()
+                    item_lower = item_cleaned.lower()
+                    
+                    if item_lower in seen: continue
+                    if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
+                    if item_lower in JUNK_WORDS: continue
+                    
+                    # 智能大小写
+                    display_word = get_display_case(item_cleaned)
+                    
+                    seen.add(item_lower)
+                    unique_items.append(display_word)
             
-            # 3. 查词 (统一用小写查)
             data = []
             for item in unique_items:
                 lookup_key = item.lower()
                 rank = vocab_dict.get(lookup_key, 99999)
-                
                 cat = "beyond"
                 if rank <= current_level: cat = "known"
                 elif rank <= target_level: cat = "target"
-                
-                # data 里存的是 display_word (Sydney / anti)
                 data.append({"word": item, "rank": rank, "cat": cat})
             
-            # 4. 排序与展示
             df = pd.DataFrame(data)
             if not df.empty:
                 df = df.sort_values(by='rank', ascending=True)
-                
                 t1, t2, t3 = st.tabs([
                     f"🟡 重点 ({len(df[df['cat']=='target'])})", 
                     f"🔴 超纲 ({len(df[df['cat']=='beyond'])})", 
                     f"🟢 已掌握 ({len(df[df['cat']=='known'])})"
                 ])
-                
                 def show(cat_name):
                     sub = df[df['cat'] == cat_name]
-                    if sub.empty: 
-                        st.info("无")
+                    if sub.empty: st.info("无")
                     else:
                         txt = "\n".join(sub['word'].tolist())
                         st.code(txt, language='text')
                         st.caption("👆 点击右上角图标一键复制")
-
                 with t1: show("target")
                 with t2: show("beyond")
                 with t3: show("known")
