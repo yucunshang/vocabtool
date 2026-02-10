@@ -2,44 +2,50 @@ import streamlit as st
 import pandas as pd
 import re
 import os
-import spacy
+import sys
+import subprocess
 
-# ==========================================
-# 0. 核心引擎：加载 spaCy (工业级 NLP)
-# ==========================================
 st.set_page_config(page_title="Vibe Vocab Studio", page_icon="🧠", layout="wide")
 
+# ==========================================
+# 0. 核心：自动环境修复 (Self-Healing)
+# ==========================================
 @st.cache_resource
-def load_nlp():
+def load_spacy_model():
+    """
+    顽强的加载器：
+    1. 检查有没有 spacy，没有就报错
+    2. 检查有没有模型 en_core_web_sm，没有就现场下载
+    """
     try:
-        # 加载英语模型
-        return spacy.load("en_core_web_sm")
+        import spacy
+    except ImportError:
+        st.error("❌ 严重错误：requirements.txt 未生效，找不到 spacy 库。请尝试 Reboot App。")
+        st.stop()
+
+    model_name = "en_core_web_sm"
+    try:
+        # 尝试直接加载
+        nlp = spacy.load(model_name)
     except OSError:
-        # 如果通过链接安装失败，尝试直接下载（通常 requirements 写了链接不需要这步）
-        from spacy.cli import download
-        download("en_core_web_sm")
-        return spacy.load("en_core_web_sm")
+        # 如果报错说找不到模型，就调用命令行下载
+        st.warning(f"正在自动下载语言模型 {model_name}... (初次运行需要 1 分钟)")
+        try:
+            # 使用 subprocess 调用安装命令
+            subprocess.check_call([sys.executable, "-m", "spacy", "download", model_name])
+            nlp = spacy.load(model_name)
+        except Exception as e:
+            st.error(f"模型下载失败，请检查网络或日志: {e}")
+            st.stop()
+            
+    return nlp
 
-try:
-    nlp = load_nlp()
-    NLP_STATUS = "✅ spaCy 引擎就绪"
-except Exception as e:
-    st.error(f"spaCy 模型加载失败: {e}")
-    st.stop()
-
-def get_lemma_spacy(word):
-    """
-    使用 spaCy 进行精准还原
-    families -> family
-    are -> be
-    went -> go
-    """
-    doc = nlp(word)
-    # 取第一个词的 lemma_ (原形)
-    return doc[0].lemma_.lower()
+# 加载 NLP 引擎
+nlp = load_spacy_model()
+st.sidebar.success("✅ spaCy 引擎已就绪")
 
 # ==========================================
-# 1. 词库加载 (保持之前的稳健逻辑)
+# 1. 词库加载 (针对 coca_cleaned.csv 优化)
 # ==========================================
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv", "COCA20000词Excel版.xlsx - Sheet1.csv"]
 
@@ -56,10 +62,13 @@ def load_vocab():
     # 优先读 coca_cleaned (标准格式)
     if 'cleaned' in file_path:
         try:
+            # 你的 coca_cleaned.csv 是标准的 word, rank 格式
             df = pd.read_csv(file_path)
-            if 'word' in df.columns and 'rank' in df.columns:
-                vocab = pd.Series(df['rank'].values, index=df['word'].astype(str)).to_dict()
-                return vocab, "加载成功 (Cleaned)"
+            # 强制小写去空格
+            df['word'] = df['word'].astype(str).str.lower().str.strip()
+            # 建立索引
+            vocab = pd.Series(df['rank'].values, index=df['word']).to_dict()
+            return vocab, "加载成功 (Cleaned)"
         except: pass
 
     # 兜底读原始文件
@@ -84,28 +93,33 @@ def load_vocab():
 vocab_dict, msg = load_vocab()
 
 # ==========================================
-# 2. 界面显示与状态自检
+# 2. 界面显示
 # ==========================================
-st.title("🧠 Vibe Vocab v10.0 (spaCy 版)")
-st.caption("工业级 NLP 引擎 · 彻底解决变体识别问题")
+st.title("🧠 Vibe Vocab v11.0 (自动修复版)")
+st.caption("spaCy 驱动 · 自动下载模型 · 彻底解决还原问题")
 
 if not vocab_dict:
     st.error(msg)
     st.stop()
 
-# 侧边栏：状态面板
-st.sidebar.success(NLP_STATUS)
 st.sidebar.info(f"📚 词库: {msg}")
 
-# === 关键自检区 ===
+# === 验证区 ===
 st.sidebar.markdown("---")
-st.sidebar.markdown("**🔍 还原测试:**")
-test_words = ["are", "went", "families", "better", "running"]
-for t in test_words:
-    res = get_lemma_spacy(t)
-    st.sidebar.text(f"{t} -> {res}")
-st.sidebar.markdown("*(如果 'are' 变成了 'be'，说明成功！)*")
-# ===================
+with st.sidebar.expander("🔍 还原 & 排名测试", expanded=True):
+    # 测试还原
+    doc = nlp("families are better")
+    res = [token.lemma_ for token in doc]
+    st.write(f"families are better -> {res}")
+    
+    # 测试排名
+    check_be = vocab_dict.get('be', 'Not Found')
+    st.write(f"'be' rank: {check_be}")
+    
+    if check_be == 'Not Found' or check_be > 100:
+        st.error("⚠️ 词库读取可能有误，'be' 的排名不对！")
+    else:
+        st.success("✅ 词库读取正常")
 
 vocab_range = st.sidebar.slider("学习区间", 1, 20000, (6000, 8000), 500)
 r_start, r_end = vocab_range
@@ -114,44 +128,39 @@ r_start, r_end = vocab_range
 # 3. 核心处理逻辑 (spaCy)
 # ==========================================
 def process_text(text):
-    # 使用 spaCy 处理整个文本，它能根据上下文更精准地还原
+    # 使用 spaCy 处理整个文本
     doc = nlp(text.lower())
-    
-    # 提取单词并去重
-    # token.is_alpha 过滤掉标点和数字
-    # token.lemma_ 直接拿到还原后的词
     
     seen_lemmas = set()
     unique_items = []
     
     for token in doc:
+        # 只保留字母，且长度大于1
         if token.is_alpha and len(token.text) > 1:
-            lemma = token.lemma_.lower()
+            lemma = token.lemma_.lower() # 这里拿到的就是 family, be, go
             original = token.text.lower()
-            
-            # 排除停用词(如 the, is, a)的干扰，这里我们依靠词库排名来过滤
-            # 但 spaCy 的 is_stop 也可以用，不过我们暂不开启，完全信任词库排名
             
             if lemma not in seen_lemmas:
                 unique_items.append((original, lemma))
                 seen_lemmas.add(lemma)
     
-    # 排序以便查看
-    unique_items.sort(key=lambda x: x[1])
-
-    known, target, beyond = [], [], []
+    # 按排名排序逻辑
+    # 我们先查 rank，再排序
+    processed_list = []
     
     for original, lemma in unique_items:
         rank = 99999
-        match = lemma # 默认用还原后的词去查
+        match = lemma # 默认用还原后的词(family)去查
         note = ""
 
-        # 1. 查还原后的词 (be, family, go)
+        # 1. 查还原后的词 (family)
         if lemma in vocab_dict:
             rank = vocab_dict[lemma]
             if original != lemma:
-                note = f"<{original}>"
-        # 2. 兜底查原词 (有时候词库里收录的是 families 而不是 family)
+                note = f"<{original}>" # 备注：原词是 families
+        
+        # 2. 如果还原后的词没查到，或者是生词(rank>20000)，再试试原词(families)
+        # (防止 spaCy 还原错误，或者词库里只收录了变形体)
         elif original in vocab_dict:
             r_orig = vocab_dict[original]
             if r_orig < rank:
@@ -159,13 +168,19 @@ def process_text(text):
                 match = original
                 note = ""
 
-        item = {'单词': match, '排名': int(rank), '备注': note}
-        
-        if rank <= r_start: known.append(item)
-        elif r_start < rank <= r_end: target.append(item)
-        else: beyond.append(item)
+        processed_list.append({'单词': match, '排名': int(rank), '备注': note})
 
-    return pd.DataFrame(known), pd.DataFrame(target), pd.DataFrame(beyond)
+    # 转 DataFrame
+    df_all = pd.DataFrame(processed_list)
+    if df_all.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    # 分类
+    known = df_all[df_all['排名'] <= r_start]
+    target = df_all[(df_all['排名'] > r_start) & (df_all['排名'] <= r_end)]
+    beyond = df_all[df_all['排名'] > r_end]
+    
+    return known, target, beyond
 
 # ==========================================
 # 4. 主界面
@@ -176,7 +191,7 @@ if st.button("🚀 开始分析 (spaCy Powered)", type="primary"):
     if not text_input.strip():
         st.warning("请输入内容")
     else:
-        with st.spinner("spaCy 正在深度分析..."):
+        with st.spinner("spaCy 正在加载模型并分析..."):
             df_k, df_t, df_b = process_text(text_input)
         
         st.success("分析完成")
