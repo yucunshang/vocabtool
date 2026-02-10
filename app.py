@@ -95,7 +95,7 @@ def smart_lemmatize(text):
     return " ".join(results)
 
 # ==========================================
-# 4. 词库加载
+# 4. 词库加载 (含紧急修复补丁)
 # ==========================================
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv"]
 
@@ -117,10 +117,21 @@ def load_vocab():
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
         except: pass
     
+    # 1. 注入常规补丁词库
     for word, rank in BUILTIN_PATCH_VOCAB.items():
-        if word not in vocab: vocab[word] = rank
-        else:
-            if vocab[word] > 20000: vocab[word] = rank
+        vocab[word] = rank
+        
+    # 2. 核心修复：修复 COCA 词频表中被“同形异义词”污染的专有名词
+    # 比如不让 China 去查 china(瓷器:9255)，不让 March 去查 march(行军:2500)
+    URGENT_OVERRIDES = {
+        "china": 400, "turkey": 1500, "march": 500, "may": 100, "august": 1500, "polish": 2500,
+        "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
+        "january": 400, "february": 400, "april": 400, "june": 400, "july": 400, "september": 400, "october": 400, "november": 400, "december": 400,
+        "usa": 200, "uk": 200, "google": 1000, "apple": 1000, "microsoft": 1500
+    }
+    for word, rank in URGENT_OVERRIDES.items():
+        vocab[word] = rank
+        
     return vocab
 
 vocab_dict = load_vocab()
@@ -177,7 +188,7 @@ def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list
     return prompt
 
 # ==========================================
-# 6. 通用分析函数 (彻底扁平化)
+# 6. 通用分析函数 (保留真实难度)
 # ==========================================
 def analyze_text(raw_text, mode="auto"):
     raw_items = []
@@ -201,9 +212,10 @@ def analyze_text(raw_text, mode="auto"):
         if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
         if item_lower in JUNK_WORDS: continue
         
+        # 获取该词在词典中的真实 Rank
         actual_rank = vocab_dict.get(item_lower, 99999)
         
-        # 1. 术语身份：保留领域后缀，赋予真实 Rank
+        # 1. 术语身份
         if item_lower in BUILTIN_TECHNICAL_TERMS:
             domain = BUILTIN_TECHNICAL_TERMS[item_lower]
             term_rank = actual_rank if actual_rank != 99999 else 15000
@@ -212,27 +224,27 @@ def analyze_text(raw_text, mode="auto"):
                 "rank": term_rank,
                 "raw": item_lower
             })
+            seen.add(item_lower)
+            continue
         
-        is_proper_or_ambiguous = False
-        
-        # 2. 专名与歧义词：强制赋权 1000，当成普通词
+        # 2. 专名身份 (保留真实难度！)
         if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
             display = PROPER_NOUNS_DB.get(item_lower, item_cleaned.title())
             unique_items.append({
                 "word": display,
-                "rank": 1000, # 基础权重 1000
+                "rank": actual_rank, 
                 "raw": item_lower
             })
-            is_proper_or_ambiguous = True
+            seen.add(item_lower)
+            continue
             
-        # 3. 纯普通词
-        if not is_proper_or_ambiguous:
-            if actual_rank != 99999:
-                unique_items.append({
-                    "word": item_cleaned,
-                    "rank": actual_rank,
-                    "raw": item_lower
-                })
+        # 3. 普通身份
+        if actual_rank != 99999:
+            unique_items.append({
+                "word": item_cleaned,
+                "rank": actual_rank,
+                "raw": item_lower
+            })
         
         seen.add(item_lower)
         
@@ -269,14 +281,14 @@ elif "单词分级" in app_mode:
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         input_mode = st.radio("识别模式:", ("自动分词", "按行处理"), horizontal=True)
-        grade_input = st.text_area("input_box", height=400, placeholder="China\nchina\nmotion\nrun", label_visibility="collapsed")
+        grade_input = st.text_area("input_box", height=400, placeholder="China\nTesla\nmotion\nrun", label_visibility="collapsed")
         btn_grade = st.button("开始分级", type="primary", use_container_width=True)
 
     with g_col2:
         if btn_grade and grade_input and vocab_dict:
             df = analyze_text(grade_input, input_mode)
             if not df.empty:
-                # 终极极简分类：完全依照词频，不再有特权分类
+                # 终极极简分类：不再区分是不是专名，只看 rank 难度
                 def categorize(row):
                     r = row['rank']
                     if r <= current_level: return "known"
@@ -286,7 +298,7 @@ elif "单词分级" in app_mode:
                 df['final_cat'] = df.apply(categorize, axis=1)
                 df = df.sort_values(by='rank')
 
-                # 只有三大 Tab
+                # 只保留三大难度区间
                 t_known, t_target, t_beyond = st.tabs([
                     f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
                     f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
@@ -307,10 +319,12 @@ elif "单词分级" in app_mode:
                                 else:
                                     display_lines.append(row['word'])
                             
-                            # 直接展示，不要 expander
-                            st.code("\n".join(display_lines), language='text')
+                            # 恢复折叠框
+                            with st.expander("👁️ 查看列表", expanded=False):
+                                st.code("\n".join(display_lines), language='text')
                             
                             st.markdown(f"**🤖 AI 指令 ({label})**")
+                            # 检测是否存在术语 (决定要不要传 term 指令)
                             has_term = any('(' in w for w in pure_words)
                             
                             p_csv = generate_ai_prompt(pure_words, 'csv', def_mode, is_term_list=has_term)
@@ -326,7 +340,7 @@ elif "单词分级" in app_mode:
                 render_tab(t_beyond, "beyond", "超纲", def_mode="single") 
 
 elif "Top N" in app_mode:
-    st.info("💡 此模式自动过滤简单词，按 **由易到难** 挑选。")
+    st.info("💡 此模式自动过滤简单词，按 **由易到难** 挑选。所有单词(含专名/术语)均采用真实词频过滤。")
     
     c_set1, c_set2, c_set3 = st.columns([1, 1, 1])
     with c_set1: top_n = st.number_input("🎯 筛选数量", 10, 500, 50, 10)
@@ -337,7 +351,7 @@ elif "Top N" in app_mode:
         
     c_input, c_btn = st.columns([3, 1])
     with c_input:
-        topn_input = st.text_area("输入", height=150, placeholder="China\nchina\nmotion\nrun", label_visibility="collapsed")
+        topn_input = st.text_area("输入", height=150, placeholder="China\nTesla\nmotion\nrun", label_visibility="collapsed")
     with c_btn:
         btn_topn = st.button("🎲 生成精选", type="primary", use_container_width=True)
 
@@ -372,7 +386,9 @@ elif "Top N" in app_mode:
                         else:
                             display_lines.append(row['word'])
                             
-                    st.code("\n".join(display_lines), language='text')
+                    # 恢复折叠框
+                    with st.expander("👁️ 查看列表", expanded=True):
+                        st.code("\n".join(display_lines), language='text')
                     
                     st.markdown("**🤖 AI 指令 (核心单义)**")
                     has_term = any('(' in w for w in pure_words)
@@ -399,7 +415,9 @@ elif "Top N" in app_mode:
                         else:
                             display_lines_r.append(row['word'])
                             
-                    st.code("\n".join(display_lines_r), language='text')
+                    # 恢复折叠框
+                    with st.expander("👁️ 查看列表", expanded=False):
+                        st.code("\n".join(display_lines_r), language='text')
                     
                     st.markdown("**🤖 AI 指令 (备用)**")
                     has_term_r = any('(' in w for w in pure_words_r)
