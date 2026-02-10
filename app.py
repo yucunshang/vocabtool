@@ -20,15 +20,16 @@ st.markdown("""
     footer {visibility: hidden;}
     .block-container { padding-top: 1rem; }
     
-    /* 强调用途提示框 */
-    .stAlert {
+    /* 调整单选按钮样式 */
+    .stRadio > label {
         font-weight: bold;
+        color: #1f77b4;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 内置词库 (地名/时间/品牌白名单)
+# 2. 内置词库 (白名单)
 # ==========================================
 PROPER_NOUNS_DB = {
     "usa": "USA", "uk": "UK", "america": "America", "england": "England",
@@ -125,16 +126,25 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 5. 核心：AI 指令生成器 (优化版)
+# 5. 核心：AI 指令生成器 (支持格式选择)
 # ==========================================
-def generate_ai_prompt(word_list):
+def generate_ai_prompt(word_list, output_format):
     """
     生成符合用户“终极目标”的 Prompt
+    output_format: 'csv' 或 'txt'
     """
     words_str = ", ".join(word_list)
     
+    # 动态调整指令中的格式要求
+    if output_format == 'csv':
+        format_req = "CSV Code Block (后缀名 .csv)"
+        format_desc = "请直接输出标准 CSV 代码块。"
+    else:
+        format_req = "TXT Code Block (后缀名 .txt)"
+        format_desc = "请输出纯文本 TXT 代码块。"
+
     prompt = f"""
-请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表，请严格按照以下【终极制卡标准】为我生成导入内容。
+请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表，请严格按照以下【终极制卡标准】为我生成导入文件。
 
 1. 核心原则：原子性 (Atomicity)
 - 含义拆分：若单词有多个不同含义，拆分为多条数据。
@@ -148,9 +158,10 @@ def generate_ai_prompt(word_list):
 - 格式：HTML 排版，包含三部分，必须使用 <br><br> 分隔。
 - 结构：英文释义<br><br><em>斜体例句</em><br><br>【词根词缀】中文解析
 
-4. 输出格式标准 (CSV Code Block)
-- 请直接输出 CSV 代码块。
-- 英文逗号分隔，每个字段用双引号包裹。
+4. 输出格式标准 ({format_req})
+- {format_desc}
+- 关键格式：使用英文逗号 (,) 分隔，且每个字段内容必须用英文双引号 ("...") 包裹 (防止 HTML 内容冲突)。
+- 示例： "Front Content","Back Content"
 
 待处理单词：
 {words_str}
@@ -160,9 +171,9 @@ def generate_ai_prompt(word_list):
 # ==========================================
 # 6. 界面布局
 # ==========================================
-st.title("🚀 Vocab Master Pro (AI Command)")
+st.title("🚀 Vocab Master Pro (Format Select)")
 
-tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原", "📊 2. 单词分级 (含指令)"])
+tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原", "📊 2. 单词分级 (AI 指令)"])
 
 # --- Tab 1 ---
 with tab_lemma:
@@ -244,25 +255,31 @@ with tab_grade:
                     if sub.empty: 
                         st.info("无")
                     else:
-                        # 1. 单词列表 (一键复制)
                         st.markdown(f"**1. {label} 列表**")
                         words = sub['word'].tolist()
                         st.code("\n".join(words), language='text')
                         
-                        # 2. AI 指令 (核心优化点)
                         st.divider()
                         st.markdown(f"**2. AI 制卡指令 ({label})**")
                         
-                        # 提示语
+                        # === 新增：格式选择器 ===
+                        # 使用 key 区分不同 tab 的选择器
+                        fmt_option = st.radio(
+                            "选择 AI 生成格式:", 
+                            ("CSV (.csv)", "TXT (.txt)"), 
+                            horizontal=True,
+                            key=f"fmt_{cat_name}"
+                        )
+                        
+                        output_fmt = 'csv' if 'CSV' in fmt_option else 'txt'
+                        
                         st.info("💡 适用于：DeepSeek / ChatGPT / Claude / Gemini / Kimi 等任意 AI")
                         
-                        # 生成指令
-                        prompt = generate_ai_prompt(words)
+                        # 传入选择的格式
+                        prompt = generate_ai_prompt(words, output_fmt)
                         
-                        # === 关键优化：使用 st.code 实现一键复制 ===
-                        # 以前是 text_area 需要全选，现在点击右上角图标即可
                         st.code(prompt, language='markdown')
-                        st.caption("👆 点击右上角图标，一键复制完整指令，发送给 AI 即可。")
+                        st.caption("👆 点击右上角图标，一键复制指令。")
 
                 with t1: show("target", "重点词")
                 with t2: show("proper", "专有名词")
