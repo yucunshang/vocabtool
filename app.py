@@ -4,154 +4,193 @@ import os
 import sys
 import subprocess
 
-# 设置页面
-st.set_page_config(page_title="Vibe Vocab Studio", page_icon="🧠", layout="wide")
+# ==========================================
+# 1. Google Translate 风格配置
+# ==========================================
+st.set_page_config(layout="wide", page_title="Vocab Analyzer", page_icon="🅰️")
+
+# 自定义 CSS 让界面更像 Google Translate (大文本框、清爽字体)
+st.markdown("""
+<style>
+    .stTextArea textarea {
+        font-size: 18px !important;
+        line-height: 1.5 !important;
+        font-family: 'Roboto', sans-serif;
+    }
+    .stNumberInput input {
+        font-weight: bold;
+        color: #1a73e8;
+    }
+    /* 隐藏部分多余的元素 */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ==========================================
-# 0. 核心引擎：自修复式加载逻辑
+# 2. 核心引擎 (spaCy + 自动修复)
 # ==========================================
 @st.cache_resource
 def load_nlp():
-    import spacy
+    try:
+        import spacy
+    except ImportError:
+        return None
+    
     model_name = "en_core_web_sm"
     try:
-        # 尝试正常加载
         return spacy.load(model_name)
-    except OSError:
-        # 如果加载失败（说明没安装），则在运行时强行下载
-        st.warning(f"正在初始化语言模型 ({model_name})... 首次运行需要 30-60 秒，请勿刷新。")
+    except:
+        # 自动下载模型（防止报错）
         try:
-            # 使用子进程调用命令行下载
-            subprocess.run([sys.executable, "-m", "spacy", "download", model_name], check=True)
-            st.success("模型安装成功！正在加载...")
+            subprocess.check_call([sys.executable, "-m", "spacy", "download", model_name])
             return spacy.load(model_name)
-        except Exception as e:
-            st.error(f"模型自动安装失败: {str(e)}")
+        except:
             return None
 
-nlp = load_nlp()
-
 # ==========================================
-# 1. 词库加载逻辑
+# 3. 词库加载 (静默加载，不报错)
 # ==========================================
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv"]
 
 @st.cache_data
 def load_vocab():
     file_path = next((f for f in POSSIBLE_FILES if os.path.exists(f)), None)
-    if not file_path:
-        return None, "❌ 未找到词库文件（coca_cleaned.csv）"
+    if not file_path: return None
+    
     try:
         df = pd.read_csv(file_path)
-        # 清洗列名
-        df.columns = [str(c).strip().lower() for c in df.columns]
+        # 极简清洗
+        cols = [str(c).strip().lower() for c in df.columns]
+        df.columns = cols
         
-        # 智能匹配列
-        w_col = 'word' if 'word' in df.columns else df.columns[0]
-        r_col = 'rank' if 'rank' in df.columns else df.columns[1]
+        # 智能找列
+        w_col = next((c for c in cols if 'word' in c or '单词' in c), cols[0])
+        r_col = next((c for c in cols if 'rank' in c or '排序' in c), cols[1])
         
-        # 统一格式
         df[w_col] = df[w_col].astype(str).str.lower().str.strip()
+        df[r_col] = pd.to_numeric(df[r_col], errors='coerce').fillna(99999)
         
-        # 构建字典
-        vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
-        return vocab, f"✅ 词库加载成功: {file_path}"
-    except Exception as e:
-        return None, f"❌ 读取失败: {str(e)}"
+        return pd.Series(df[r_col].values, index=df[w_col]).to_dict()
+    except:
+        return None
 
-vocab_dict, status_msg = load_vocab()
-
-# ==========================================
-# 2. 侧边栏与 UI
-# ==========================================
-st.title("🧠 Vibe Vocab v13.0 (自修复版)")
-
-if nlp is None:
-    st.error("🚨 核心组件加载失败，请检查日志。")
-    st.stop()
-
-if not vocab_dict:
-    st.error(status_msg)
-    st.stop()
-
-with st.sidebar:
-    st.success("引擎状态：在线 🟢")
-    st.info(status_msg)
-    st.divider()
-    v_range = st.slider("设定学习区间", 1, 20000, (6000, 8000), 500)
-    r_start, r_end = v_range
-    st.write(f"🟢 熟词: 1-{r_start}")
-    st.write(f"🟡 重点: {r_start}-{r_end}")
-    st.write(f"🔴 超纲: {r_end}+")
+# 初始化资源
+nlp = load_nlp()
+vocab = load_vocab()
 
 # ==========================================
-# 3. 核心处理逻辑
+# 4. 界面布局 (Top Bar + Split View)
 # ==========================================
-def process_text_pro(text):
-    doc = nlp(text.lower())
-    results = []
-    seen_lemmas = set()
+
+# --- 顶部：设置栏 ---
+c1, c2, c3 = st.columns([1, 1, 3])
+with c1:
+    # 步长 500，默认 6000
+    current_level = st.number_input("当前词汇量", min_value=0, max_value=20000, value=6000, step=500)
+with c2:
+    # 步长 500，默认 8000
+    target_level = st.number_input("目标词汇量", min_value=0, max_value=20000, value=8000, step=500)
+with c3:
+    st.write("") # 占位
+
+# --- 主体：左右分栏 ---
+st.divider()
+left_col, right_col = st.columns([1, 1])
+
+# === 左侧：输入区 ===
+with left_col:
+    st.markdown("### 📝 输入文本")
+    text_input = st.text_area(
+        label="hidden_label",
+        placeholder="在此粘贴英语文章...",
+        height=500,
+        label_visibility="collapsed"
+    )
     
-    for token in doc:
-        if token.is_alpha and len(token.text) > 1:
-            # 词形还原核心
-            lemma = token.lemma_.lower()
-            original = token.text.lower()
+    # 放在左侧底部的按钮
+    analyze_btn = st.button("开始分析 / Analyze", type="primary", use_container_width=True)
+
+# === 右侧：结果区 ===
+with right_col:
+    st.markdown("### 📊 分析结果")
+    
+    if not nlp:
+        st.error("正在初始化 NLP 引擎，请稍等或刷新...")
+    elif not vocab:
+        st.error("未找到词库文件 (coca_cleaned.csv)，请先上传。")
+    elif analyze_btn and text_input:
+        
+        with st.spinner("正在拆解文本..."):
+            # 1. spaCy 处理 (增加 max_length 防止大文本报错)
+            nlp.max_length = 2000000 
+            doc = nlp(text_input.lower())
             
-            if lemma not in seen_lemmas:
-                rank = vocab_dict.get(lemma, 99999)
+            # 2. 提取与还原
+            seen = set()
+            data = []
+            
+            for token in doc:
+                if token.is_alpha and len(token.text) > 1:
+                    lemma = token.lemma_ # 还原: families -> family
+                    if lemma not in seen:
+                        rank = vocab.get(lemma, 99999)
+                        
+                        # 二次查找逻辑 (防止 spaCy 还原过度)
+                        if rank == 99999 and token.text in vocab:
+                            rank = vocab[token.text]
+                            lemma = token.text
+                            
+                        data.append({'word': lemma, 'rank': int(rank)})
+                        seen.add(lemma)
+            
+            # 3. 分组
+            df = pd.DataFrame(data)
+            if not df.empty:
+                df = df.sort_values('rank')
                 
-                # 二次查找逻辑
-                if rank == 99999 and original in vocab_dict:
-                    rank = vocab_dict[original]
-                    display_word = original
-                else:
-                    display_word = lemma
+                # 三个桶
+                known = df[df['rank'] <= current_level]
+                target = df[(df['rank'] > current_level) & (df['rank'] <= target_level)]
+                beyond = df[df['rank'] > target_level]
                 
-                results.append({
-                    '单词': display_word,
-                    '原文': original if original != display_word else "-",
-                    '排名': int(rank)
-                })
-                seen_lemmas.add(lemma)
+                # 4. 显示结果 (Tabs)
+                t1, t2, t3 = st.tabs([
+                    f"🟡 重点词 ({len(target)})", 
+                    f"🔴 超纲词 ({len(beyond)})", 
+                    f"🟢 已掌握 ({len(known)})"
+                ])
+                
+                # 定义一个简单的文本渲染函数
+                def render_list(dataframe, color_code):
+                    if dataframe.empty:
+                        st.info("列表为空")
+                        return
+                    
+                    # 生成简单的文本列表格式
+                    # 格式: 1. word (Rank: 123)
+                    lines = []
+                    for _, row in dataframe.iterrows():
+                        lines.append(f"• **{row['word']}** _(Rank: {row['rank']})_")
+                    
+                    # 使用 markdown 显示，带滚动条容器
+                    with st.container(height=400):
+                        st.markdown("\n".join(lines))
 
-    if not results:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-    df = pd.DataFrame(results).sort_values('排名')
-    known = df[df['排名'] <= r_start]
-    target = df[(df['排名'] > r_start) & (df['排名'] <= r_end)]
-    beyond = df[df['排名'] > r_end]
-    return known, target, beyond
-
-# ==========================================
-# 4. 主界面交互
-# ==========================================
-text_input = st.text_area("在此粘贴你的英文文章/小说内容:", height=200)
-
-if st.button("🚀 开始精准分析", type="primary"):
-    if not text_input.strip():
-        st.warning("请输入文本内容")
+                with t1:
+                    render_list(target, "orange")
+                with t2:
+                    render_list(beyond, "red")
+                with t3:
+                    render_list(known, "green")
+            else:
+                st.warning("未检测到有效英文单词。")
+                
+    elif analyze_btn and not text_input:
+        st.warning("请先在左侧粘贴文本。")
     else:
-        with st.spinner("正在分析中..."):
-            df_k, df_t, df_b = process_text_pro(text_input)
-        
-        st.success(f"分析完成！找到重点词: {len(df_t)} 个")
-        
-        tab1, tab2, tab3 = st.tabs([
-            f"🟡 重点突破 ({len(df_t)})", 
-            f"🔴 生词/超纲 ({len(df_b)})", 
-            f"🟢 熟词表 ({len(df_k)})"
-        ])
-        
-        with tab1:
-            st.dataframe(df_t, use_container_width=True)
-            if not df_t.empty:
-                csv_t = df_t.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 下载重点词 CSV", csv_t, "target.csv", "text/csv")
-            
-        with tab2:
-            st.dataframe(df_b, use_container_width=True)
-            
-        with tab3:
-            st.dataframe(df_k, use_container_width=True)
+        st.info("等待输入...")
