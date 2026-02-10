@@ -2,13 +2,13 @@ import streamlit as st
 import pandas as pd
 import re
 import os
-import simplemma
+import simplemma  # 新增：智能还原库
 
 st.set_page_config(page_title="Vibe Vocab Studio", page_icon="🧠", layout="wide")
 
 # --- 1. 智能加载配置 ---
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv", "COCA20000词Excel版.xlsx - Sheet1.csv"]
-LANG_DATA = simplemma.load_data('en') # 加载英语还原库
+LANG_DATA = simplemma.load_data('en') # 加载英语数据
 
 @st.cache_data
 def load_vocab():
@@ -27,18 +27,18 @@ def load_vocab():
         except:
             df = pd.read_csv(file_path, encoding='gbk')
 
-        # 清洗列名
+        # 智能清洗列名
         df.columns = [str(c).strip().lower().replace('\n', '') for c in df.columns]
         
-        # 智能找列
+        # 模糊匹配列名
         rank_col = next((c for c in df.columns if any(k in c for k in ['rank', '排名', '序号', '词频'])), None)
         word_col = next((c for c in df.columns if any(k in c for k in ['word', '单词', '词汇'])), None)
         
+        # 兜底
         if not word_col: word_col = df.columns[0]
         if not rank_col: rank_col = df.columns[3] if len(df.columns) > 3 else df.columns[0]
 
         # 建立字典: word -> rank
-        # 关键优化：把词库里的词也都做一次还原，确保命中率
         vocab_dict = pd.Series(
             pd.to_numeric(df[rank_col], errors='coerce').fillna(99999).values, 
             index=df[word_col].astype(str).str.lower().str.strip()
@@ -49,10 +49,10 @@ def load_vocab():
         st.error(f"词库加载出错: {e}")
         return None
 
-# --- 2. 核心逻辑 (v4.0 强力还原版) ---
+# --- 2. 核心逻辑 (v4.0 智能还原) ---
 def process_text_smart(text, vocab_dict, range_start, range_end):
     text_lower = text.lower()
-    # 提取单词
+    # 提取单词 (支持带撇号如 user's)
     words = re.findall(r'\b[a-z\']{2,}\b', text_lower)
     unique_words = sorted(list(set(words)))
     
@@ -61,22 +61,22 @@ def process_text_smart(text, vocab_dict, range_start, range_end):
     tier_beyond = []  
     
     for w in unique_words:
-        # === 核心修改：三级跳查词法 ===
         rank = 999999
         match_word = w
         
-        # 1. 查原词 (比如 "apple")
+        # === 智能查词三部曲 ===
+        # 1. 查原形
         if w in vocab_dict:
             rank = vocab_dict[w]
             match_word = w
         else:
-            # 2. 查还原后的词 (比如 "went" -> "go", "countries" -> "country")
+            # 2. 查还原形 (went -> go)
             lemma = simplemma.lemmatize(w, LANG_DATA)
             if lemma in vocab_dict:
                 rank = vocab_dict[lemma]
-                match_word = lemma # 修正显示为原形，方便学习
+                match_word = lemma # 显示为原形
             else:
-                # 3. 最后的挣扎 (去掉 's 等)
+                # 3. 查简单变体 (处理 's 等)
                 if w.endswith("'s") and w[:-2] in vocab_dict:
                     rank = vocab_dict[w[:-2]]
                     match_word = w[:-2]
@@ -89,12 +89,12 @@ def process_text_smart(text, vocab_dict, range_start, range_end):
         elif range_start < rank <= range_end:
             tier_target.append(item)
         else:
-            # 如果原文和还原后是一样的，只显示一个列
+            # 如果原文和单词一样，原文列显示横线，保持表格整洁
             if item['单词 (Word)'] == item['原文 (Original)']:
                 item['原文 (Original)'] = '-'
             tier_beyond.append(item)
 
-    # 结果生成
+    # 转 DataFrame
     def to_df(data):
         if not data: return pd.DataFrame()
         return pd.DataFrame(data).sort_values('排名 (Rank)').drop_duplicates(subset=['单词 (Word)'])
@@ -103,19 +103,19 @@ def process_text_smart(text, vocab_dict, range_start, range_end):
 
 # --- 3. 界面 UI ---
 st.title("🧠 Vibe Vocab v4.0 (智能还原版)")
-st.caption("Simplemma 驱动 · 完美处理变体/不规则动词")
+st.caption("Simplemma 驱动 · 完美解决不规则动词问题")
 
 vocab_dict = load_vocab()
 if not vocab_dict:
-    st.error("❌ 找不到词库文件！")
+    st.error("❌ 找不到词库！请确认 GitHub 上传了 csv 文件。")
     st.stop()
 
 st.sidebar.header("⚙️ 学习规划")
-st.sidebar.success(f"📚 词库已就绪")
+st.sidebar.success(f"📚 词库加载成功")
 
-st.sidebar.subheader("设定范围")
+st.sidebar.subheader("设定学习区间")
 vocab_range = st.sidebar.slider(
-    "选择区间：", 1, 20000, (6000, 8000), 500
+    "拖动滑块：", 1, 20000, (6000, 8000), 500
 )
 range_start, range_end = vocab_range
 
@@ -159,21 +159,20 @@ if st.button("🚀 开始智能分析", type="primary"):
         ])
         
         with t1:
-            st.markdown(f"### 🎯 你的核心学习区 ({range_start}-{range_end})")
+            st.markdown(f"### 🎯 重点学习 ({range_start}-{range_end})")
             if not df_target.empty:
                 st.dataframe(df_target, use_container_width=True)
                 show_download_buttons(df_target, "target_words")
             else:
-                st.info("没有发现此区间的单词。")
+                st.info("太棒了！此区间无生词。")
 
         with t2:
             st.markdown(f"### 🚀 超纲词 (>{range_end})")
-            # 超纲词往往是还原失败的，或者真的很偏
             if not df_beyond.empty:
                 st.dataframe(df_beyond, use_container_width=True)
                 show_download_buttons(df_beyond, "beyond_words")
             else:
-                st.info("没有超纲词汇！")
+                st.info("没有超纲词。")
 
         with t3:
             st.markdown(f"### ✅ 已掌握 (<{range_start})")
@@ -181,4 +180,4 @@ if st.button("🚀 开始智能分析", type="primary"):
                 st.dataframe(df_known, use_container_width=True)
                 show_download_buttons(df_known, "known_words")
             else:
-                st.info("没有发现熟词。")
+                st.info("无熟词。")
