@@ -10,22 +10,38 @@ import nltk
 # ==========================================
 st.set_page_config(layout="wide", page_title="Vocab Master Pro", page_icon="🚀")
 
+# === CSS 样式优化：适配深色模式 (Dark Mode) ===
 st.markdown("""
 <style>
+    /* 优化代码块字体 */
     .stCode {
         font-family: 'Consolas', 'Courier New', monospace !important;
         font-size: 16px !important;
     }
+    
+    /* 隐藏页眉页脚和侧边栏按钮 */
     header {visibility: hidden;}
     footer {visibility: hidden;}
     .block-container { padding-top: 1rem; }
+    [data-testid="stSidebarCollapsedControl"] {display: none;}
+
+    /* === 核心修改：Radio Group 适配深色模式 === */
+    /* 使用 var(--变量名) 代替固定颜色，让 Streamlit 自动接管颜色 */
     div[role="radiogroup"] > label {
         font-weight: bold;
-        background-color: #f0f2f6;
-        padding: 0 15px;
-        border-radius: 5px;
+        background-color: var(--secondary-background-color); /* 自动适配背景色 */
+        color: var(--text-color);                            /* 自动适配文字颜色 */
+        border: 1px solid var(--border-color-light);         /* 增加微弱边框 */
+        padding: 5px 15px;
+        border-radius: 8px;
+        margin-right: 10px;
     }
-    [data-testid="stSidebarCollapsedControl"] {display: none;}
+    
+    /* 鼠标悬停效果 */
+    div[role="radiogroup"] > label:hover {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -185,39 +201,27 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 5. AI 指令生成器 (核心Prompt重构)
+# 5. AI 指令生成器
 # ==========================================
 def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list=False):
-    """
-    def_mode: 
-      - "split":  【熟词】严格执行“原子性”，一词多卡。
-      - "single": 【生词】执行“极简主义”，一词一义一卡。
-      - "term":   【术语】领域锁定。
-    """
     words_str = ", ".join(word_list)
     
-    # === 根据模式，生成完全不同的核心原则文案 ===
-    core_principle_text = ""
+    # === 构建动态指令 ===
+    definition_instruction = ""
     
-    # 优先级：Term > Split > Single
     if is_term_list or def_mode == "term":
-        core_principle_text = """1. 核心原则：领域锁定 (Domain Locked)
-- **领域匹配**：如果单词带有 (Domain) 标签，**必须**仅提供符合该领域背景的专业释义。
-- **原子性**：一张卡片只解释该领域的一个含义。"""
+        definition_instruction = "- **领域锁定**：单词带有 (Domain) 标签，**必须**仅提供符合该领域背景的专业释义。"
     
     elif def_mode == "split":
-        # === 用户要求的原子性核心 ===
-        core_principle_text = """1. 核心原则：原子性 (Atomicity)
-- **含义拆分**：若一个单词有多个不同常用释义（名词 vs 动词，字面义 vs 引申义），**必须拆分为多条（1-3）独立数据**（即为同一个单词生成多行/多张卡片）。
-- **严禁堆砌**：每张卡片只承载一个特定语境下的含义，不准将多个释义挤在一起。"""
+        definition_instruction = """- **熟词深挖 (Polymsey Splitting)**：这些是高频常用词，为了掌握其不同用法，**请将不同的含义拆分为多条独立的数据（多张卡片）**。
+    - 例如 'fair' 应拆分为：
+      1. fair (adj) - reasonable/impartial (公平的)
+      2. fair (n) - gathering/market (集市)
+    - 不要把所有意思挤在一张卡片里。"""
     
     else: # single
-        core_principle_text = """1. 核心原则：极简速记 (Minimalist)
-- **单一释义**：请**仅提供 1 个最核心、最常用的释义**。
-- **严禁拆分**：对于这些生词，不要生成多张卡片，一张卡片即可。
-- **减轻负担**：目的是快速混个脸熟，不要面面俱到。"""
+        definition_instruction = "- **极简速记 (Minimalist)**：这些是生词，请**仅提供 1 个最核心、最常用的释义**。严禁罗列多个义项，减轻记忆负担。"
 
-    # 格式要求
     if output_format == 'csv':
         format_req = "CSV Code Block (后缀名 .csv)"
         format_desc = "请直接输出标准 CSV 代码块。"
@@ -226,14 +230,14 @@ def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list
         format_desc = "请输出纯文本 TXT 代码块。"
 
     prompt = f"""
-请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表，请严格按照以下【核心原则】为我生成导入文件。
+请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表，请严格按照以下【释义策略】为我生成导入文件。
 
-{core_principle_text}
+1. 核心原则：释义策略
+{definition_instruction}
 
 2. 卡片正面 (Column 1: Front)
 - 内容：提供自然的短语或搭配 (Phrase/Collocation)。
 - 样式：纯文本。
-- 注意：如果是“含义拆分”模式，正面可以是一样的单词/短语，但背面解释不同。
 
 3. 卡片背面 (Column 2: Back)
 - 格式：HTML 排版，包含三部分，必须使用 <br><br> 分隔。
@@ -380,12 +384,11 @@ elif "单词分级" in app_mode:
                             with t_txt: st.code(p_txt, language='markdown')
                         else: st.info("无")
 
-                # === 核心策略映射 ===
                 render_tab(t1, "term", "术语", def_mode="term")   
-                render_tab(t2, "target", "重点", def_mode="single") # 重点词: 1卡1义
+                render_tab(t2, "target", "重点", def_mode="single") 
                 render_tab(t3, "proper", "专名", def_mode="single")
-                render_tab(t4, "beyond", "超纲", def_mode="single") # 超纲词: 1卡1义
-                render_tab(t5, "known", "熟词", def_mode="split")   # 熟词: N卡N义 (深挖)
+                render_tab(t4, "beyond", "超纲", def_mode="single") 
+                render_tab(t5, "known", "熟词", def_mode="split")  
 
 # ---------------------------------------------------------
 # 模式 C: 智能精选 (Top N)
@@ -425,7 +428,7 @@ elif "Top N" in app_mode:
             st.divider()
             col_win, col_rest = st.columns(2)
             
-            # === 左栏：精选词汇 (生词 -> Single) ===
+            # === 左栏：精选词汇 (Top N) ===
             with col_win:
                 st.success(f"🔥 精选 Top {len(top_df)}")
                 if not top_df.empty:
@@ -445,7 +448,7 @@ elif "Top N" in app_mode:
                     with t2: st.code(p_txt, language='markdown')
                 else: st.warning("无")
 
-            # === 右栏：剩余词汇 (太简单/太难 -> Single) ===
+            # === 右栏：剩余词汇 ===
             with col_rest:
                 st.subheader(f"💤 剩余 {len(rest_df)} 个")
                 if not rest_df.empty:
@@ -453,8 +456,6 @@ elif "Top N" in app_mode:
                     with st.expander("列表", expanded=False): st.code("\n".join(words_rest))
                     
                     st.markdown("**🤖 AI 指令 (备用)**")
-                    # 这里如果是“简单词”，理论上应该用 split 模式深挖，但为了页面简洁，暂且给 single
-                    # 你可以根据需求改成 "split"
                     p_csv_r = generate_ai_prompt(words_rest, 'csv', "single")
                     p_txt_r = generate_ai_prompt(words_rest, 'txt', "single")
                     
