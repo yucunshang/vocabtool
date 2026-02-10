@@ -37,12 +37,17 @@ def load_vocab():
         return None, "❌ 未找到词库文件（coca_cleaned.csv）"
     try:
         df = pd.read_csv(file_path)
+        # 清洗列名，防止 BOM 或空格干扰
         df.columns = [str(c).strip().lower() for c in df.columns]
+        
         # 确保有 word 和 rank 列
         w_col = 'word' if 'word' in df.columns else df.columns[0]
         r_col = 'rank' if 'rank' in df.columns else df.columns[1]
         
+        # 统一格式：转小写，去空格
         df[w_col] = df[w_col].astype(str).str.lower().str.strip()
+        
+        # 构建字典
         vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
         return vocab, f"✅ 词库加载成功: {file_path}"
     except Exception as e:
@@ -87,6 +92,7 @@ def process_text_pro(text):
     for token in doc:
         # 只处理长度 > 1 的纯字母单词
         if token.is_alpha and len(token.text) > 1:
+            # 关键：使用 lemma_ 获取还原词（如 went -> go）
             lemma = token.lemma_.lower()
             original = token.text.lower()
             
@@ -109,6 +115,9 @@ def process_text_pro(text):
                 seen_lemmas.add(lemma)
 
     # 排序并分类
+    if not results:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
     df = pd.DataFrame(results).sort_values('排名')
     known = df[df['排名'] <= r_start]
     target = df[(df['排名'] > r_start) & (df['排名'] <= r_end)]
@@ -137,8 +146,9 @@ if st.button("🚀 开始精准分析", type="primary"):
         
         with tab1:
             st.dataframe(df_t, use_container_width=True)
-            csv_t = df_t.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 下载重点词 CSV", csv_t, "target.csv", "text/csv")
+            if not df_t.empty:
+                csv_t = df_t.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 下载重点词 CSV", csv_t, "target.csv", "text/csv")
             
         with tab2:
             st.dataframe(df_b, use_container_width=True)
