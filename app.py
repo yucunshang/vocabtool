@@ -117,10 +117,10 @@ def load_vocab():
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
         except: pass
     
+    # 核心修复 1：补丁词库拥有“绝对覆盖权”，不再管原 rank 是多少
     for word, rank in BUILTIN_PATCH_VOCAB.items():
-        if word not in vocab: vocab[word] = rank
-        else:
-            if vocab[word] > 20000: vocab[word] = rank
+        vocab[word] = rank
+        
     return vocab
 
 vocab_dict = load_vocab()
@@ -203,7 +203,7 @@ def analyze_text(raw_text, mode="auto"):
         
         actual_rank = vocab_dict.get(item_lower, 99999)
         
-        # 1. 术语身份 (作为普通词分类)
+        # 1. 术语身份 (保留真实 Rank 逻辑)
         if item_lower in BUILTIN_TECHNICAL_TERMS:
             domain = BUILTIN_TECHNICAL_TERMS[item_lower]
             term_rank = actual_rank if actual_rank != 99999 else 15000
@@ -216,10 +216,11 @@ def analyze_text(raw_text, mode="auto"):
         
         is_proper_only = False
         
-        # 2. 专名身份 
+        # 2. 专名身份 (核心修复 2：绝对豁免权，无视 CSV 中的错误词频，强制设为 100)
         if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
             display = PROPER_NOUNS_DB.get(item_lower, item_cleaned.title())
-            proper_rank = actual_rank if actual_rank != 99999 else 1000
+            # 强制设为 100，确保它会被 "忽略前N词" 的阈值稳定过滤
+            proper_rank = 100 
             unique_items.append({
                 "word": display,
                 "rank": proper_rank, 
@@ -267,7 +268,7 @@ elif "单词分级" in app_mode:
     with col_level1: current_level = st.number_input("当前水平", 0, 30000, 9000, 500)
     with col_level2: target_level = st.number_input("目标水平", 0, 30000, 15000, 500)
     with col_level3: 
-        st.write("") # 占位换行
+        st.write("") 
         show_rank = st.checkbox("🔢 显示单词词频 (Rank)", value=False)
     
     g_col1, g_col2 = st.columns(2)
@@ -290,7 +291,6 @@ elif "单词分级" in app_mode:
                 df['final_cat'] = df.apply(categorize, axis=1)
                 df = df.sort_values(by='rank')
 
-                # 移除术语Tab，按照逻辑顺序排序
                 t_known, t_target, t_beyond, t_proper = st.tabs([
                     f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
                     f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
@@ -304,25 +304,20 @@ elif "单词分级" in app_mode:
                         if not sub.empty:
                             pure_words = sub['word'].tolist()
                             
-                            # 拼接用于展示的列表 (附带 Rank)
                             display_lines = []
                             for _, row in sub.iterrows():
                                 if show_rank:
-                                    # 处理 rank=99999 的显示
                                     rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
                                     display_lines.append(f"{row['word']} [Rank: {rank_str}]")
                                 else:
                                     display_lines.append(row['word'])
                             
-                            # 恢复折叠框
                             with st.expander("👁️ 查看列表", expanded=False):
                                 st.code("\n".join(display_lines), language='text')
                             
                             st.markdown(f"**🤖 AI 指令 ({label})**")
-                            # 检查该列表中是否混入了术语
                             has_term = any('(' in w for w in pure_words)
                             
-                            # 生成 Prompt (依然传递纯净单词 pure_words)
                             p_csv = generate_ai_prompt(pure_words, 'csv', def_mode, is_term_list=has_term)
                             p_txt = generate_ai_prompt(pure_words, 'txt', def_mode, is_term_list=has_term)
                             
