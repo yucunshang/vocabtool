@@ -420,7 +420,7 @@ elif "Top N" in app_mode:
                     p_csv = generate_ai_prompt(words, 'csv', is_term_list=has_term)
                     p_txt = generate_ai_prompt(words, 'txt', is_term_list=has_term)
                     
-                    # === 优化：使用 Tabs 展示 AI 指令 ===
+                    # === Tabs 展示 ===
                     t_csv, t_txt = st.tabs(["📋 CSV 指令", "📝 TXT 指令"])
                     with t_csv: st.code(p_csv, language='markdown')
                     with t_txt: st.code(p_txt, language='markdown')
@@ -429,7 +429,8 @@ elif "Top N" in app_mode:
 
             # === 右栏：剩余词汇 ===
             with col_rest:
-                st.secondary_header(f"💤 剩余 {len(rest_df)} 个")
+                # 修复点：使用 st.subheader 替代 st.secondary_header
+                st.subheader(f"💤 剩余 {len(rest_df)} 个")
                 if not rest_df.empty:
                     words_rest = rest_df['word'].tolist()
                     with st.expander("👁️ 查看剩余列表", expanded=False):
@@ -441,7 +442,7 @@ elif "Top N" in app_mode:
                     p_csv_r = generate_ai_prompt(words_rest, 'csv', is_term_list=has_term_rest)
                     p_txt_r = generate_ai_prompt(words_rest, 'txt', is_term_list=has_term_rest)
                     
-                    # === 优化：使用 Tabs 展示 AI 指令 ===
+                    # === Tabs 展示 ===
                     rt_csv, rt_txt = st.tabs(["📋 CSV 指令", "📝 TXT 指令"])
                     with rt_csv: st.code(p_csv_r, language='markdown')
                     with rt_txt: st.code(p_txt_r, language='markdown')
