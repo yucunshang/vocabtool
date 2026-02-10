@@ -120,7 +120,7 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 5. 核心：AI 指令生成器 (双模版)
+# 5. 核心：AI 指令生成器
 # ==========================================
 def generate_ai_prompt(word_list, output_format):
     words_str = ", ".join(word_list)
@@ -160,7 +160,7 @@ def generate_ai_prompt(word_list, output_format):
 # ==========================================
 # 6. 界面布局
 # ==========================================
-st.title("🚀 Vocab Master Pro (Dual Format)")
+st.title("🚀 Vocab Master Pro (Folded List)")
 
 tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原", "📊 2. 单词分级 (AI 指令)"])
 
@@ -232,10 +232,8 @@ with tab_grade:
             if not df.empty:
                 df = df.sort_values(by='rank', ascending=True)
                 
-                # 四大分类 Tabs
                 t1, t2, t3, t4 = st.tabs([
                     f"🟡 重点 ({len(df[df['cat']=='target'])})", 
-                    f"🔵 专有名词 ({len(df[df['cat']=='proper'])})", 
                     f"🔴 超纲 ({len(df[df['cat']=='beyond'])})", 
                     f"🟢 已掌握 ({len(df[df['cat']=='known'])})"
                 ])
@@ -245,16 +243,19 @@ with tab_grade:
                     if sub.empty: 
                         st.info("无")
                     else:
-                        # 1. 单词列表
-                        st.markdown(f"**1. {label} 列表**")
                         words = sub['word'].tolist()
-                        st.code("\n".join(words), language='text')
+                        count = len(words)
                         
-                        st.divider()
-                        st.markdown(f"**2. AI 制卡指令 ({label})**")
+                        # === 核心优化：使用 expander 折叠单词列表 ===
+                        # 默认 expanded=False (折叠状态)，防止刷屏
+                        with st.expander(f"👁️ 查看/复制 {label} 列表 (共 {count} 个)", expanded=False):
+                            st.code("\n".join(words), language='text')
+                            st.caption("👆 需要复制单词时，点右上角图标")
+                        
+                        # AI 指令区 (保持展开，方便操作)
+                        st.markdown(f"**🤖 AI 制卡指令 ({label})**")
                         st.info("💡 适用于：DeepSeek / ChatGPT / Claude / Gemini / Kimi 等任意 AI")
                         
-                        # === 核心优化：直接使用 Tabs 展示两种格式，无需点击生成，无刷新 ===
                         prompt_csv = generate_ai_prompt(words, 'csv')
                         prompt_txt = generate_ai_prompt(words, 'txt')
                         
@@ -262,11 +263,11 @@ with tab_grade:
                         
                         with ai_tab1:
                             st.code(prompt_csv, language='markdown')
-                            st.caption("👆 点击右上角图标，一键复制 CSV 版指令")
+                            st.caption("👆 一键复制 CSV 指令")
                             
                         with ai_tab2:
                             st.code(prompt_txt, language='markdown')
-                            st.caption("👆 点击右上角图标，一键复制 TXT 版指令")
+                            st.caption("👆 一键复制 TXT 指令")
 
                 with t1: show("target", "重点词")
                 with t2: show("proper", "专有名词")
