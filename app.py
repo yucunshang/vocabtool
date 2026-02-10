@@ -19,6 +19,19 @@ st.markdown("""
     header {visibility: hidden;}
     footer {visibility: hidden;}
     .block-container { padding-top: 1rem; }
+    
+    /* 优化顶部单选导航的样式 */
+    div[role="radiogroup"] > label {
+        font-weight: bold;
+        font-size: 1.1rem;
+        padding: 0px 20px;
+        border-radius: 5px;
+        background-color: #f0f2f6;
+        margin-right: 10px;
+    }
+    div[role="radiogroup"] > label:hover {
+        background-color: #e0e2e6;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -120,7 +133,7 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 5. 核心：AI 指令生成器
+# 5. AI 指令生成器
 # ==========================================
 def generate_ai_prompt(word_list, output_format):
     words_str = ", ".join(word_list)
@@ -158,14 +171,18 @@ def generate_ai_prompt(word_list, output_format):
     return prompt
 
 # ==========================================
-# 6. 界面布局
+# 6. 界面布局 (扁平化架构修复)
 # ==========================================
-st.title("🚀 Vocab Master Pro (Folded List)")
+st.title("🚀 Vocab Master Pro (Fixed Structure)")
 
-tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原", "📊 2. 单词分级 (AI 指令)"])
+# === 修复：使用 Radio 代替顶层 Tabs，避免嵌套错误 ===
+app_mode = st.radio("选择功能模式:", ["🛠️ 智能还原", "📊 单词分级 (AI 制卡)"], horizontal=True)
+st.divider()
 
-# --- Tab 1 ---
-with tab_lemma:
+# ---------------------------------------------------------
+# 模式 A: 智能还原
+# ---------------------------------------------------------
+if "智能还原" in app_mode:
     c1, c2 = st.columns(2)
     with c1:
         raw_text = st.text_area("输入原始文章", height=400, placeholder="He was excited.")
@@ -177,12 +194,13 @@ with tab_lemma:
             st.caption("👆 点击右上角图标，一键复制还原后的文本")
         elif not raw_text: st.info("👈 请输入文本")
 
-# --- Tab 2 ---
-with tab_grade:
+# ---------------------------------------------------------
+# 模式 B: 单词分级
+# ---------------------------------------------------------
+else:
     col_a, col_b, col_c = st.columns([1, 1, 2])
     with col_a: current_level = st.number_input("当前水平", 0, 20000, 9000, 500)
     with col_b: target_level = st.number_input("目标水平", 0, 20000, 15000, 500)
-    st.divider()
     
     g_col1, g_col2 = st.columns(2)
     with g_col1:
@@ -211,7 +229,6 @@ with tab_grade:
                 for item in raw_items:
                     item_cleaned = item.strip()
                     item_lower = item_cleaned.lower()
-                    
                     if item_lower in seen: continue
                     if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
                     if item_lower in JUNK_WORDS: continue
@@ -232,8 +249,10 @@ with tab_grade:
             if not df.empty:
                 df = df.sort_values(by='rank', ascending=True)
                 
+                # === 这里是全页面唯一的 Tabs，安全！ ===
                 t1, t2, t3, t4 = st.tabs([
                     f"🟡 重点 ({len(df[df['cat']=='target'])})", 
+                    f"🔵 专有名词 ({len(df[df['cat']=='proper'])})", 
                     f"🔴 超纲 ({len(df[df['cat']=='beyond'])})", 
                     f"🟢 已掌握 ({len(df[df['cat']=='known'])})"
                 ])
@@ -246,28 +265,28 @@ with tab_grade:
                         words = sub['word'].tolist()
                         count = len(words)
                         
-                        # === 核心优化：使用 expander 折叠单词列表 ===
-                        # 默认 expanded=False (折叠状态)，防止刷屏
+                        # 单词列表折叠框
                         with st.expander(f"👁️ 查看/复制 {label} 列表 (共 {count} 个)", expanded=False):
                             st.code("\n".join(words), language='text')
-                            st.caption("👆 需要复制单词时，点右上角图标")
+                            st.caption("👆 复制单词列表")
                         
-                        # AI 指令区 (保持展开，方便操作)
                         st.markdown(f"**🤖 AI 制卡指令 ({label})**")
-                        st.info("💡 适用于：DeepSeek / ChatGPT / Claude / Gemini / Kimi 等任意 AI")
+                        st.info("💡 适用于：DeepSeek / ChatGPT / Claude / Gemini 等")
                         
+                        # === 修复：用 Columns 代替 Tabs，避免嵌套 ===
                         prompt_csv = generate_ai_prompt(words, 'csv')
                         prompt_txt = generate_ai_prompt(words, 'txt')
                         
-                        ai_tab1, ai_tab2 = st.tabs(["📋 CSV 指令", "📝 TXT 指令"])
-                        
-                        with ai_tab1:
+                        # 左右分栏展示两种格式
+                        ac1, ac2 = st.columns(2)
+                        with ac1:
+                            st.markdown("##### 📋 CSV 版指令")
                             st.code(prompt_csv, language='markdown')
-                            st.caption("👆 一键复制 CSV 指令")
-                            
-                        with ai_tab2:
+                            st.caption("👆 适合导入 Excel/Anki 电脑版")
+                        with ac2:
+                            st.markdown("##### 📝 TXT 版指令")
                             st.code(prompt_txt, language='markdown')
-                            st.caption("👆 一键复制 TXT 指令")
+                            st.caption("👆 适合导入 Anki 手机版/通用文本")
 
                 with t1: show("target", "重点词")
                 with t2: show("proper", "专有名词")
