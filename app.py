@@ -29,10 +29,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 【核心】内置专业术语库 (带学科标签 - 扩容版)
+# 2. 【核心】内置专业术语库 (带学科标签)
 # ==========================================
-# 策略：只收录“一眼假”的专业词（普通人很少用，或者是特定领域的强术语）。
-# 像 energy, force, cell, market 这种通用高频词不收录，让它们走普通分级。
 BUILTIN_TECHNICAL_TERMS = {
     # === Computer Science (CS/AI) ===
     "algorithm": "CS", "recursion": "CS", "latency": "CS", "throughput": "CS", "bandwidth": "CS",
@@ -172,6 +170,27 @@ AMBIGUOUS_WORDS = {
     "china", "turkey", "march", "may", "august", "polish"
 }
 
+BUILTIN_PATCH_VOCAB = {
+    "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
+    "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
+    "cloud": 3000, "algorithm": 6000, "database": 5000, "interface": 5000,
+    "digital": 3000, "virtual": 4000, "smart": 2000, "mobile": 2500,
+    "email": 2000, "text": 1000, "chat": 2000, "video": 1500, "audio": 3000,
+    "link": 2000, "click": 2000, "search": 1500, "share": 1500, "post": 1500,
+    "analysis": 2500, "strategy": 2500, "method": 2000, "theory": 2500,
+    "research": 1500, "evidence": 2000, "significant": 2000, "factor": 1500,
+    "process": 1000, "system": 1000, "available": 1500, "similar": 1500,
+    "specific": 2000, "issue": 1000, "policy": 1500, "community": 1500,
+    "development": 1500, "economic": 2000, "global": 2500, "environment": 2000,
+    "challenge": 2500, "opportunity": 2000, "solution": 2500, "management": 2500,
+    "okay": 500, "hey": 500, "yeah": 500, "wow": 1000, "cool": 1500,
+    "super": 2000, "extra": 2500, "plus": 2000
+}
+
+AMBIGUOUS_WORDS = {
+    "china", "turkey", "march", "may", "august", "polish"
+}
+
 
 # ==========================================
 # 4. 初始化 NLP
@@ -196,8 +215,6 @@ def get_word_info(raw_word):
     # 0. 检查内置专业术语 (返回 word + domain)
     if word_lower in BUILTIN_TECHNICAL_TERMS:
         domain = BUILTIN_TECHNICAL_TERMS[word_lower]
-        # 返回格式：(Display Word, Domain String)
-        # 例如: ("variable", "Math")
         return raw_word.strip(), f"term:{domain}"
 
     # 1. 检查歧义词
@@ -254,7 +271,7 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 6. AI 指令生成器 (支持学科标签)
+# 6. AI 指令生成器 (核心优化)
 # ==========================================
 def generate_ai_prompt(word_list, output_format, is_term_list=False):
     words_str = ", ".join(word_list)
@@ -265,9 +282,10 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
         format_req = "TXT Code Block (后缀名 .txt)"
         format_desc = "请输出纯文本 TXT 代码块。"
 
+    # === 关键优化：针对术语列表的 Prompt ===
     context_instruction = ""
     if is_term_list:
-        context_instruction = "\n- 注意：这些单词是【带领域标签的专业术语 (e.g. word (Domain))】。请务必根据括号内的领域（如 Math, CS, Law）提供该领域的精确释义，不要提供通用含义。"
+        context_instruction = "\n- 注意：这些单词是【带领域标签的专业术语 (e.g. word (Domain))】。**英文释义**请务必根据括号内的领域（如 Math, CS）提供该领域的精确释义。**中文解析**部分请优先拆解【词源、词根、词缀】以辅助记忆；只有当英文释义非常晦涩难懂时，才补充中文领域解释，否则请聚焦于词源分析。"
 
     prompt = f"""
 请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表{context_instruction}，请严格按照以下【终极制卡标准】为我生成导入文件。
@@ -283,7 +301,7 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
 
 3. 卡片背面 (Column 2: Back)
 - 格式：HTML 排版，包含三部分，必须使用 <br><br> 分隔。
-- 结构：英文释义<br><br><em>斜体例句</em><br><br>【词根词缀/领域术语】中文解析
+- 结构：英文释义<br><br><em>斜体例句</em><br><br>【词源/词根词缀】中文助记
 
 4. 输出格式标准 ({format_req})
 - {format_desc}
@@ -297,7 +315,7 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
 # ==========================================
 # 7. 界面布局
 # ==========================================
-st.title("🚀 Vocab Master Pro (Domains)")
+st.title("🚀 Vocab Master Pro (Etymology)")
 
 # === 高级设置折叠区 ===
 with st.expander("⚙️ 词库与术语统计 (点击展开)", expanded=False):
@@ -371,15 +389,14 @@ else:
                     display_word, info_type = get_word_info(item_cleaned)
                     
                     # 默认值
-                    domain_label = ""
                     cat = "known" # 默认
+                    rank = vocab_dict.get(item_lower, 99999)
                     
                     # 术语处理
                     if isinstance(info_type, str) and info_type.startswith("term:"):
                         cat = "term"
-                        # 提取 domain: "term:Math" -> "Math"
+                        # 提取 domain
                         domain_str = info_type.split(":")[1]
-                        # 组合显示: variable (Math)
                         display_word = f"{display_word} ({domain_str})"
                     
                     # 专有名词处理
@@ -388,12 +405,9 @@ else:
                     
                     # 普通词处理
                     else:
-                        rank = vocab_dict.get(item_lower, 99999)
                         if rank <= current_level: cat = "known"
                         elif rank <= target_level: cat = "target"
                         else: cat = "beyond"
-                        
-                    rank = vocab_dict.get(item_lower, 99999) # 记录一下 rank 备用
                     
                     seen.add(item_lower)
                     unique_items.append({"word": display_word, "rank": rank, "cat": cat})
@@ -422,7 +436,7 @@ else:
                             st.caption("👆 复制单词列表")
                         
                         st.markdown(f"**🤖 AI 制卡指令 ({label})**")
-                        # 传入 is_term，让 AI 注意领域
+                        # 传入 is_term
                         prompt_csv = generate_ai_prompt(words, 'csv', is_term_list=is_term)
                         prompt_txt = generate_ai_prompt(words, 'txt', is_term_list=is_term)
                         
