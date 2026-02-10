@@ -30,7 +30,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 内置词库 (数据层)
+# 2. 内置词库
 # ==========================================
 BUILTIN_TECHNICAL_TERMS = {
     # 用户指定补充
@@ -60,11 +60,59 @@ BUILTIN_TECHNICAL_TERMS = {
 BUILTIN_TECHNICAL_TERMS = {k.lower(): v for k, v in BUILTIN_TECHNICAL_TERMS.items()}
 
 PROPER_NOUNS_DB = {
-    "usa": "USA", "uk": "UK", "china": "China", "japan": "Japan", "korea": "Korea", 
-    "google": "Google", "apple": "Apple", "microsoft": "Microsoft", "monday": "Monday"
+    "usa": "USA", "uk": "UK", "uae": "UAE", "prc": "PRC",
+    "america": "America", "england": "England", "scotland": "Scotland", "wales": "Wales",
+    "japan": "Japan", "korea": "Korea", "france": "France", "germany": "Germany", "italy": "Italy",
+    "spain": "Spain", "russia": "Russia", "india": "India", "brazil": "Brazil", "canada": "Canada",
+    "australia": "Australia", "mexico": "Mexico", "egypt": "Egypt", "china": "China",
+    "switzerland": "Switzerland", "sweden": "Sweden", "norway": "Norway", "denmark": "Denmark",
+    "finland": "Finland", "netherlands": "Netherlands", "belgium": "Belgium", "austria": "Austria",
+    "greece": "Greece", "turkey": "Turkey", "israel": "Israel", "saudi arabia": "Saudi Arabia",
+    "singapore": "Singapore", "malaysia": "Malaysia", "thailand": "Thailand", "vietnam": "Vietnam",
+    "indonesia": "Indonesia", "philippines": "Philippines",
+    "london": "London", "paris": "Paris", "tokyo": "Tokyo", "beijing": "Beijing",
+    "shanghai": "Shanghai", "hong kong": "Hong Kong", "sydney": "Sydney", 
+    "melbourne": "Melbourne", "berlin": "Berlin", "rome": "Rome", "madrid": "Madrid",
+    "new york": "New York", "los angeles": "Los Angeles", "san francisco": "San Francisco",
+    "chicago": "Chicago", "seattle": "Seattle", "boston": "Boston", "houston": "Houston",
+    "moscow": "Moscow", "cairo": "Cairo", "dubai": "Dubai", "mumbai": "Mumbai",
+    "africa": "Africa", "asia": "Asia", "europe": "Europe", "antarctica": "Antarctica",
+    "monday": "Monday", "tuesday": "Tuesday", "wednesday": "Wednesday", "thursday": "Thursday",
+    "friday": "Friday", "saturday": "Saturday", "sunday": "Sunday",
+    "january": "January", "february": "February", "march": "March", "april": "April", 
+    "may": "May", "june": "June", "july": "July", "august": "August", 
+    "september": "September", "october": "October", "november": "November", "december": "December",
+    "christmas": "Christmas", "easter": "Easter", "thanksgiving": "Thanksgiving", "halloween": "Halloween",
+    "google": "Google", "apple": "Apple", "microsoft": "Microsoft", "tesla": "Tesla",
+    "amazon": "Amazon", "facebook": "Facebook", "twitter": "Twitter", "youtube": "YouTube", "instagram": "Instagram",
+    "tiktok": "TikTok", "netflix": "Netflix", "spotify": "Spotify", "zoom": "Zoom",
+    "nasa": "NASA", "fbi": "FBI", "cia": "CIA", "un": "UN", "eu": "EU", "nato": "NATO", "wto": "WTO", "who": "WHO",
+    "iphone": "iPhone", "ipad": "iPad", "mac": "Mac", "windows": "Windows", "android": "Android",
+    "wifi": "Wi-Fi", "internet": "Internet", "bluetooth": "Bluetooth",
+    "mr": "Mr.", "mrs": "Mrs.", "ms": "Ms.", "dr": "Dr.", "prof": "Prof.",
+    "phd": "PhD", "mba": "MBA", "ceo": "CEO", "cfo": "CFO", "cto": "CTO", "vip": "VIP"
 }
 
-AMBIGUOUS_WORDS = {"china", "turkey", "march", "may", "august", "polish"}
+BUILTIN_PATCH_VOCAB = {
+    "online": 2000, "website": 2500, "app": 3000, "user": 1500, "data": 1000,
+    "software": 3000, "hardware": 4000, "network": 2500, "server": 3500,
+    "cloud": 3000, "algorithm": 6000, "database": 5000, "interface": 5000,
+    "digital": 3000, "virtual": 4000, "smart": 2000, "mobile": 2500,
+    "email": 2000, "text": 1000, "chat": 2000, "video": 1500, "audio": 3000,
+    "link": 2000, "click": 2000, "search": 1500, "share": 1500, "post": 1500,
+    "analysis": 2500, "strategy": 2500, "method": 2000, "theory": 2500,
+    "research": 1500, "evidence": 2000, "significant": 2000, "factor": 1500,
+    "process": 1000, "system": 1000, "available": 1500, "similar": 1500,
+    "specific": 2000, "issue": 1000, "policy": 1500, "community": 1500,
+    "development": 1500, "economic": 2000, "global": 2500, "environment": 2000,
+    "challenge": 2500, "opportunity": 2000, "solution": 2500, "management": 2500,
+    "okay": 500, "hey": 500, "yeah": 500, "wow": 1000, "cool": 1500,
+    "super": 2000, "extra": 2500, "plus": 2000
+}
+
+AMBIGUOUS_WORDS = {
+    "china", "turkey", "march", "may", "august", "polish"
+}
 
 # ==========================================
 # 3. 初始化 NLP
@@ -137,14 +185,34 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 5. AI 指令生成器 (核心Prompt修改)
+# 5. AI 指令生成器 (策略：熟词深挖，生词速记)
 # ==========================================
-def generate_ai_prompt(word_list, output_format, is_term_list=False):
+def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list=False):
+    """
+    def_mode: 
+      - "split":  【熟词】多义拆分，一词多卡。
+      - "single": 【生词】核心单义，一词一卡。
+      - "term":   【术语】领域锁定。
+    """
     words_str = ", ".join(word_list)
     
-    context_instruction = ""
-    if is_term_list:
-        context_instruction = "\n- 注意：列表中包含【带领域标签的专业术语 (e.g. word (Domain))】，请严格按照领域解释。"
+    # === 构建动态指令 ===
+    definition_instruction = ""
+    
+    if is_term_list or def_mode == "term":
+        definition_instruction = "- **领域锁定**：单词带有 (Domain) 标签，**必须**仅提供符合该领域背景的专业释义。"
+    
+    elif def_mode == "split":
+        # 针对已掌握的词：要求拆分
+        definition_instruction = """- **熟词深挖 (Polymsey Splitting)**：这些是高频常用词，为了掌握其不同用法，**请将不同的含义拆分为多条独立的数据（多张卡片）**。
+    - 例如 'fair' 应拆分为：
+      1. fair (adj) - reasonable/impartial (公平的)
+      2. fair (n) - gathering/market (集市)
+    - 不要把所有意思挤在一张卡片里。"""
+    
+    else: # single
+        # 针对重点/超纲/TopN：要求极简
+        definition_instruction = "- **极简速记 (Minimalist)**：这些是生词，请**仅提供 1 个最核心、最常用的释义**。严禁罗列多个义项，减轻记忆负担。"
 
     if output_format == 'csv':
         format_req = "CSV Code Block (后缀名 .csv)"
@@ -153,13 +221,11 @@ def generate_ai_prompt(word_list, output_format, is_term_list=False):
         format_req = "TXT Code Block (后缀名 .txt)"
         format_desc = "请输出纯文本 TXT 代码块。"
 
-    # === Prompt 更新部分：核心原则 ===
     prompt = f"""
-请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表{context_instruction}，请严格按照以下标准为我生成导入文件。
+请扮演一位专业的 Anki 制卡专家。这是我整理的单词列表，请严格按照以下【释义策略】为我生成导入文件。
 
-1. 核心原则：极简释义 (Minimalist Definition)
-- **单一释义**：对于无标签的普通单词，请**仅提供 1 个最常用、最核心的释义** (The Single Most Common Definition)。严禁罗列多个义项，严禁拆分成多张卡片，确保记忆负担最小化。
-- **领域匹配**：如果单词带有 (Domain) 标签（如 Math, Law），**必须**仅提供符合该领域背景的专业释义。
+1. 核心原则：释义策略
+{definition_instruction}
 
 2. 卡片正面 (Column 1: Front)
 - 内容：提供自然的短语或搭配 (Phrase/Collocation)。
@@ -270,7 +336,7 @@ elif "单词分级" in app_mode:
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         input_mode = st.radio("识别模式:", ("自动分词", "按行处理"), horizontal=True)
-        grade_input = st.text_area("input_box", height=400, placeholder="motion\nenergy", label_visibility="collapsed")
+        grade_input = st.text_area("input_box", height=400, placeholder="motion\nenergy\nrun\nset", label_visibility="collapsed")
         btn_grade = st.button("开始分级", type="primary", use_container_width=True)
 
     with g_col2:
@@ -290,47 +356,53 @@ elif "单词分级" in app_mode:
 
                 t1, t2, t3, t4, t5 = st.tabs(["🟣 专业术语", "🟡 重点", "🔵 专有名词", "🔴 超纲", "🟢 已掌握"])
                 
-                def render_tab(tab_obj, cat_key, label, is_term=False):
+                def render_tab(tab_obj, cat_key, label, def_mode):
                     with tab_obj:
                         sub = df[df['final_cat'] == cat_key]
                         st.caption(f"共 {len(sub)} 个")
                         if not sub.empty:
                             words = sub['word'].tolist()
                             with st.expander("👁️ 查看列表", expanded=False): st.code("\n".join(words))
+                            
                             st.markdown(f"**🤖 AI 指令 ({label})**")
                             
-                            p_csv = generate_ai_prompt(words, 'csv', is_term)
-                            p_txt = generate_ai_prompt(words, 'txt', is_term)
+                            # === 智能逻辑：是否包含术语 ===
+                            has_term = (cat_key == 'term')
+                            
+                            p_csv = generate_ai_prompt(words, 'csv', def_mode, is_term_list=has_term)
+                            p_txt = generate_ai_prompt(words, 'txt', def_mode, is_term_list=has_term)
                             
                             t_csv, t_txt = st.tabs(["📋 CSV 指令", "📝 TXT 指令"])
                             with t_csv: st.code(p_csv, language='markdown')
                             with t_txt: st.code(p_txt, language='markdown')
                         else: st.info("无")
 
-                render_tab(t1, "term", "术语", True)
-                render_tab(t2, "target", "重点", False)
-                render_tab(t3, "proper", "专名", False)
-                render_tab(t4, "beyond", "超纲", False)
-                render_tab(t5, "known", "熟词", False)
+                # === 核心策略映射 ===
+                # 术语 -> 领域释义
+                render_tab(t1, "term", "术语", def_mode="term")   
+                # 重点词 -> 1个释义 (Target词对你来说是新的，先学核心义)
+                render_tab(t2, "target", "重点", def_mode="single") 
+                # 专名 -> 1个释义
+                render_tab(t3, "proper", "专名", def_mode="single")
+                # 超纲词 -> 1个释义
+                render_tab(t4, "beyond", "超纲", def_mode="single") 
+                # 【关键】已掌握 -> 拆分多义 (Known词你已经会了核心义，现在要深挖)
+                render_tab(t5, "known", "熟词", def_mode="split")  
 
 # ---------------------------------------------------------
 # 模式 C: 智能精选 (Top N)
 # ---------------------------------------------------------
 elif "Top N" in app_mode:
-    st.info("💡 此模式可自动过滤掉 **太简单** 的词 (包括常见专有名词)，然后按 **由易到难** 挑选出前 N 个。")
+    st.info("💡 此模式自动过滤简单词，按 **由易到难** 挑选。")
     
-    # === 参数设置区 ===
     c_set1, c_set2, c_set3 = st.columns([1, 1, 1])
-    with c_set1:
-        top_n = st.number_input("🎯 筛选数量", 10, 500, 50, 10)
-    with c_set2:
-        min_rank_threshold = st.number_input("📉 忽略前 N 词 (起点)", 0, 20000, 3000, 500, help="Rank小于此数的词(含专名)会被过滤。")
-    with c_set3:
-        st.write("") 
+    with c_set1: top_n = st.number_input("🎯 筛选数量", 10, 500, 50, 10)
+    with c_set2: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3000, 500)
+    with c_set3: st.write("") 
         
     c_input, c_btn = st.columns([3, 1])
     with c_input:
-        topn_input = st.text_area("输入", height=150, placeholder="Monday WHO November UK Wednesday\nmotion\nenergy\ngravity", label_visibility="collapsed")
+        topn_input = st.text_area("输入", height=150, placeholder="motion\nenergy\nrun", label_visibility="collapsed")
     with c_btn:
         btn_topn = st.button("🎲 生成精选", type="primary", use_container_width=True)
 
@@ -340,7 +412,6 @@ elif "Top N" in app_mode:
         if not df.empty:
             df['rank'] = pd.to_numeric(df['rank'], errors='coerce').fillna(99999)
             
-            # Top N 核心逻辑
             term_mask = (df['cat'] == 'term')
             general_mask = (df['cat'].isin(['general', 'proper'])) & (df['rank'] >= min_rank_threshold)
             
@@ -356,40 +427,38 @@ elif "Top N" in app_mode:
             st.divider()
             col_win, col_rest = st.columns(2)
             
-            # === 左栏：精选词汇 ===
+            # === 左栏：精选词汇 (通常是生词 -> Single) ===
             with col_win:
-                st.success(f"🔥 精选 Top {len(top_df)} (Start Rank: {min_rank_threshold})")
+                st.success(f"🔥 精选 Top {len(top_df)}")
                 if not top_df.empty:
                     words = top_df['word'].tolist()
-                    with st.expander("👁️ 查看单词列表", expanded=True):
-                        st.code("\n".join(words), language='text')
+                    with st.expander("列表", expanded=True): st.code("\n".join(words))
                     
-                    st.markdown("**🤖 AI 制卡指令**")
+                    st.markdown("**🤖 AI 指令 (核心单义)**")
                     has_term = any('(' in w for w in words)
                     
-                    p_csv = generate_ai_prompt(words, 'csv', is_term_list=has_term)
-                    p_txt = generate_ai_prompt(words, 'txt', is_term_list=has_term)
+                    # 精选词主要是为了“速记”，所以用 single 模式
+                    mode = "single" if not has_term else "term"
                     
-                    t_csv, t_txt = st.tabs(["📋 CSV 指令", "📝 TXT 指令"])
-                    with t_csv: st.code(p_csv, language='markdown')
-                    with t_txt: st.code(p_txt, language='markdown')
-                else:
-                    st.warning("无符合条件的单词 (都被过滤了)")
+                    p_csv = generate_ai_prompt(words, 'csv', mode, is_term_list=has_term)
+                    p_txt = generate_ai_prompt(words, 'txt', mode, is_term_list=has_term)
+                    
+                    t1, t2 = st.tabs(["CSV", "TXT"])
+                    with t1: st.code(p_csv, language='markdown')
+                    with t2: st.code(p_txt, language='markdown')
+                else: st.warning("无")
 
-            # === 右栏：剩余词汇 ===
+            # === 右栏：剩余词汇 (太简单/太难 -> Single) ===
             with col_rest:
-                st.subheader(f"💤 剩余 {len(rest_df)} 个 (简单/未入选)")
+                st.subheader(f"💤 剩余 {len(rest_df)} 个")
                 if not rest_df.empty:
                     words_rest = rest_df['word'].tolist()
-                    with st.expander("👁️ 查看剩余列表", expanded=False):
-                        st.code("\n".join(words_rest), language='text')
+                    with st.expander("列表", expanded=False): st.code("\n".join(words_rest))
                     
-                    st.markdown("**🤖 AI 制卡指令**")
-                    has_term_rest = any('(' in w for w in words_rest)
+                    st.markdown("**🤖 AI 指令 (备用)**")
+                    p_csv_r = generate_ai_prompt(words_rest, 'csv', "single")
+                    p_txt_r = generate_ai_prompt(words_rest, 'txt', "single")
                     
-                    p_csv_r = generate_ai_prompt(words_rest, 'csv', is_term_list=has_term_rest)
-                    p_txt_r = generate_ai_prompt(words_rest, 'txt', is_term_list=has_term_rest)
-                    
-                    rt_csv, rt_txt = st.tabs(["📋 CSV 指令", "📝 TXT 指令"])
-                    with rt_csv: st.code(p_csv_r, language='markdown')
-                    with rt_txt: st.code(p_txt_r, language='markdown')
+                    rt1, rt2 = st.tabs(["CSV", "TXT"])
+                    with rt1: st.code(p_csv_r, language='markdown')
+                    with rt2: st.code(p_txt_r, language='markdown')
