@@ -25,51 +25,36 @@ st.markdown("""
 # ==========================================
 # 2. 内置词库 (白名单：仅限地名/时间/品牌)
 # ==========================================
-
-# A. 纯专有名词库 (无歧义，输入小写也会自动变大写)
 PROPER_NOUNS_DB = {
-    # --- 国家 & 地区 ---
+    # 国家/城市
     "usa": "USA", "uk": "UK", "america": "America", "england": "England",
     "japan": "Japan", "korea": "Korea", "france": "France", "germany": "Germany", "italy": "Italy",
     "spain": "Spain", "russia": "Russia", "india": "India", "brazil": "Brazil", "canada": "Canada",
-    "australia": "Australia", "mexico": "Mexico", "egypt": "Egypt", 
+    "australia": "Australia", "mexico": "Mexico", "egypt": "Egypt", "china": "China",
     "switzerland": "Switzerland", "sweden": "Sweden", "norway": "Norway",
-    
-    # --- 著名城市 ---
     "london": "London", "paris": "Paris", "tokyo": "Tokyo", "beijing": "Beijing",
-    "shanghai": "Shanghai", "hong kong": "Hong Kong",
-    "sydney": "Sydney", "melbourne": "Melbourne", "berlin": "Berlin", "rome": "Rome",
+    "shanghai": "Shanghai", "hong kong": "Hong Kong", "sydney": "Sydney", 
+    "melbourne": "Melbourne", "berlin": "Berlin", "rome": "Rome",
     "new york": "New York", "los angeles": "Los Angeles", "san francisco": "San Francisco",
     "chicago": "Chicago", "seattle": "Seattle", "boston": "Boston",
     "moscow": "Moscow", "cairo": "Cairo", "dubai": "Dubai",
-    
-    # --- 洲/大洋 ---
     "africa": "Africa", "asia": "Asia", "europe": "Europe", "antarctica": "Antarctica",
-    "pacific": "Pacific", "atlantic": "Atlantic",
-    
-    # --- 时间 (星期/月份) ---
+    # 时间
     "monday": "Monday", "tuesday": "Tuesday", "wednesday": "Wednesday", "thursday": "Thursday",
     "friday": "Friday", "saturday": "Saturday", "sunday": "Sunday",
     "january": "January", "february": "February", "april": "April", 
     "june": "June", "july": "July", "september": "September", 
     "october": "October", "november": "November", "december": "December",
-    
-    # --- 科技品牌 & 组织 ---
+    # 品牌
     "google": "Google", "apple": "Apple", "microsoft": "Microsoft", "tesla": "Tesla",
     "amazon": "Amazon", "facebook": "Facebook", "twitter": "Twitter", "youtube": "YouTube",
     "nasa": "NASA", "fbi": "FBI", "cia": "CIA", "un": "UN", "eu": "EU", "nato": "NATO",
     "iphone": "iPhone", "ipad": "iPad", "wifi": "Wi-Fi", "internet": "Internet"
 }
 
-# B. 歧义词名单 (严格大小写)
-# 仅保留地名/时间相关的歧义词。人名歧义词(Bill, Rose)全部移除，归入普通词。
+# 歧义词
 AMBIGUOUS_WORDS = {
-    "china",   # 瓷器 vs 中国
-    "turkey",  # 火鸡 vs 土耳其
-    "march",   # 行军 vs 三月
-    "may",     # 可能 vs 五月
-    "august",  # 威严的 vs 八月
-    "polish",  # 磨光 vs 波兰语
+    "china", "turkey", "march", "may", "august", "polish"
 }
 
 # ==========================================
@@ -89,29 +74,13 @@ def setup_nltk():
 setup_nltk()
 
 def get_word_info(raw_word):
-    """
-    智能判断逻辑 (无名氏版)
-    """
     word_lower = raw_word.lower()
     word_clean = raw_word.strip()
-    
-    # 1. 检查歧义词 (China, May)
     if word_lower in AMBIGUOUS_WORDS:
-        # 只有大写才算专有
-        if word_clean[0].isupper():
-            return word_clean.title(), True
-        else:
-            return word_lower, False
-
-    # 2. 检查纯专有名词库 (仅包含地名/时间/品牌)
+        if word_clean[0].isupper(): return word_clean.title(), True
+        else: return word_lower, False
     if word_lower in PROPER_NOUNS_DB:
         return PROPER_NOUNS_DB[word_lower], True
-        
-    # 3. 关闭 NLTK 的自动推断
-    # 以前我们会问 NLTK 这算不算 NNP，但 NLTK 会把 'John' 算作 NNP。
-    # 为了彻底杜绝人名，我们移除 NLTK 兜底逻辑。
-    # 凡是不在上面两个库里的，一律按普通词处理。
-    
     return word_lower, False
 
 def smart_lemmatize(text):
@@ -155,11 +124,45 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 5. 界面布局
+# 5. 核心：AI 指令生成器
 # ==========================================
-st.title("🚀 Vocab Master Pro (No Names)")
+def generate_ai_prompt(word_list):
+    """
+    生成符合用户“终极目标”的 Prompt
+    """
+    words_str = ", ".join(word_list)
+    
+    prompt = f"""
+这是为您整理的最新、最完整的 Anki 制卡核心指令标准。请严格遵守此准则处理单词列表：
 
-tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原", "📊 2. 单词分级"])
+1. 核心原则：原子性 (Atomicity)
+- 含义拆分：若单词有多个不同含义，拆分为多条数据。
+- 严禁堆砌：每张卡片只承载一个特定语境下的含义。
+
+2. 卡片正面 (Column 1: Front)
+- 内容：提供自然的短语或搭配 (Phrase/Collocation)，而非单个孤立单词。
+- 样式：纯文本，不加粗。
+
+3. 卡片背面 (Column 2: Back)
+- 格式：HTML 排版，包含三部分，用 <br><br> 分隔。
+- 结构：英文释义<br><br><em>斜体例句</em><br><br>【词根词缀】中文解析
+
+4. 输出格式标准 (TXT/CSV)
+- 代码块输出。
+- 英文逗号分隔字段。
+- 每个字段用双引号 ("...") 包裹。
+
+请为以下单词生成内容：
+{words_str}
+"""
+    return prompt
+
+# ==========================================
+# 6. 界面布局
+# ==========================================
+st.title("🚀 Vocab Master Pro (AI Prompt)")
+
+tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原", "📊 2. 单词分级 (生成指令)"])
 
 # --- Tab 1 ---
 with tab_lemma:
@@ -184,7 +187,7 @@ with tab_grade:
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         input_mode = st.radio("识别模式:", ("自动分词", "按行处理"), horizontal=True)
-        grade_input = st.text_area("input_box", height=400, placeholder="China\nParis\nJohn\nBill", label_visibility="collapsed")
+        grade_input = st.text_area("input_box", height=400, placeholder="China\nParis\nshove\nunhinge", label_visibility="collapsed")
         btn_grade = st.button("开始分级", type="primary", use_container_width=True)
 
     with g_col2:
@@ -213,13 +216,10 @@ with tab_grade:
                     if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
                     if item_lower in JUNK_WORDS: continue
                     
-                    # 获取信息
                     display_word, is_proper = get_word_info(item_cleaned)
-                    
                     rank = vocab_dict.get(item_lower, 99999)
                     
-                    if is_proper:
-                        cat = "proper"
+                    if is_proper: cat = "proper"
                     else:
                         if rank <= current_level: cat = "known"
                         elif rank <= target_level: cat = "target"
@@ -239,17 +239,24 @@ with tab_grade:
                     f"🟢 已掌握 ({len(df[df['cat']=='known'])})"
                 ])
                 
-                def show(cat_name):
+                def show(cat_name, label):
                     sub = df[df['cat'] == cat_name]
-                    if sub.empty: st.info("无")
+                    if sub.empty: 
+                        st.info("无")
                     else:
-                        txt = "\n".join(sub['word'].tolist())
-                        st.code(txt, language='text')
-                        st.caption("👆 一键复制")
+                        # 1. 显示单词列表
+                        words = sub['word'].tolist()
+                        st.code("\n".join(words), language='text')
+                        
+                        # 2. 生成 AI 指令
+                        with st.expander(f"🧠 生成 {label} AI 制卡指令 (点击展开)"):
+                            prompt = generate_ai_prompt(words)
+                            st.text_area("复制下方指令发给 AI:", value=prompt, height=300)
+                            st.caption("👆 全选复制，发送给 ChatGPT/Gemini，即可获得完美 Anki 导入文件")
 
-                with t1: show("target")
-                with t2: show("proper")
-                with t3: show("beyond")
-                with t4: show("known")
+                with t1: show("target", "重点词")
+                with t2: show("proper", "专有名词")
+                with t3: show("beyond", "超纲词")
+                with t4: show("known", "熟词")
             else:
                 st.warning("无有效单词")
