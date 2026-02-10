@@ -4,193 +4,240 @@ import re
 import os
 import simplemma
 
-st.set_page_config(page_title="Vibe Vocab Studio", page_icon="🕵️", layout="wide")
+# ==========================================
+# 0. 核心修复：强制内置映射表 (不再依赖下载)
+# ==========================================
+# 这里手动定义最常见的不规则动词，确保 100% 能还原
+# 即使 simplemma 挂了，这些词也能对！
+MANUAL_LEMMAS = {
+    "is": "be", "am": "be", "are": "be", "was": "be", "were": "be", 
+    "been": "be", "being": "be", "'s": "be", "'re": "be", "'m": "be",
+    "has": "have", "had": "have", "having": "have", "'ve": "have",
+    "does": "do", "did": "do", "done": "do", "doing": "do",
+    "went": "go", "gone": "go", "going": "go", "goes": "go",
+    "made": "make", "making": "make", "makes": "make",
+    "took": "take", "taken": "take", "taking": "take",
+    "came": "come", "coming": "come",
+    "saw": "see", "seen": "see",
+    "knew": "know", "known": "know",
+    "got": "get", "gotten": "get",
+    "gave": "give", "given": "give",
+    "told": "tell",
+    "felt": "feel",
+    "became": "become",
+    "left": "leave",
+    "put": "put",
+    "meant": "mean",
+    "kept": "keep",
+    "let": "let",
+    "began": "begin", "begun": "begin",
+    "seemed": "seem",
+    "helped": "help",
+    "showed": "show",
+    "heard": "hear",
+    "played": "play",
+    "ran": "run",
+    "moved": "move",
+    "lived": "live",
+    "believed": "believe",
+    "brought": "bring",
+    "happened": "happen",
+    "wrote": "write", "written": "write",
+    "provided": "provide",
+    "sat": "sit",
+    "stood": "stand",
+    "lost": "lose",
+    "paid": "pay",
+    "met": "meet",
+    "included": "include",
+    "continued": "continue",
+    "set": "set",
+    "learnt": "learn", "learned": "learn",
+    "changed": "change",
+    "led": "lead",
+    "understood": "understand",
+    "watched": "watch",
+    "followed": "follow",
+    "stopped": "stop",
+    "created": "create",
+    "spoke": "speak", "spoken": "speak",
+    "read": "read",
+    "allowed": "allow",
+    "added": "add",
+    "spent": "spend",
+    "grew": "grow",
+    "opened": "open",
+    "walked": "walk",
+    "won": "win",
+    "offered": "offer",
+    "remembered": "remember",
+    "loved": "love",
+    "considered": "consider",
+    "appeared": "appear",
+    "bought": "buy",
+    "waited": "wait",
+    "served": "serve",
+    "died": "die",
+    "sent": "send",
+    "expected": "expect",
+    "built": "build",
+    "stayed": "stay",
+    "fell": "fall", "fallen": "fall",
+    "cut": "cut",
+    "reached": "reach",
+    "killed": "kill",
+    "remained": "remain"
+}
 
-st.title("🕵️ Vibe Vocab v8.0 (透明调试版)")
-st.caption("所见即所得 · 拒绝黑盒操作")
+def get_lemma_robust(word):
+    """三保险还原策略"""
+    # 1. 第一层保险：查手动表 (处理最高频的不规则词)
+    if word in MANUAL_LEMMAS:
+        return MANUAL_LEMMAS[word]
+    
+    # 2. 第二层保险：Simplemma (尝试调用)
+    try:
+        res = simplemma.lemmatize(word, lang='en')
+        if res != word: return res
+    except:
+        pass
+        
+    # 3. 第三层保险：简单规则去尾 (处理规则复数/动词)
+    if word.endswith('s') and not word.endswith('ss'):
+        return word[:-1]
+    if word.endswith('ed'):
+        return word[:-2]
+    if word.endswith('ing'):
+        return word[:-3]
+    if word.endswith('ly'):
+        return word[:-2]
+        
+    return word
 
 # ==========================================
-# 1. 基础环境检查
+# 1. 页面配置
 # ==========================================
-# 检查 simplemma 是否能工作
-LEMMA_Check = "❌ 损坏"
-try:
-    test = simplemma.lemmatize("went", lang="en")
-    if test == "go":
-        LEMMA_Check = "✅ 正常 (v1.x)"
-        def get_lemma(word): return simplemma.lemmatize(word, lang="en")
-    else:
-        # 尝试旧版
-        if hasattr(simplemma, 'load_data'):
-            lang_data = simplemma.load_data('en')
-            def get_lemma(word): return simplemma.lemmatize(word, lang_data)
-            LEMMA_Check = "✅ 正常 (v0.9)"
-        else:
-            LEMMA_Check = "⚠️ 异常 (返回原词)"
-            def get_lemma(word): return word
-except:
-    LEMMA_Check = "❌ 彻底失败"
-    def get_lemma(word): return word
+st.set_page_config(page_title="Vibe Vocab Studio", page_icon="⚡", layout="wide")
+st.title("⚡ Vibe Vocab v9.0 (硬核还原版)")
+st.caption("内置高频变形表 · 专治 'are/been' 不认识")
 
 # ==========================================
-# 2. 读取文件 (只读，不猜)
+# 2. 读取词库
 # ==========================================
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv", "COCA20000词Excel版.xlsx - Sheet1.csv"]
 
 @st.cache_data
-def load_raw_df():
+def load_vocab_simple():
     file_path = None
     for f in POSSIBLE_FILES:
         if os.path.exists(f):
             file_path = f
             break
-    
+            
     if not file_path: return None, "未找到文件"
 
-    # 尝试暴力读取
+    # 优先读 coca_cleaned
+    if 'cleaned' in file_path:
+        try:
+            df = pd.read_csv(file_path)
+            # 确保列名正确
+            if 'word' in df.columns and 'rank' in df.columns:
+                vocab = pd.Series(df['rank'].values, index=df['word'].astype(str)).to_dict()
+                return vocab, "加载成功 (Cleaned)"
+        except: pass
+
+    # 兜底读原始文件
     for enc in ['utf-8', 'utf-8-sig', 'gbk']:
         try:
             df = pd.read_csv(file_path, encoding=enc)
-            if len(df) > 1:
-                # 统一转成字符串列名，防止出错
-                df.columns = [str(c).strip() for c in df.columns]
-                return df, file_path
-        except:
-            continue
-    return None, "读取失败"
+            # 找列
+            cols = [str(c).lower() for c in df.columns]
+            df.columns = cols
+            
+            w_col = next((c for c in cols if 'word' in c or '单词' in c), cols[0])
+            r_col = next((c for c in cols if 'rank' in c or '排序' in c or '词频' in c), cols[1] if len(cols)>1 else cols[0])
+            
+            # 清洗
+            df['w'] = df[w_col].astype(str).str.lower().str.strip()
+            df['r'] = pd.to_numeric(df[r_col], errors='coerce').fillna(99999)
+            
+            vocab = pd.Series(df['r'].values, index=df['w']).to_dict()
+            return vocab, "加载成功 (Raw)"
+        except: continue
+        
+    return None, "加载失败"
 
-df_raw, msg = load_raw_df()
+vocab_dict, msg = load_vocab_simple()
 
-if df_raw is None:
-    st.error(f"❌ 致命错误: {msg}")
+if not vocab_dict:
+    st.error(msg)
     st.stop()
-
-# ==========================================
-# 3. 交互式配置 (把控制权交给你)
-# ==========================================
-with st.sidebar:
-    st.header("🛠️ 核心设置")
-    st.info(f"词形还原引擎: {LEMMA_Check}")
     
-    st.write("---")
-    st.write("### 1. 确认数据列")
-    st.caption(f"当前加载: {os.path.basename(msg)}")
+# 侧边栏自检
+st.sidebar.success(f"📚 {msg}")
+check_are = vocab_dict.get('be', 'Not Found')
+st.sidebar.info(f"检查点: 'be' 排名 = {check_are}")
+st.sidebar.info(f"还原测试: went -> {get_lemma_robust('went')}")
+
+# ==========================================
+# 3. 核心逻辑 (调用强力还原)
+# ==========================================
+st.sidebar.divider()
+vocab_range = st.sidebar.slider("学习区间", 1, 20000, (6000, 8000), 500)
+r_start, r_end = vocab_range
+
+def process_text(text):
+    text_lower = text.lower()
+    words = re.findall(r'\b[a-z\']{2,}\b', text_lower)
+    unique_words = sorted(list(set(words)))
     
-    # 让用户自己选列！
-    all_cols = list(df_raw.columns)
+    known, target, beyond = [], [], []
     
-    # 尝试预选
-    default_word = next((c for c in all_cols if 'word' in c.lower() or '单词' in c), all_cols[0])
-    default_rank = next((c for c in all_cols if 'rank' in c.lower() or '排序' in c or '词频' in c), all_cols[1] if len(all_cols)>1 else all_cols[0])
+    for w in unique_words:
+        rank = 99999
+        match = w
+        note = ""
 
-    col_word = st.selectbox("哪一列是【单词】?", all_cols, index=all_cols.index(default_word))
-    col_rank = st.selectbox("哪一列是【排名】?", all_cols, index=all_cols.index(default_rank))
-
-    # 生成字典
-    try:
-        # 清洗
-        df_raw['clean_word'] = df_raw[col_word].astype(str).str.lower().str.strip()
-        df_raw['clean_rank'] = pd.to_numeric(df_raw[col_rank], errors='coerce').fillna(99999)
-        
-        # 建立索引
-        vocab_dict = pd.Series(df_raw['clean_rank'].values, index=df_raw['clean_word']).to_dict()
-        
-        st.success(f"✅ 索引建立完成: {len(vocab_dict)} 词")
-    except Exception as e:
-        st.error(f"建立索引失败: {e}")
-        st.stop()
-        
-    st.write("---")
-    vocab_range = st.slider("学习区间", 1, 20000, (6000, 8000), 500)
-
-# ==========================================
-# 4. 数据透视区 (关键！)
-# ==========================================
-with st.expander("📊 查看词库前 10 行 (排错必看)", expanded=True):
-    st.write("请检查：1. 列名选对了吗？ 2. 'the' 的排名是 1 吗？")
-    st.dataframe(df_raw[[col_word, col_rank]].head(10), use_container_width=True)
-
-# ==========================================
-# 5. 单词侦探 (Debug 专用)
-# ==========================================
-st.divider()
-c1, c2 = st.columns([1, 2])
-with c1:
-    st.subheader("🕵️ 单词侦探")
-    debug_word = st.text_input("输入一个词测试 (如 went):", placeholder="试一下简单的词...")
-    
-    if debug_word:
-        w = debug_word.lower().strip()
-        lemma = get_lemma(w)
-        
-        st.write(f"1. 原始词: **{w}**")
-        
-        # 查原始
+        # A. 直接查 (is -> is?)
         if w in vocab_dict:
-            r = vocab_dict[w]
-            st.write(f"   - 在词库中? ✅ (排名: {r})")
-        else:
-            st.write(f"   - 在词库中? ❌")
-            
-        st.write(f"2. 还原词: **{lemma}**")
+            rank = vocab_dict[w]
         
-        # 查还原
-        if lemma in vocab_dict:
-            r = vocab_dict[lemma]
-            st.write(f"   - 在词库中? ✅ (排名: {r})")
-            final_rank = r
-        else:
-            st.write(f"   - 在词库中? ❌")
-            final_rank = 99999
-            
-        # 判定
-        limit = vocab_range[0]
-        if final_rank <= limit:
-            st.success(f"结论: 🟢 熟词 (排名 {final_rank} <= {limit})")
-        else:
-            st.error(f"结论: 🔴 生词/超纲 (排名 {final_rank} > {limit})")
+        # B. 强力还原查 (is -> be)
+        if rank > 20000: # 如果直接查没查到，或者查到了但排名很低(可能是错误条目)
+            lemma = get_lemma_robust(w)
+            if lemma in vocab_dict:
+                # 只有当还原后的排名更靠前时，才采纳
+                lemma_rank = vocab_dict[lemma]
+                if lemma_rank < rank:
+                    rank = lemma_rank
+                    match = lemma
+                    note = f"<{w}>"
+
+        item = {'单词': match, '排名': int(rank), '备注': note}
+        
+        if rank <= r_start: known.append(item)
+        elif r_start < rank <= r_end: target.append(item)
+        else: beyond.append(item)
+
+    return pd.DataFrame(known), pd.DataFrame(target), pd.DataFrame(beyond)
 
 # ==========================================
-# 6. 批量分析逻辑
+# 4. 界面
 # ==========================================
-with c2:
-    st.subheader("📝 批量分析")
-    text_input = st.text_area("输入文章:", height=150)
-    
-    if st.button("🚀 开始分析"):
-        if not text_input: st.warning("没内容啊")
-        else:
-            words = re.findall(r'\b[a-z\']{2,}\b', text_input.lower())
-            unique_words = sorted(list(set(words)))
-            
-            res = []
-            for w in unique_words:
-                rank = 99999
-                match = w
-                
-                # 查词逻辑
-                if w in vocab_dict:
-                    rank = vocab_dict[w]
-                else:
-                    lemma = get_lemma(w)
-                    if lemma in vocab_dict:
-                        rank = vocab_dict[lemma]
-                        match = lemma
-                    elif w.endswith("s") and w[:-1] in vocab_dict:
-                         rank = vocab_dict[w[:-1]]
-                         match = w[:-1]
-                
-                res.append({'单词': match, '原文': w, '排名': int(rank)})
-            
-            df_res = pd.DataFrame(res)
-            
-            # 分级
-            r1, r2 = vocab_range
-            df_k = df_res[df_res['排名'] <= r1]
-            df_t = df_res[(df_res['排名'] > r1) & (df_res['排名'] <= r2)]
-            df_b = df_res[df_res['排名'] > r2]
-            
-            t1, t2, t3 = st.tabs([f"重点 ({len(df_t)})", f"超纲 ({len(df_b)})", f"熟词 ({len(df_k)})"])
-            with t1: st.dataframe(df_t, use_container_width=True)
-            with t2: st.dataframe(df_b, use_container_width=True)
-            with t3: st.dataframe(df_k, use_container_width=True)
+text_input = st.text_area("在此粘贴文本:", height=150)
+
+if st.button("🚀 开始分析", type="primary"):
+    if not text_input: st.warning("请输入内容")
+    else:
+        df_k, df_t, df_b = process_text(text_input)
+        
+        st.success("分析完成")
+        t1, t2, t3 = st.tabs([
+            f"🟡 重点 ({len(df_t)})", 
+            f"🔴 生词/超纲 ({len(df_b)})", 
+            f"🟢 熟词 ({len(df_k)})"
+        ])
+        
+        with t1: st.dataframe(df_t, use_container_width=True)
+        with t2: st.dataframe(df_b, use_container_width=True)
+        with t3: st.dataframe(df_k, use_container_width=True)
