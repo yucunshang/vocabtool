@@ -23,55 +23,57 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 内置巨型专有名词库 (大小写映射表)
+# 2. 内置词库 (白名单：仅限地名/时间/品牌)
 # ==========================================
-# key = 全小写, value = 正确显示格式
+
+# A. 纯专有名词库 (无歧义，输入小写也会自动变大写)
 PROPER_NOUNS_DB = {
     # --- 国家 & 地区 ---
-    "china": "China", "usa": "USA", "uk": "UK", "america": "America", "england": "England",
+    "usa": "USA", "uk": "UK", "america": "America", "england": "England",
     "japan": "Japan", "korea": "Korea", "france": "France", "germany": "Germany", "italy": "Italy",
     "spain": "Spain", "russia": "Russia", "india": "India", "brazil": "Brazil", "canada": "Canada",
-    "australia": "Australia", "new zealand": "New Zealand", "mexico": "Mexico", "egypt": "Egypt",
-    "singapore": "Singapore", "malaysia": "Malaysia", "thailand": "Thailand", "vietnam": "Vietnam",
-    "switzerland": "Switzerland", "sweden": "Sweden", "norway": "Norway", "denmark": "Denmark",
-    "finland": "Finland", "netherlands": "Netherlands", "belgium": "Belgium", "austria": "Austria",
-    "greece": "Greece", "turkey": "Turkey", "israel": "Israel", "saudi arabia": "Saudi Arabia",
-    "dubai": "Dubai", "africa": "Africa", "asia": "Asia", "europe": "Europe", "antarctica": "Antarctica",
+    "australia": "Australia", "mexico": "Mexico", "egypt": "Egypt", 
+    "switzerland": "Switzerland", "sweden": "Sweden", "norway": "Norway",
     
     # --- 著名城市 ---
-    "london": "London", "new york": "New York", "paris": "Paris", "tokyo": "Tokyo", "beijing": "Beijing",
-    "shanghai": "Shanghai", "hong kong": "Hong Kong", "sydney": "Sydney", "melbourne": "Melbourne",
-    "berlin": "Berlin", "rome": "Rome", "madrid": "Madrid", "moscow": "Moscow", "cairo": "Cairo",
-    "los angeles": "Los Angeles", "san francisco": "San Francisco", "chicago": "Chicago", "seattle": "Seattle",
-    "boston": "Boston", "washington": "Washington", "toronto": "Toronto", "vancouver": "Vancouver",
+    "london": "London", "paris": "Paris", "tokyo": "Tokyo", "beijing": "Beijing",
+    "shanghai": "Shanghai", "hong kong": "Hong Kong",
+    "sydney": "Sydney", "melbourne": "Melbourne", "berlin": "Berlin", "rome": "Rome",
+    "new york": "New York", "los angeles": "Los Angeles", "san francisco": "San Francisco",
+    "chicago": "Chicago", "seattle": "Seattle", "boston": "Boston",
+    "moscow": "Moscow", "cairo": "Cairo", "dubai": "Dubai",
+    
+    # --- 洲/大洋 ---
+    "africa": "Africa", "asia": "Asia", "europe": "Europe", "antarctica": "Antarctica",
+    "pacific": "Pacific", "atlantic": "Atlantic",
     
     # --- 时间 (星期/月份) ---
     "monday": "Monday", "tuesday": "Tuesday", "wednesday": "Wednesday", "thursday": "Thursday",
     "friday": "Friday", "saturday": "Saturday", "sunday": "Sunday",
-    "january": "January", "february": "February", "march": "March", "april": "April",
-    "may": "May", "june": "June", "july": "July", "august": "August",
-    "september": "September", "october": "October", "november": "November", "december": "December",
+    "january": "January", "february": "February", "april": "April", 
+    "june": "June", "july": "July", "september": "September", 
+    "october": "October", "november": "November", "december": "December",
     
-    # --- 常见英文名 (Top 50+) ---
-    "james": "James", "john": "John", "robert": "Robert", "michael": "Michael", "william": "William",
-    "david": "David", "richard": "Richard", "joseph": "Joseph", "thomas": "Thomas", "charles": "Charles",
-    "mary": "Mary", "patricia": "Patricia", "jennifer": "Jennifer", "linda": "Linda", "elizabeth": "Elizabeth",
-    "barbara": "Barbara", "susan": "Susan", "jessica": "Jessica", "sarah": "Sarah", "karen": "Karen",
-    "trump": "Trump", "biden": "Biden", "obama": "Obama", "musk": "Musk", "jobs": "Jobs", "gates": "Gates",
-    
-    # --- 科技 & 品牌 ---
-    "google": "Google", "apple": "Apple", "microsoft": "Microsoft", "amazon": "Amazon", "facebook": "Facebook",
-    "tesla": "Tesla", "twitter": "Twitter", "instagram": "Instagram", "youtube": "YouTube", "tiktok": "TikTok",
-    "iphone": "iPhone", "ipad": "iPad", "mac": "Mac", "windows": "Windows", "android": "Android",
-    "nike": "Nike", "adidas": "Adidas", "coca-cola": "Coca-Cola", "pepsi": "Pepsi", "mcdonald's": "McDonald's",
-    
-    # --- 缩写 & 组织 ---
+    # --- 科技品牌 & 组织 ---
+    "google": "Google", "apple": "Apple", "microsoft": "Microsoft", "tesla": "Tesla",
+    "amazon": "Amazon", "facebook": "Facebook", "twitter": "Twitter", "youtube": "YouTube",
     "nasa": "NASA", "fbi": "FBI", "cia": "CIA", "un": "UN", "eu": "EU", "nato": "NATO",
-    "ceo": "CEO", "cfo": "CFO", "cto": "CTO", "phd": "PhD", "mba": "MBA", "covid": "COVID"
+    "iphone": "iPhone", "ipad": "iPad", "wifi": "Wi-Fi", "internet": "Internet"
+}
+
+# B. 歧义词名单 (严格大小写)
+# 仅保留地名/时间相关的歧义词。人名歧义词(Bill, Rose)全部移除，归入普通词。
+AMBIGUOUS_WORDS = {
+    "china",   # 瓷器 vs 中国
+    "turkey",  # 火鸡 vs 土耳其
+    "march",   # 行军 vs 三月
+    "may",     # 可能 vs 五月
+    "august",  # 威严的 vs 八月
+    "polish",  # 磨光 vs 波兰语
 }
 
 # ==========================================
-# 3. 初始化 NLP (本地下载修复)
+# 3. 初始化 NLP
 # ==========================================
 @st.cache_resource
 def setup_nltk():
@@ -86,31 +88,32 @@ def setup_nltk():
 
 setup_nltk()
 
-def get_word_info(word):
+def get_word_info(raw_word):
     """
-    核心判断逻辑：
-    返回 (display_word, is_proper_noun)
+    智能判断逻辑 (无名氏版)
     """
-    word_lower = word.lower()
+    word_lower = raw_word.lower()
+    word_clean = raw_word.strip()
     
-    # 1. 优先查内置大词库 (最准)
+    # 1. 检查歧义词 (China, May)
+    if word_lower in AMBIGUOUS_WORDS:
+        # 只有大写才算专有
+        if word_clean[0].isupper():
+            return word_clean.title(), True
+        else:
+            return word_lower, False
+
+    # 2. 检查纯专有名词库 (仅包含地名/时间/品牌)
     if word_lower in PROPER_NOUNS_DB:
         return PROPER_NOUNS_DB[word_lower], True
         
-    # 2. 如果词库没查到，用 NLTK 辅助判断 (针对生僻人名)
-    try:
-        test_word = word.title()
-        tags = nltk.pos_tag([test_word])
-        pos_tag = tags[0][1]
-        if pos_tag.startswith('NNP'): # 专有名词
-            return test_word, True
-    except:
-        pass
-        
-    # 3. 普通单词，强制小写
+    # 3. 关闭 NLTK 的自动推断
+    # 以前我们会问 NLTK 这算不算 NNP，但 NLTK 会把 'John' 算作 NNP。
+    # 为了彻底杜绝人名，我们移除 NLTK 兜底逻辑。
+    # 凡是不在上面两个库里的，一律按普通词处理。
+    
     return word_lower, False
 
-# 还原引擎
 def smart_lemmatize(text):
     words = re.findall(r"[a-zA-Z']+", text)
     results = []
@@ -154,7 +157,7 @@ vocab_dict = load_vocab()
 # ==========================================
 # 5. 界面布局
 # ==========================================
-st.title("🚀 Vocab Master Pro (Proper Nouns)")
+st.title("🚀 Vocab Master Pro (No Names)")
 
 tab_lemma, tab_grade = st.tabs(["🛠️ 1. 智能还原", "📊 2. 单词分级"])
 
@@ -171,7 +174,7 @@ with tab_lemma:
             st.caption("👆 一键复制")
         elif not raw_text: st.info("👈 请输入文本")
 
-# --- Tab 2 (包含专有名词分类) ---
+# --- Tab 2 ---
 with tab_grade:
     col_a, col_b, col_c = st.columns([1, 1, 2])
     with col_a: current_level = st.number_input("当前水平", 0, 20000, 9000, 500)
@@ -181,7 +184,7 @@ with tab_grade:
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         input_mode = st.radio("识别模式:", ("自动分词", "按行处理"), horizontal=True)
-        grade_input = st.text_area("input_box", height=400, placeholder="China\nanti\nJohn", label_visibility="collapsed")
+        grade_input = st.text_area("input_box", height=400, placeholder="China\nParis\nJohn\nBill", label_visibility="collapsed")
         btn_grade = st.button("开始分级", type="primary", use_container_width=True)
 
     with g_col2:
@@ -189,7 +192,6 @@ with tab_grade:
             st.error("❌ 词库未加载")
         elif btn_grade and grade_input:
             
-            # 获取输入
             raw_items = []
             if "按行" in input_mode:
                 lines = grade_input.split('\n')
@@ -199,11 +201,8 @@ with tab_grade:
                 raw_items = grade_input.split()
             
             seen = set()
-            unique_items = []
+            unique_items = [] 
             JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're'}
-            
-            # 数据结构：(显示单词, rank, 类别)
-            data = []
             
             with st.spinner("正在智能分析..."):
                 for item in raw_items:
@@ -214,29 +213,25 @@ with tab_grade:
                     if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
                     if item_lower in JUNK_WORDS: continue
                     
-                    # === 核心逻辑：获取显示格式 & 是否为专有名词 ===
+                    # 获取信息
                     display_word, is_proper = get_word_info(item_cleaned)
                     
-                    # 查词频
                     rank = vocab_dict.get(item_lower, 99999)
                     
-                    # 分类逻辑
                     if is_proper:
-                        cat = "proper" # 新增：专有名词
+                        cat = "proper"
                     else:
                         if rank <= current_level: cat = "known"
                         elif rank <= target_level: cat = "target"
                         else: cat = "beyond"
                     
                     seen.add(item_lower)
-                    data.append({"word": display_word, "rank": rank, "cat": cat})
+                    unique_items.append({"word": display_word, "rank": rank, "cat": cat})
             
-            # 生成 Tab
-            df = pd.DataFrame(data)
+            df = pd.DataFrame(unique_items)
             if not df.empty:
                 df = df.sort_values(by='rank', ascending=True)
                 
-                # 定义 4 个 Tabs
                 t1, t2, t3, t4 = st.tabs([
                     f"🟡 重点 ({len(df[df['cat']=='target'])})", 
                     f"🔵 专有名词 ({len(df[df['cat']=='proper'])})", 
@@ -246,15 +241,14 @@ with tab_grade:
                 
                 def show(cat_name):
                     sub = df[df['cat'] == cat_name]
-                    if sub.empty: 
-                        st.info("无")
+                    if sub.empty: st.info("无")
                     else:
                         txt = "\n".join(sub['word'].tolist())
                         st.code(txt, language='text')
                         st.caption("👆 一键复制")
 
                 with t1: show("target")
-                with t2: show("proper") # 新增的专有名词 Tab
+                with t2: show("proper")
                 with t3: show("beyond")
                 with t4: show("known")
             else:
