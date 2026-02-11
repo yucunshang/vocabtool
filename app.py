@@ -21,18 +21,14 @@ st.markdown("""
     footer {visibility: hidden;}
     .block-container { padding-top: 1rem; }
     [data-testid="stSidebarCollapsedControl"] {display: none;}
-    div[role="radiogroup"] > label {
-        font-weight: bold;
+    
+    /* 优化参数面板外观 */
+    .param-box {
         background-color: var(--secondary-background-color);
-        color: var(--text-color);
+        padding: 15px;
+        border-radius: 10px;
         border: 1px solid var(--border-color-light);
-        padding: 5px 15px;
-        border-radius: 8px;
-        margin-right: 10px;
-    }
-    div[role="radiogroup"] > label:hover {
-        border-color: var(--primary-color);
-        color: var(--primary-color);
+        margin-bottom: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -63,7 +59,7 @@ def load_knowledge_base():
 BUILTIN_TECHNICAL_TERMS, PROPER_NOUNS_DB, BUILTIN_PATCH_VOCAB, AMBIGUOUS_WORDS = load_knowledge_base()
 
 # ==========================================
-# 3. 初始化 NLP
+# 3. 初始化 NLP (词形还原引擎)
 # ==========================================
 @st.cache_resource
 def setup_nltk():
@@ -78,21 +74,16 @@ def setup_nltk():
 
 setup_nltk()
 
-def smart_lemmatize(text):
-    words = re.findall(r"[a-zA-Z']+", text)
-    results = []
-    for w in words:
-        lemmas_dict = lemminflect.getAllLemmas(w)
-        if not lemmas_dict:
-            results.append(w.lower())
-            continue
-        if 'ADJ' in lemmas_dict: lemma = lemmas_dict['ADJ'][0]
-        elif 'ADV' in lemmas_dict: lemma = lemmas_dict['ADV'][0]
-        elif 'VERB' in lemmas_dict: lemma = lemmas_dict['VERB'][0]
-        elif 'NOUN' in lemmas_dict: lemma = lemmas_dict['NOUN'][0]
-        else: lemma = list(lemmas_dict.values())[0][0]
-        results.append(lemma)
-    return " ".join(results)
+def get_lemma(w):
+    """提取单个单词的原型"""
+    lemmas_dict = lemminflect.getAllLemmas(w)
+    if not lemmas_dict:
+        return w.lower()
+    if 'ADJ' in lemmas_dict: return lemmas_dict['ADJ'][0]
+    elif 'ADV' in lemmas_dict: return lemmas_dict['ADV'][0]
+    elif 'VERB' in lemmas_dict: return lemmas_dict['VERB'][0]
+    elif 'NOUN' in lemmas_dict: return lemmas_dict['NOUN'][0]
+    else: return list(lemmas_dict.values())[0][0]
 
 # ==========================================
 # 4. 词库加载 (含紧急修复补丁)
@@ -117,12 +108,9 @@ def load_vocab():
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
         except: pass
     
-    # 1. 注入常规补丁词库
     for word, rank in BUILTIN_PATCH_VOCAB.items():
         vocab[word] = rank
         
-    # 2. 核心修复：修复 COCA 词频表中被“同形异义词”污染的专有名词
-    # 比如不让 China 去查 china(瓷器:9255)，不让 March 去查 march(行军:2500)
     URGENT_OVERRIDES = {
         "china": 400, "turkey": 1500, "march": 500, "may": 100, "august": 1500, "polish": 2500,
         "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
@@ -188,31 +176,17 @@ def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list
     return prompt
 
 # ==========================================
-# 6. 通用分析函数 (保留真实难度)
+# 6. 核心分析引擎 (完全打通版)
 # ==========================================
-def analyze_text(raw_text, mode="auto"):
-    raw_items = []
-    if "按行" in mode:
-        lines = raw_text.split('\n')
-        for line in lines:
-            if line.strip(): raw_items.append(line.strip())
-    else:
-        clean_text = re.sub(r'[,.\n\t]', ' ', raw_text)
-        raw_items = clean_text.split()
-    
-    seen = set()
+def analyze_words(unique_word_list):
+    """直接对去重且还原后的单词列表进行词频定级"""
     unique_items = [] 
     JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're'}
     
-    for item in raw_items:
-        item_cleaned = item.strip()
-        item_lower = item_cleaned.lower()
-        
-        if item_lower in seen: continue
+    for item_lower in unique_word_list:
         if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
         if item_lower in JUNK_WORDS: continue
         
-        # 获取该词在词典中的真实 Rank
         actual_rank = vocab_dict.get(item_lower, 99999)
         
         # 1. 术语身份
@@ -220,210 +194,134 @@ def analyze_text(raw_text, mode="auto"):
             domain = BUILTIN_TECHNICAL_TERMS[item_lower]
             term_rank = actual_rank if actual_rank != 99999 else 15000
             unique_items.append({
-                "word": f"{item_cleaned} ({domain})", 
+                "word": f"{item_lower} ({domain})", 
                 "rank": term_rank,
                 "raw": item_lower
             })
-            seen.add(item_lower)
             continue
         
-        # 2. 专名身份 (保留真实难度！)
+        # 2. 专名与歧义词
         if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
-            display = PROPER_NOUNS_DB.get(item_lower, item_cleaned.title())
+            display = PROPER_NOUNS_DB.get(item_lower, item_lower.title())
             unique_items.append({
                 "word": display,
                 "rank": actual_rank, 
                 "raw": item_lower
             })
-            seen.add(item_lower)
             continue
             
-        # 3. 普通身份
+        # 3. 普通词
         if actual_rank != 99999:
             unique_items.append({
-                "word": item_cleaned,
+                "word": item_lower,
                 "rank": actual_rank,
                 "raw": item_lower
             })
-        
-        seen.add(item_lower)
-        
+            
     return pd.DataFrame(unique_items)
 
 # ==========================================
-# 7. 界面布局
+# 7. 界面布局与统一流水线
 # ==========================================
-st.title("🚀 Vocab Master Pro")
+st.title("🚀 Vocab Master Pro - 全能长文解析引擎")
+st.markdown("💡 **一站式工作流**：支持粘贴整本书、长篇外刊或论文（**数十万字超长文本输入**）。系统会自动进行【词形还原】、【全量分级】并提取【Top N 精选】，极速生成双端输出。")
 
-app_mode = st.radio("选择功能模式:", 
-    ["🛠️ 智能还原", "📊 单词分级 (全量)", "🎯 智能精选 (Top N)"], 
-    horizontal=True
-)
+# --- 参数配置区 ---
+st.markdown("<div class='param-box'>", unsafe_allow_html=True)
+c1, c2, c3, c4, c5 = st.columns(5)
+with c1: current_level = st.number_input("🎯 当前水平 (起)", 0, 30000, 9000, 500, help="低于此词频的视为已掌握")
+with c2: target_level = st.number_input("🎯 目标水平 (止)", 0, 30000, 15000, 500, help="高于此词频的视为超纲")
+with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10, help="从剩余生词中挑选的最核心数量")
+with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3000, 500, help="精选时忽略太简单的基础词")
+with c5: 
+    st.write("") 
+    st.write("") 
+    show_rank = st.checkbox("🔢 附加显示 Rank", value=False)
+st.markdown("</div>", unsafe_allow_html=True)
+
+# --- 超长文本输入区 ---
+raw_text = st.text_area("📥 在此粘贴你的超长英文原文...", height=250, placeholder="Once upon a time...")
+btn_process = st.button("🚀 一键智能解析 (处理长文)", type="primary", use_container_width=True)
+
 st.divider()
 
-if "智能还原" in app_mode:
-    c1, c2 = st.columns(2)
-    with c1:
-        raw_text = st.text_area("输入原始文章", height=400, placeholder="He was excited.")
-        if st.button("开始还原", type="primary"):
-            res = smart_lemmatize(raw_text)
-            st.code(res, language='text')
-            st.caption("👆 一键复制")
-
-elif "单词分级" in app_mode:
-    col_level1, col_level2, col_level3 = st.columns([1, 1, 1])
-    with col_level1: current_level = st.number_input("当前水平", 0, 30000, 9000, 500)
-    with col_level2: target_level = st.number_input("目标水平", 0, 30000, 15000, 500)
-    with col_level3: 
-        st.write("") 
-        show_rank = st.checkbox("🔢 显示单词词频 (Rank)", value=False)
-    
-    g_col1, g_col2 = st.columns(2)
-    with g_col1:
-        input_mode = st.radio("识别模式:", ("自动分词", "按行处理"), horizontal=True)
-        grade_input = st.text_area("input_box", height=400, placeholder="China\nTesla\nmotion\nrun", label_visibility="collapsed")
-        btn_grade = st.button("开始分级", type="primary", use_container_width=True)
-
-    with g_col2:
-        if btn_grade and grade_input and vocab_dict:
-            df = analyze_text(grade_input, input_mode)
-            if not df.empty:
-                # 终极极简分类：不再区分是不是专名，只看 rank 难度
-                def categorize(row):
-                    r = row['rank']
-                    if r <= current_level: return "known"
-                    elif r <= target_level: return "target"
-                    else: return "beyond"
-                
-                df['final_cat'] = df.apply(categorize, axis=1)
-                df = df.sort_values(by='rank')
-
-                # 只保留三大难度区间
-                t_known, t_target, t_beyond = st.tabs([
-                    f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
-                    f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
-                    f"🔴 超纲 ({len(df[df['final_cat']=='beyond'])})"
-                ])
-                
-                def render_tab(tab_obj, cat_key, label, def_mode):
-                    with tab_obj:
-                        sub = df[df['final_cat'] == cat_key]
-                        if not sub.empty:
-                            pure_words = sub['word'].tolist()
-                            
-                            display_lines = []
-                            for _, row in sub.iterrows():
-                                if show_rank:
-                                    rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
-                                    display_lines.append(f"{row['word']} [Rank: {rank_str}]")
-                                else:
-                                    display_lines.append(row['word'])
-                            
-                            # 恢复折叠框
-                            with st.expander("👁️ 查看列表", expanded=False):
-                                st.code("\n".join(display_lines), language='text')
-                            
-                            st.markdown(f"**🤖 AI 指令 ({label})**")
-                            # 检测是否存在术语 (决定要不要传 term 指令)
-                            has_term = any('(' in w for w in pure_words)
-                            
-                            p_csv = generate_ai_prompt(pure_words, 'csv', def_mode, is_term_list=has_term)
-                            p_txt = generate_ai_prompt(pure_words, 'txt', def_mode, is_term_list=has_term)
-                            
-                            t_csv, t_txt = st.tabs(["📋 CSV 指令", "📝 TXT 指令"])
-                            with t_csv: st.code(p_csv, language='markdown')
-                            with t_txt: st.code(p_txt, language='markdown')
-                        else: st.info("暂无单词")
-
-                render_tab(t_known, "known", "熟词", def_mode="split")  
-                render_tab(t_target, "target", "重点", def_mode="single") 
-                render_tab(t_beyond, "beyond", "超纲", def_mode="single") 
-
-elif "Top N" in app_mode:
-    st.info("💡 此模式自动过滤简单词，按 **由易到难** 挑选。所有单词(含专名/术语)均采用真实词频过滤。")
-    
-    c_set1, c_set2, c_set3 = st.columns([1, 1, 1])
-    with c_set1: top_n = st.number_input("🎯 筛选数量", 10, 500, 50, 10)
-    with c_set2: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3000, 500)
-    with c_set3: 
-        st.write("") 
-        show_rank_topn = st.checkbox("🔢 显示单词词频 (Rank)", value=False)
+# --- 统一流水线处理逻辑 ---
+if btn_process and raw_text and vocab_dict:
+    with st.spinner("🧠 正在进行亿级词形还原与全量词频匹配..."):
         
-    c_input, c_btn = st.columns([3, 1])
-    with c_input:
-        topn_input = st.text_area("输入", height=150, placeholder="China\nTesla\nmotion\nrun", label_visibility="collapsed")
-    with c_btn:
-        btn_topn = st.button("🎲 生成精选", type="primary", use_container_width=True)
-
-    if btn_topn and topn_input and vocab_dict:
-        df = analyze_text(topn_input, "自动分词") 
+        # 1. 提取与智能还原 (Lemmatization)
+        raw_words = re.findall(r"[a-zA-Z']+", raw_text)
+        lemmatized_words = [get_lemma(w) for w in raw_words]
+        full_lemmatized_text = " ".join(lemmatized_words)
+        
+        # 2. 去重并提取唯一词根
+        unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
+        
+        # 3. 词频定级
+        df = analyze_words(unique_lemmas)
         
         if not df.empty:
-            df['rank'] = pd.to_numeric(df['rank'], errors='coerce').fillna(99999)
+            # --- 核心分类器 ---
+            def categorize(row):
+                r = row['rank']
+                if r <= current_level: return "known"
+                elif r <= target_level: return "target"
+                else: return "beyond"
             
+            df['final_cat'] = df.apply(categorize, axis=1)
+            df = df.sort_values(by='rank')
+            
+            # --- Top N 提取 ---
             valid_candidates = df[df['rank'] >= min_rank_threshold].copy()
-            sorted_df = valid_candidates.sort_values(by='rank', ascending=True)
-            top_df = sorted_df.head(top_n)
+            top_df = valid_candidates.sort_values(by='rank', ascending=True).head(top_n)
             
-            all_ids = set(df.index)
-            top_ids = set(top_df.index)
-            rest_ids = all_ids - top_ids
-            rest_df = df.loc[list(rest_ids)].sort_values(by='rank')
+            # --- 渲染输出 Tab 面板 ---
+            t_top, t_target, t_beyond, t_known, t_raw = st.tabs([
+                f"🔥 Top {len(top_df)} 核心精选",
+                f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
+                f"🔴 超纲 ({len(df[df['final_cat']=='beyond'])})",
+                f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
+                "📝 词形还原全文输出"
+            ])
             
-            st.divider()
-            col_win, col_rest = st.columns(2)
-            
-            with col_win:
-                st.success(f"🔥 精选 Top {len(top_df)}")
-                if not top_df.empty:
-                    pure_words = top_df['word'].tolist()
-                    
-                    display_lines = []
-                    for _, row in top_df.iterrows():
-                        if show_rank_topn:
-                            r_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
-                            display_lines.append(f"{row['word']} [Rank: {r_str}]")
+            # 渲染通用函数
+            def render_tab(tab_obj, data_df, label, def_mode, is_expander=False):
+                with tab_obj:
+                    if not data_df.empty:
+                        pure_words = data_df['word'].tolist()
+                        
+                        display_lines = []
+                        for _, row in data_df.iterrows():
+                            if show_rank:
+                                rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
+                                display_lines.append(f"{row['word']} [Rank: {rank_str}]")
+                            else:
+                                display_lines.append(row['word'])
+                        
+                        if is_expander:
+                            with st.expander("👁️ 查看完整列表", expanded=False):
+                                st.code("\n".join(display_lines), language='text')
                         else:
-                            display_lines.append(row['word'])
-                            
-                    # 恢复折叠框
-                    with st.expander("👁️ 查看列表", expanded=True):
-                        st.code("\n".join(display_lines), language='text')
-                    
-                    st.markdown("**🤖 AI 指令 (核心单义)**")
-                    has_term = any('(' in w for w in pure_words)
-                    mode = "single" if not has_term else "term"
-                    
-                    p_csv = generate_ai_prompt(pure_words, 'csv', mode, is_term_list=has_term)
-                    p_txt = generate_ai_prompt(pure_words, 'txt', mode, is_term_list=has_term)
-                    
-                    t1, t2 = st.tabs(["CSV", "TXT"])
-                    with t1: st.code(p_csv, language='markdown')
-                    with t2: st.code(p_txt, language='markdown')
-                else: st.warning("无符合条件的单词 (全部被起点过滤了)")
+                            st.code("\n".join(display_lines), language='text')
+                        
+                        st.markdown(f"**🤖 AI 指令 ({label})**")
+                        has_term = any('(' in w for w in pure_words)
+                        
+                        p_csv = generate_ai_prompt(pure_words, 'csv', def_mode, is_term_list=has_term)
+                        p_txt = generate_ai_prompt(pure_words, 'txt', def_mode, is_term_list=has_term)
+                        
+                        t_csv, t_txt = st.tabs(["📋 CSV 指令", "📝 TXT 指令"])
+                        with t_csv: st.code(p_csv, language='markdown')
+                        with t_txt: st.code(p_txt, language='markdown')
+                    else: st.info("该区间暂无符合条件的单词")
 
-            with col_rest:
-                st.subheader(f"💤 剩余 {len(rest_df)} 个")
-                if not rest_df.empty:
-                    pure_words_r = rest_df['word'].tolist()
-                    
-                    display_lines_r = []
-                    for _, row in rest_df.iterrows():
-                        if show_rank_topn:
-                            r_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
-                            display_lines_r.append(f"{row['word']} [Rank: {r_str}]")
-                        else:
-                            display_lines_r.append(row['word'])
-                            
-                    # 恢复折叠框
-                    with st.expander("👁️ 查看列表", expanded=False):
-                        st.code("\n".join(display_lines_r), language='text')
-                    
-                    st.markdown("**🤖 AI 指令 (备用)**")
-                    has_term_r = any('(' in w for w in pure_words_r)
-                    p_csv_r = generate_ai_prompt(pure_words_r, 'csv', "single", is_term_list=has_term_r)
-                    p_txt_r = generate_ai_prompt(pure_words_r, 'txt', "single", is_term_list=has_term_r)
-                    
-                    rt1, rt2 = st.tabs(["CSV", "TXT"])
-                    with rt1: st.code(p_csv_r, language='markdown')
-                    with rt2: st.code(p_txt_r, language='markdown')
+            # 渲染各板块
+            render_tab(t_top, top_df, "核心单义", def_mode="single", is_expander=False) # Top N 直接展示
+            render_tab(t_target, df[df['final_cat']=='target'], "重点", def_mode="single", is_expander=True)
+            render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", def_mode="single", is_expander=True)
+            render_tab(t_known, df[df['final_cat']=='known'], "熟词拆分", def_mode="split", is_expander=True)
+            
+            # 渲染还原原文板块
+            with t_raw:
+                st.info("💡 这是自动词形还原（Lemmatized）后的超长文本输出，可直接复制用于其他 NLP 分析。")
+                st.code(full_lemmatized_text, language='text')
