@@ -248,7 +248,7 @@ Process the following list of words immediately and output ONLY the final code b
 # 5. 多核并发 API 引擎 (健壮性升级版)
 # ==========================================
 def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
-    url = "[https://api.deepseek.com/chat/completions](https://api.deepseek.com/chat/completions)".strip()
+    url = "https://api.deepseek.com/chat/completions".strip()
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     system_enforcement = "\n\n【系统绝对强制指令】现在我已经发送了单词列表，请立即且直接输出最终的数据代码，绝对不准回复“好的”、“没问题”等任何客套话，绝对不准使用 ```csv 等 Markdown 语法包裹代码！"
     full_prompt = f"{prompt_template}{system_enforcement}\n\n待处理单词列表：\n{', '.join(batch_words)}"
@@ -364,7 +364,8 @@ def analyze_words(unique_word_list):
 # 7. UI 视图层
 # ==========================================
 st.title("🚀 Vocab Master Pro - Stable Release")
-st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB` 文件，并**内置免费 AI** 一键生成 Anki 记忆卡片。")
+# --- 新增注记：说明词频基于 COCA 20000 核心词库 ---
+st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB` 文件，并**内置免费 AI** 一键生成 Anki 记忆卡片。 *(词频分级数据基于 COCA 20000 权威核心词库)*")
 
 def clear_all_inputs():
     st.session_state.raw_input_text = ""
@@ -377,9 +378,9 @@ c1, c2, c3, c4, c5 = st.columns(5)
 with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 20000, 9000, 500)     
 with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 20000, 15000, 500)    
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 100, 10)                 
-with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 10000, 500) 
+# --- 更新默认阈值：忽略前 6000 词 ---
+with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 6000, 500) 
 with c5: 
-    # 已移除“过滤人名”开关，仅保留 Rank 开关，进行美观占位
     st.write("") 
     st.write("") 
     show_rank = st.checkbox("🔢 附加显示 Rank", value=True)
@@ -450,7 +451,9 @@ if st.session_state.get("is_processed", False):
         
         df['final_cat'] = df.apply(categorize, axis=1)
         df = df.sort_values(by='rank')
-        top_df = df[df['rank'] >= min_rank_threshold].sort_values(by='rank', ascending=True).head(top_n)
+        
+        # --- 更新逻辑：Top N 必须排除未收录词汇 (rank != 99999) ---
+        top_df = df[(df['rank'] >= min_rank_threshold) & (df['rank'] < 99999)].sort_values(by='rank', ascending=True).head(top_n)
         
         t_top, t_target, t_beyond, t_known = st.tabs([
             f"🔥 Top {len(top_df)}", 
@@ -519,6 +522,9 @@ if st.session_state.get("is_processed", False):
                             height=380, 
                             key=f"prompt_{df_key}_{export_format}"
                         )
+                        
+                        # --- 新增：AI 生成内容免责声明 ---
+                        st.caption("⚠️ **免责声明**：AI 生成的内容（释义、例句等）可能存在偶发的不准确或幻觉，请结合实际语境使用，建议导入前稍作复核。")
                         
                         if st.button("⚡ 召唤 DeepSeek 极速生成卡片", key=f"btn_{df_key}", type="primary"):
                             progress_bar = st.progress(0)
