@@ -37,7 +37,7 @@ st.markdown("""
         margin-bottom: 20px;
     }
     
-    /* 修复：复制提示文字显示不全的问题（去除了负边距） */
+    /* 复制提示文字高亮 */
     .copy-hint {
         color: #888;
         font-size: 14px;
@@ -101,7 +101,7 @@ def get_lemma(w):
     else: return list(lemmas_dict.values())[0][0]
 
 # ==========================================
-# 4. 词库加载 (含紧急修复补丁)
+# 4. 词库加载
 # ==========================================
 POSSIBLE_FILES = ["coca_cleaned.csv", "data.csv"]
 
@@ -239,15 +239,18 @@ def analyze_words(unique_word_list):
 # 7. 界面布局与统一流水线
 # ==========================================
 st.title("🚀 Vocab Master Pro - 全能长文解析引擎")
-st.markdown("💡 **一站式工作流**：支持粘贴整本书、长篇外刊或论文（**数十万字超长文本输入**）。系统会自动进行【词形还原】、【全量分级】并提取【Top N 精选】，极速生成双端输出。")
+st.markdown("💡 **一站式工作流**：支持粘贴几十万字的超长文本，**更支持直接上传 TXT 原著文件**，突破浏览器性能极限！系统将一键完成【词形还原】、【全量分级】并提取【Top N 精选】。")
 
-# --- 初始化 Session State（用于清空文本框） ---
+# --- 初始化 Session State（用于彻底清空输入框和上传组件） ---
 if "raw_input_text" not in st.session_state:
     st.session_state.raw_input_text = ""
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0 # 用作 file_uploader 的 key，改变它即可强制重置组件
 
-def clear_text():
-    """回调函数：清空输入框绑定的 session state"""
+def clear_all_inputs():
+    """回调函数：彻底清空文本框和文件上传器"""
     st.session_state.raw_input_text = ""
+    st.session_state.uploader_key += 1 # 每次加1，重新渲染一个空白的上传组件
 
 # --- 参数配置区 (直观展示，不折叠) ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
@@ -262,25 +265,38 @@ with c5:
     show_rank = st.checkbox("🔢 附加显示 Rank", value=False)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# --- 超长文本输入区 ---
-raw_text = st.text_area("📥 在此粘贴你的超长英文原文...", height=250, placeholder="Once upon a time, there was a...", key="raw_input_text")
+# --- 双通道输入区：文本框 + 文件上传 ---
+col_input1, col_input2 = st.columns([3, 2])
+with col_input1:
+    raw_text = st.text_area("📥 在此粘贴英文原文 (支持10万字以内)...", height=200, key="raw_input_text")
+with col_input2:
+    st.info("💡 **突破极限**：超10万字的英文原著/论文，请勿粘贴，直接在此上传 👇")
+    # 绑定动态 key，方便一键清空
+    uploaded_file = st.file_uploader("📂 上传 .txt 纯文本文件", type=["txt"], key=f"uploader_{st.session_state.uploader_key}")
 
-# --- 按钮区（新增一键清空） ---
+# --- 按钮区（新增一键清空双通道） ---
 col_btn1, col_btn2 = st.columns([5, 1])
 with col_btn1:
     btn_process = st.button("🚀 一键智能解析 (处理长文)", type="primary", use_container_width=True)
 with col_btn2:
-    # 点击时触发 clear_text 回调函数，清空文本并刷新页面，底下的结果也会一同消失
-    st.button("🗑️ 一键清空", on_click=clear_text, use_container_width=True)
+    st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_container_width=True)
 
 st.divider()
 
+# --- 提取并融合文本 ---
+# 无论用户是只粘贴了、只上传了，还是又粘贴又上传，我们都把文本合在一起处理
+combined_text = raw_text
+if uploaded_file is not None:
+    # 读取并解码上传的 TXT 文件
+    file_content = uploaded_file.getvalue().decode("utf-8", errors="ignore")
+    combined_text += "\n" + file_content
+
 # --- 统一流水线处理逻辑 ---
-if btn_process and raw_text and vocab_dict:
-    with st.spinner("🧠 正在进行亿级词形还原与全量词频匹配..."):
+if btn_process and combined_text.strip() and vocab_dict:
+    with st.spinner("🧠 正在进行亿级词形还原与全量词频匹配（文件越大所需时间越长，请耐心等待）..."):
         
         # 1. 提取总词数 (Total Words)
-        raw_words = re.findall(r"[a-zA-Z']+", raw_text)
+        raw_words = re.findall(r"[a-zA-Z']+", combined_text)
         total_word_count = len(raw_words)
         
         # 2. 智能还原 (Lemmatization)
@@ -297,7 +313,7 @@ if btn_process and raw_text and vocab_dict:
         
         # === 全景字数统计看板 ===
         col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric(label="📝 原文总字数", value=f"{total_word_count:,}")
+        col_m1.metric(label="📝 解析总字数", value=f"{total_word_count:,}")
         col_m2.metric(label="✂️ 去重词根数", value=f"{unique_word_count:,}")
         col_m3.metric(label="🎯 纳入分级词汇", value=f"{valid_word_count:,}")
         st.write("") # 留白
@@ -326,7 +342,7 @@ if btn_process and raw_text and vocab_dict:
                 "📝 词形还原全文输出"
             ])
             
-            # 渲染通用函数 (修复了提示文案显示不全的问题)
+            # 渲染通用函数
             def render_tab(tab_obj, data_df, label, def_mode, expand_default=False):
                 with tab_obj:
                     if not data_df.empty:
@@ -340,7 +356,6 @@ if btn_process and raw_text and vocab_dict:
                             else:
                                 display_lines.append(row['word'])
                         
-                        # 统一加折叠栏与明确的复制指引
                         with st.expander("👁️ 查看完整单词列表", expanded=expand_default):
                             st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制单词</p>", unsafe_allow_html=True)
                             st.code("\n".join(display_lines), language='text')
@@ -368,6 +383,6 @@ if btn_process and raw_text and vocab_dict:
             
             # 渲染还原原文板块
             with t_raw:
-                st.info("💡 这是自动词形还原（Lemmatized）后的超长文本输出，可直接复制用于其他 NLP 分析。")
+                st.info("💡 这是自动词形还原（Lemmatized）后的全文输出，可直接复制用于其他 NLP 分析。")
                 st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制全文</p>", unsafe_allow_html=True)
                 st.code(full_lemmatized_text, language='text')
