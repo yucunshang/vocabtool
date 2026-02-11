@@ -40,13 +40,19 @@ st.markdown("""
 @st.cache_data
 def load_knowledge_base():
     try:
+        # 确保 data 目录存在，如果不存在则提示
+        if not os.path.exists('data'):
+            # 这里可以做容错，如果没有文件返回空字典，防止报错崩溃
+            return {}, {}, {}, set()
+            
         with open('data/terms.json', 'r', encoding='utf-8') as f: terms = {k.lower(): v for k, v in json.load(f).items()}
         with open('data/proper.json', 'r', encoding='utf-8') as f: proper = {k.lower(): v for k, v in json.load(f).items()}
         with open('data/patch.json', 'r', encoding='utf-8') as f: patch = json.load(f)
         with open('data/ambiguous.json', 'r', encoding='utf-8') as f: ambiguous = set(json.load(f))
         return terms, proper, patch, ambiguous
-    except FileNotFoundError:
-        st.error("⚠️ 缺少 data/ 文件夹下的 JSON 知识库文件！")
+    except Exception as e:
+        # 生产环境静默失败或仅打印日志，避免弹窗吓到用户
+        print(f"Knowledge base load error: {e}")
         return {}, {}, {}, set()
 
 BUILTIN_TECHNICAL_TERMS, PROPER_NOUNS_DB, BUILTIN_PATCH_VOCAB, AMBIGUOUS_WORDS = load_knowledge_base()
@@ -87,6 +93,7 @@ def load_vocab():
         except: pass
     
     for word, rank in BUILTIN_PATCH_VOCAB.items(): vocab[word] = rank
+    # 常用词强制覆盖 rank
     URGENT_OVERRIDES = {
         "china": 400, "turkey": 1500, "march": 500, "may": 100, "august": 1500, "polish": 2500,
         "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
@@ -130,7 +137,7 @@ def extract_text_from_file(uploaded_file):
     return ""
 
 def get_base_prompt_template(export_format="TXT"):
-    return f"""【角色设定】 你是一位精通词源学、认知心理学以及 Anki 算法的“英语词汇专家与闪卡制作大师”。接下来的对话中，请严格遵守以下 5 项制卡标准，处理我提供的所有单词列表：：
+    return f"""【角色设定】 你是一位精通词源学、认知心理学以及 Anki 算法的“英语词汇专家与闪卡制作大师”。接下来的对话中，请严格遵守以下 5 项制卡标准，处理我提供的所有单词列表：
 
 1. 核心原则：原子性 (Atomicity)
 含义拆分：若一个单词有多个常用含义（名词 vs 动词，字面义 vs 引申义等），必须拆分为多条独立数据。
@@ -199,19 +206,17 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
         return f"\n🚨 批次请求发生异常: {str(e)}"
 
 def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text):
-    """多线程并发控制器 (极速反馈 + 跑分解锁版)"""
+    """多线程并发控制器"""
     try: api_key = st.secrets["DEEPSEEK_API_KEY"]
     except KeyError: return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
     
     if not words: return "⚠️ 错误：没有需要生成的单词。"
     
-    # 🔓 跑分墙解禁：为了测试超越 Gemini，单次上限提升到 300 词！
     MAX_WORDS = 250
     if len(words) > MAX_WORDS:
         st.warning(f"⚠️ 为保证并发稳定，本次仅截取前 **{MAX_WORDS}** 个单词。")
         words = words[:MAX_WORDS]
 
-    # 黄金切割：30词一批。250词刚好分9批，5个线程两波即可打完！
     CHUNK_SIZE = 30  
     chunks = [words[i:i + CHUNK_SIZE] for i in range(0, len(words), CHUNK_SIZE)]
     total_words = len(words)
@@ -272,8 +277,8 @@ def analyze_words(unique_word_list):
 # ==========================================
 # 6. UI 与流水线状态管理
 # ==========================================
-st.title("🚀 Vocab Master Pro - V5")
-st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB文件，并**内置免费 AI** 一键生成 Anki 记忆卡片。")
+st.title("🚀 Vocab Master Pro - Stable")
+st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB` 文件，并**内置免费 AI** 一键生成 Anki 记忆卡片。")
 
 if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
@@ -283,6 +288,8 @@ def clear_all_inputs():
     st.session_state.raw_input_text = ""
     st.session_state.uploader_key += 1 
     st.session_state.is_processed = False
+    # 清除旧的分析结果
+    if 'base_df' in st.session_state: del st.session_state.base_df
 
 # --- 参数配置区 ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
@@ -315,7 +322,7 @@ st.divider()
 # 7. 后台硬核计算
 # ==========================================
 if btn_process:
-    with st.spinner("🧠 正在急速读取文件并进行智能解析（长篇巨著请稍候）..."):
+    with st.spinner("🧠 正在急速读取文件并进行智能解析（性能优化版）..."):
         start_time = time.time()
         combined_text = raw_text
         if uploaded_file is not None: combined_text += "\n" + extract_text_from_file(uploaded_file)
@@ -324,14 +331,22 @@ if btn_process:
             st.warning("⚠️ 未提取到任何有效文本！")
             st.session_state.is_processed = False
         elif vocab_dict:
+            # 1. 提取单词
             raw_words = re.findall(r"[a-zA-Z']+", combined_text)
-            lemmatized_words = [get_lemma(w) for w in raw_words]
-            full_lemmatized_text = " ".join(lemmatized_words)
             
-            unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
+            # 2. 词形还原 (优化：仅提取不拼接全文，大幅节省内存)
+            # 使用 set 先去重再还原效率不一定高，因为 context 丢失，但这里 get_lemma 是单词处理，
+            # 我们可以先对 raw_words 做 set 减少 get_lemma 调用次数 (如果单词量极大)
+            # 不过为了保持频率统计的潜在准确性(虽然这里没用到频次)，直接处理列表也行。
+            # 既然是 stable 优化，我们只做去重后的 lemma
             
+            unique_raw_words = list(set(raw_words)) # 先去重，减少 get_lemma 调用
+            lemmatized_unique = [get_lemma(w).lower() for w in unique_raw_words]
+            unique_lemmas = list(set(lemmatized_unique)) # 再次去重 (run -> run, running -> run)
+            
+            # 3. 核心分析
             st.session_state.base_df = analyze_words(unique_lemmas)
-            st.session_state.lemma_text = full_lemmatized_text
+            
             st.session_state.stats = {
                 "raw_count": len(raw_words),
                 "unique_count": len(unique_lemmas),
@@ -365,10 +380,12 @@ if st.session_state.get("is_processed", False):
         df = df.sort_values(by='rank')
         top_df = df[df['rank'] >= min_rank_threshold].sort_values(by='rank', ascending=True).head(top_n)
         
-        t_top, t_target, t_beyond, t_known, t_raw = st.tabs([
-            f"🔥 Top {len(top_df)}", f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
-            f"🔴 超纲 ({len(df[df['final_cat']=='beyond'])})", f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
-            "📝 原文防卡死下载"
+        # 移除 "原文防卡死下载" Tab
+        t_top, t_target, t_beyond, t_known = st.tabs([
+            f"🔥 Top {len(top_df)}", 
+            f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
+            f"🔴 超纲 ({len(df[df['final_cat']=='beyond'])})", 
+            f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})"
         ])
         
         def render_tab(tab_obj, data_df, label, expand_default=False, df_key=""):
@@ -433,7 +450,7 @@ if st.session_state.get("is_processed", False):
                                     use_container_width=True
                                 )
                                 
-                                st.markdown("##### 📝 预览框 (仅供查看，请勿从此处手动复制拖拽，以免格式错乱)")
+                                st.markdown("##### 📝 预览框")
                                 st.code(ai_result, language="text")
                     
                     with ai_tab2:
@@ -447,12 +464,3 @@ if st.session_state.get("is_processed", False):
         render_tab(t_target, df[df['final_cat']=='target'], "重点", expand_default=False, df_key="target")
         render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", expand_default=False, df_key="beyond")
         render_tab(t_known, df[df['final_cat']=='known'], "熟词", expand_default=False, df_key="known")
-        
-        with t_raw:
-            st.info("💡 这是自动词形还原后的全文输出，已针对长文优化防卡死体验。")
-            st.download_button(label="💾 一键下载完整词形还原原文 (.txt)", data=st.session_state.lemma_text, file_name="lemmatized_text.txt", mime="text/plain", type="primary")
-            if len(st.session_state.lemma_text) > 50000:
-                st.warning("⚠️ 文本超长，仅展示前 50,000 字符。")
-                st.code(st.session_state.lemma_text[:50000] + "\n\n... [请下载查看完整内容] ...", language='text')
-            else:
-                st.code(st.session_state.lemma_text, language='text')
