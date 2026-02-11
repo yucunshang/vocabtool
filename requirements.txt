@@ -2,3 +2,8 @@ streamlit
 pandas
 lemminflect
 nltk
+PyPDF2
+EbookLib
+beautifulsoup4
+pysrt
+openai
