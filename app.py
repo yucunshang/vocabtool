@@ -379,7 +379,25 @@ if btn_process and combined_text.strip() and vocab_dict:
             render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", def_mode="single", expand_default=False)
             render_tab(t_known, df[df['final_cat']=='known'], "熟词拆分", def_mode="split", expand_default=False)
             
+            # 渲染还原原文板块 (防卡死 & 下载优化版)
             with t_raw:
-                st.info("💡 这是自动词形还原（Lemmatized）后的全文输出，可直接复制用于其他 NLP 分析。")
-                st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制全文</p>", unsafe_allow_html=True)
-                st.code(full_lemmatized_text, language='text')
+                st.info("💡 这是自动词形还原（Lemmatized）后的全文。")
+                
+                # 1. 直接提供本地文件下载，完全绕过浏览器渲染限制！
+                st.download_button(
+                    label="💾 一键下载完整词形还原原文 (.txt)",
+                    data=full_lemmatized_text,
+                    file_name="lemmatized_full_text.txt",
+                    mime="text/plain",
+                    type="primary"
+                )
+                
+                # 2. 限制网页端的显示长度（超过 5万字符 就截断防卡）
+                display_limit = 50000
+                if len(full_lemmatized_text) > display_limit:
+                    st.warning("⚠️ 为防止浏览器卡死，网页仅展示前 50,000 个字符。请点击上方按钮下载完整版。")
+                    st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内可复制展示部分</p>", unsafe_allow_html=True)
+                    st.code(full_lemmatized_text[:display_limit] + "\n\n... [文本超长，剩余几十万字已折叠，请点击上方按钮下载查看] ...", language='text')
+                else:
+                    st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制全文</p>", unsafe_allow_html=True)
+                    st.code(full_lemmatized_text, language='text')
