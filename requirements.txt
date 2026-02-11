@@ -1,8 +1,7 @@
-streamlit
-pandas
+streamlit>=1.30.0
+pandas>=2.0.0
+requests
 lemminflect
 nltk
 PyPDF2
 python-docx
-beautifulsoup4
-requests
