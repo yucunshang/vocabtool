@@ -91,7 +91,6 @@ def load_vocab():
     
     for word, rank in BUILTIN_PATCH_VOCAB.items(): vocab[word] = rank
     
-    # 手动降级/覆盖特定单词的权重 (将常用数字词/序数词强行压到 1000 以内)
     URGENT_OVERRIDES = {
         "china": 400, "turkey": 1500, "march": 500, "may": 100, "august": 1500, "polish": 2500,
         "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
@@ -149,7 +148,7 @@ def extract_text_from_file(uploaded_file):
 
 def get_dynamic_prompt_template(export_format, front_style, add_pos, def_lang, ex_count, add_ety, split_polysemy):
     """
-    动态生成 Anki 极速制卡 Prompt (带严格语义约束模式)
+    动态生成 Anki 极速制卡 Prompt (带严格语义与例句数量约束模式)
     """
     front_desc = "A natural phrase or collocation using the specific meaning." if front_style == "phrase" else "The target word itself."
     if add_pos:
@@ -164,13 +163,17 @@ def get_dynamic_prompt_template(export_format, front_style, add_pos, def_lang, e
     }
     def_desc = def_map.get(def_lang, "English definition")
 
+    # 强化例句数量逻辑，增加针对 AI 的强制指令 (ex_rule)
     if ex_count == 0:
         ex_desc = ""
+        ex_rule = "Generate ZERO example sentences. Do NOT include any examples."
     elif ex_count == 1:
         ex_desc = "<br><br><em>Italicized example sentence</em>"
+        ex_rule = "Generate EXACTLY ONE example sentence. NEVER generate two or more examples."
     else:
         examples = [f"{i+1}. <em>Italicized example sentence {i+1}</em>" for i in range(ex_count)]
         ex_desc = "<br><br>" + " <br><br> ".join(examples)
+        ex_rule = f"Generate EXACTLY {ex_count} example sentences, numbered as shown."
 
     ety_desc = "<br><br>【词根词缀/词源】Chinese etymology or affix explanation." if add_ety else ""
     
@@ -191,6 +194,7 @@ Process the user's input words, auto-correct any spelling errors/abbreviations, 
 3. Quotes: Both columns MUST be wrapped in double quotes. Use single quotes (' ') inside the text if needed.
 4. {poly_rule}
 5. Strict Alignment (CRITICAL): The generated phrase, part of speech (if requested), definition, example sentence(s), and etymology MUST strictly logically align with the EXACT SAME specific meaning of the target word. Do not mix definitions or examples of different meanings in a single card.
+6. Example Count Constraint (CRITICAL): {ex_rule}
 
 # Content Formatting
 - Column 1 (Front): {front_desc} Do NOT bold or highlight the target word.
@@ -325,13 +329,13 @@ def clear_all_inputs():
     st.session_state.is_processed = False
     if 'base_df' in st.session_state: del st.session_state.base_df
 
-# === 更新：按照截图设置参数默认值 ===
+# === 更新：调整数值选择器的上限 max_value 至 20000 ===
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
 c1, c2, c3, c4, c5 = st.columns(5)
-with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 30000, 9000, 500)     # 修改默认值为 9000
-with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 30000, 15000, 500)    # 修改默认值为 15000
-with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 100, 10)                 # 修改默认值为 100
-with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 10000, 500) # 修改默认值为 10000
+with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 20000, 9000, 500)     
+with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 20000, 15000, 500)    
+with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 100, 10)                 
+with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 10000, 500) 
 with c5: 
     st.write("") 
     st.write("") 
@@ -431,17 +435,16 @@ if st.session_state.get("is_processed", False):
                     st.markdown("#### ⚙️ 定制卡片内容")
                     ui_col1, ui_col2 = st.columns(2)
                     
-                    # === 更新：按照截图设置制卡界面的默认单选框和复选框 ===
                     with ui_col1:
                         st.markdown("**正面配置 (Front)**")
                         export_format = st.radio("输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}", index=0)
                         ui_front = st.radio("呈现形式:", ["短语/搭配 (Phrase)", "仅单词 (Word Only)"], horizontal=True, key=f"front_{df_key}", index=0)
                         ui_pos = st.checkbox("附加词性标示 (如 v, n)", value=True, key=f"pos_{df_key}")
-                        ui_poly = st.radio("多义词处理:", ["拆分为多张卡片 (原版默认)", "仅生成核心释义 (1词1卡)"], index=1, horizontal=True, key=f"poly_{df_key}") # 默认选中第二项
+                        ui_poly = st.radio("多义词处理:", ["拆分为多张卡片 (原版默认)", "仅生成核心释义 (1词1卡)"], index=1, horizontal=True, key=f"poly_{df_key}")
 
                     with ui_col2:
                         st.markdown("**背面配置 (Back)**")
-                        ui_def = st.radio("释义语言:", ["纯英文 (EN)", "纯中文 (ZH)", "中英双语 (EN+ZH)"], index=0, horizontal=True, key=f"def_{df_key}") # 默认选中纯英文
+                        ui_def = st.radio("释义语言:", ["纯英文 (EN)", "纯中文 (ZH)", "中英双语 (EN+ZH)"], index=0, horizontal=True, key=f"def_{df_key}")
                         ui_ex = st.slider("例句数量:", 0, 5, 1, key=f"ex_{df_key}")
                         ui_ety = st.checkbox("包含【词根词缀/词源】", value=True, key=f"ety_{df_key}")
 
