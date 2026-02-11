@@ -153,8 +153,7 @@ def call_deepseek_api(prompt_template, words):
     try: api_key = st.secrets["DEEPSEEK_API_KEY"]
     except KeyError: return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
     if not words: return "⚠️ 错误：没有需要生成的单词。"
-    
-    url = "[https://api.deepseek.com/chat/completions](https://api.deepseek.com/chat/completions)"
+    url = "https://api.deepseek.com/chat/completions".strip()
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     full_prompt = f"{prompt_template}\n\n待处理单词：\n{', '.join(words)}"
     
