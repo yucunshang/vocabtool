@@ -9,7 +9,7 @@ import zipfile
 import concurrent.futures
 import lemminflect
 import nltk
-from collections import Counter  # <--- [新增] 引入计数器
+from collections import Counter
 
 # ==========================================
 # 0. 尝试导入多格式文档处理库
@@ -28,7 +28,7 @@ st.set_page_config(layout="wide", page_title="Vocab Master Pro", page_icon="🚀
 st.markdown("""
 <style>
     .stCode { font-family: 'Consolas', 'Courier New', monospace !important; font-size: 16px !important; }
-    header {visibility: hidden;} footer {visibility: hidden;}\
+    header {visibility: hidden;} footer {visibility: hidden;}
     .block-container { padding-top: 1rem; }
     [data-testid="stSidebarCollapsedControl"] {display: none;}
     [data-testid="stMetricValue"] { font-size: 28px !important; color: var(--primary-color) !important; }
@@ -37,7 +37,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 统一初始化 Session State (提升健壮性)
 if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
 if "is_processed" not in st.session_state: st.session_state.is_processed = False
@@ -45,9 +44,8 @@ if "base_df" not in st.session_state: st.session_state.base_df = pd.DataFrame()
 if "stats" not in st.session_state: st.session_state.stats = {}
 
 # ==========================================
-# 2. 全局核心配置字典 (集中管理，提升拓展性)
+# 2. 全局核心配置字典
 # ==========================================
-# 既是人名又是核心单词的“免死金牌”白名单
 SAFE_NAMES_DB = {
     'will', 'mark', 'rose', 'lily', 'bill', 'pat', 'joy', 'hope', 'penny', 'faith', 
     'grace', 'amber', 'crystal', 'dawn', 'eve', 'holly', 'ivy', 'robin', 'summer', 
@@ -65,7 +63,6 @@ SAFE_NAMES_DB = {
     'wright', 'scott', 'price', 'long', 'major', 'rich', 'dick', 'christian', 'kelly', 'parker'
 }
 
-# 强行覆盖的词汇等级矩阵 (地名/节日/月份/大厂/数字)
 GLOBAL_ENTITY_RANKS = {
     "africa": 1000, "asia": 1000, "europe": 800, "america": 500, "australia": 1500, "antarctica": 4000,
     "china": 400, "usa": 200, "uk": 200, "britain": 800, "england": 800, "france": 800, "germany": 900, "japan": 900, "russia": 900, "india": 1000, "italy": 1000, "canada": 1000, "spain": 1200, "mexico": 1200, "brazil": 1500, "korea": 1500, "egypt": 2000, "greece": 2000, "ireland": 2000, "scotland": 2000, "wales": 2500, "sweden": 2500, "switzerland": 2500, "norway": 3000, "denmark": 3000, "finland": 3000, "poland": 2500, "netherlands": 2500, "portugal": 3000, "vietnam": 3000, "thailand": 3000, "singapore": 3000, "malaysia": 3000, "indonesia": 3000, "philippines": 3000, "turkey": 1500, "israel": 1500, "iran": 2000, "iraq": 2000,
@@ -78,12 +75,11 @@ GLOBAL_ENTITY_RANKS = {
     "january": 400, "february": 400, "march": 400, "april": 400, "may": 100, "june": 400, "july": 400, "august": 1500, "september": 400, "october": 400, "november": 400, "december": 400
 }
 
-# 基础数字词写入全局矩阵
 for _nw in ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth", "twentieth", "thirtieth", "fortieth", "fiftieth", "sixtieth", "seventieth", "eightieth", "ninetieth", "hundredth", "thousandth"]:
     GLOBAL_ENTITY_RANKS[_nw] = 1000
 
 # ==========================================
-# 3. 数据与 NLP 初始化 (带容错机制)
+# 3. 数据与 NLP 初始化
 # ==========================================
 @st.cache_data
 def load_knowledge_base():
@@ -107,7 +103,6 @@ def setup_nltk():
     nltk_data_dir = os.path.join(root_dir, 'nltk_data')
     os.makedirs(nltk_data_dir, exist_ok=True)
     nltk.data.path.append(nltk_data_dir)
-    # 防御性下载，即使失败也不抛出异常
     for pkg in ['averaged_perceptron_tagger', 'punkt', 'names']:
         try: nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
         except Exception: pass
@@ -119,7 +114,6 @@ def load_names_db():
         from nltk.corpus import names
         return set([n.lower() for n in names.words()])
     except Exception:
-        # 如果 nltk 缺失或加载失败，返回空集以保证主体程序继续运行
         return set()
 NLTK_NAMES_DB = load_names_db()
 
@@ -151,7 +145,6 @@ def load_vocab():
         except Exception as e: 
             print(f"Vocab CSV load error: {e}")
     
-    # 按照优先级合并词库: 基础 CSV < 补丁数据 < 强制常量映射
     for word, rank in BUILTIN_PATCH_VOCAB.items(): vocab[word] = rank
     for word, rank in GLOBAL_ENTITY_RANKS.items(): vocab[word] = rank
     return vocab
@@ -246,7 +239,7 @@ Process the following list of words immediately and output ONLY the final code b
     return prompt
 
 # ==========================================
-# 5. 多核并发 API 引擎 (健壮性升级版)
+# 5. 多核并发 API 引擎
 # ==========================================
 def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
     url = "https://api.deepseek.com/chat/completions".strip()
@@ -261,19 +254,17 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
         "max_tokens": 4096
     }
     
-    for attempt in range(4): # 增加重试次数增强网络稳定性
+    for attempt in range(4): 
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=120)
             if resp.status_code == 429: 
-                time.sleep(3 * (attempt + 1)) # 指数退避，防止被封IP
+                time.sleep(3 * (attempt + 1)) 
                 continue
             if resp.status_code == 402: return "❌ ERROR_402_NO_BALANCE"
             elif resp.status_code == 401: return "❌ ERROR_401_INVALID_KEY"
             resp.raise_for_status()
             
             result = resp.json()['choices'][0]['message']['content'].strip()
-            
-            # 使用 Regex 正则强力清洗 Markdown 标签 (极高稳定性保障)
             result = re.sub(r"^```(?:csv|txt|text)?\n", "", result, flags=re.IGNORECASE)
             result = re.sub(r"\n```$", "", result)
             return result.strip()
@@ -328,9 +319,9 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
     return "\n".join(filter(None, results_ordered))
 
 # ==========================================
-# 6. 分析引擎 (内置无感知人名过滤拦截器) - [已修改支持词频统计]
+# 6. 分析引擎 (内置无感知人名过滤拦截器)
 # ==========================================
-def analyze_words(unique_word_list, freq_dict): # <--- [修改] 增加 freq_dict 参数
+def analyze_words(unique_word_list, freq_dict, min_freq=1): # <--- [修改] 增加 min_freq
     unique_items = [] 
     JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're', 'don', 'doesn', 'didn', 'won', 'isn', 'aren', 'ain'}
     
@@ -339,7 +330,11 @@ def analyze_words(unique_word_list, freq_dict): # <--- [修改] 增加 freq_dict
         if item_lower in JUNK_WORDS: continue
         
         # 获取该词在本文中的频率
-        doc_freq = freq_dict.get(item_lower, 1) # <--- [新增] 获取词频
+        doc_freq = freq_dict.get(item_lower, 1)
+
+        # [新增] 低频词过滤逻辑
+        if doc_freq < min_freq: 
+            continue
 
         # 🛡️ 核心隐形拦截：强制人名过滤
         if item_lower in NLTK_NAMES_DB and item_lower not in SAFE_NAMES_DB:
@@ -350,18 +345,15 @@ def analyze_words(unique_word_list, freq_dict): # <--- [修改] 增加 freq_dict
         if item_lower in BUILTIN_TECHNICAL_TERMS:
             domain = BUILTIN_TECHNICAL_TERMS[item_lower]
             term_rank = actual_rank if actual_rank != 99999 else 15000
-            # [修改] 增加 freq 字段
             unique_items.append({"word": f"{item_lower} ({domain})", "rank": term_rank, "raw": item_lower, "freq": doc_freq})
             continue
             
         if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
             display = PROPER_NOUNS_DB.get(item_lower, item_lower.title())
-            # [修改] 增加 freq 字段
             unique_items.append({"word": display, "rank": actual_rank, "raw": item_lower, "freq": doc_freq})
             continue
             
         if actual_rank != 99999:
-            # [修改] 增加 freq 字段
             unique_items.append({"word": item_lower, "rank": actual_rank, "raw": item_lower, "freq": doc_freq})
             
     return pd.DataFrame(unique_items)
@@ -379,18 +371,20 @@ def clear_all_inputs():
     st.session_state.base_df = pd.DataFrame()
 
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
-c1, c2, c3, c4, c5 = st.columns(5)
+# [修改] 布局改为 6 列，加入 min_freq
+c1, c2, c3, c4, c5, c6 = st.columns(6)
 with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 20000, 9000, 500)     
 with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 20000, 15000, 500)    
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 100, 10)                 
 with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 6000, 500) 
-with c5: 
-    # [修改] 增加了排序逻辑的选择
-    sort_mode = st.radio("📊 排序优先", ["COCA 词频 (默认)", "本文出现频率"], index=0)
-    show_rank = st.checkbox("🔢 显示详细数据", value=True)
+with c5: min_freq = st.number_input("📉 本文最低频次", 1, 50, 2, 1) # <--- [新增] 默认2
+with c6: 
+    sort_mode = st.radio("📊 排序优先", ["COCA 词频", "本文频率"], index=0)
+
+# 补充一个显示开关在下方
+show_rank = st.checkbox("🔢 显示详细数据 (Rank / Freq)", value=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# --- UI 调整：文本框与上传文件并排 ---
 col_input1, col_input2 = st.columns([3, 2])
 with col_input1:
     raw_text = st.text_area("📥 粘贴文本 (支持10万字以内)", height=150, key="raw_input_text")
@@ -403,7 +397,7 @@ btn_process = st.button("🚀 极速智能解析", type="primary", use_container
 st.divider()
 
 # ==========================================
-# 8. 流水线执行 - [已修改：先还原词形再统计频率]
+# 8. 流水线执行
 # ==========================================
 if btn_process:
     with st.spinner("🧠 正在急速读取文件并进行智能解析（性能优化版）..."):
@@ -418,16 +412,15 @@ if btn_process:
             # 1. 提取所有原始单词
             raw_words = re.findall(r"[a-zA-Z']+", combined_text)
             
-            # 2. 全量词形还原 (为了统计 accurately，必须先还原再 count)
-            # 注意：这里我们不对 raw_words 去重，而是对所有词进行还原
+            # 2. 全量词形还原
             all_lemmas_with_dups = [get_lemma(w).lower() for w in raw_words]
             
             # 3. 统计本文词频
             lemma_counts = Counter(all_lemmas_with_dups)
             unique_lemmas = list(lemma_counts.keys())
             
-            # 4. 核心业务调用 (传入 freq_dict 即 lemma_counts)
-            st.session_state.base_df = analyze_words(unique_lemmas, lemma_counts)
+            # 4. 核心业务调用 (传入 min_freq)
+            st.session_state.base_df = analyze_words(unique_lemmas, lemma_counts, min_freq)
             
             st.session_state.stats = {
                 "raw_count": len(raw_words),
@@ -460,12 +453,10 @@ if st.session_state.get("is_processed", False):
         
         df['final_cat'] = df.apply(categorize, axis=1)
         
-        # --- [修改] 新增排序逻辑 ---
-        if "本文出现频率" in sort_mode:
-            # 按频率倒序 (出现次数越多越靠前)，次要关键词按 Rank
+        # --- 排序逻辑 ---
+        if "本文频率" in sort_mode:
             df = df.sort_values(by=['freq', 'rank'], ascending=[False, True])
         else:
-            # 按 COCA 排名正序 (默认)
             df = df.sort_values(by='rank', ascending=True)
         # -------------------
         
@@ -485,7 +476,6 @@ if st.session_state.get("is_processed", False):
                     for _, row in data_df.iterrows():
                         if show_rank:
                             rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
-                            # [修改] 展示增加了 Freq (词频)
                             freq_str = f" | Freq: {row['freq']}"
                             display_lines.append(f"{row['word']} [Rank: {rank_str}{freq_str}]")
                         else:
