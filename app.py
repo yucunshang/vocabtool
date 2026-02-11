@@ -130,7 +130,7 @@ def extract_text_from_file(uploaded_file):
     return ""
 
 def get_base_prompt_template(export_format="TXT"):
-    return f"""【角色设定】 你是一位精通词源学、认知心理学以及 Anki 算法的“英语词汇专家与闪卡制作大师”。接下来的对话中，请严格遵守以下 5 项制卡标准，处理我提供的所有单词列表：
+    return f'''【角色设定】 你是一位精通词源学、认知心理学以及 Anki 算法的“英语词汇专家与闪卡制作大师”。接下来的对话中，请严格遵守以下 5 项制卡标准，处理我提供的所有单词列表：
 
 1. 核心原则：原子性 (Atomicity)
 
@@ -168,7 +168,7 @@ def get_base_prompt_template(export_format="TXT"):
 
 纯代码块输出：请将最终结果放在一个单独的纯文本代码块中，不要输出任何解释性的废话，以便我直接复制。
 
-💡 最终输出格式示例： "run a business","to manage or operate a company<br><br><em>He quit his job to run a business selling handmade crafts.</em><br><br>【词源】源自古英语 rinnan（跑/流动），引申为“使机器运转”或“使业务流转”" "go for a run","an act of running for exercise<br><br><em>I go for a run every morning before work.</em><br><br>【词源】源自古英语 rinnan（跑/流动），此处为名词用法，指“奔跑”这一动作""""
+💡 最终输出格式示例： "run a business","to manage or operate a company<br><br><em>He quit his job to run a business selling handmade crafts.</em><br><br>【词源】源自古英语 rinnan（跑/流动），引申为“使机器运转”或“使业务流转”" "go for a run","an act of running for exercise<br><br><em>I go for a run every morning before work.</em><br><br>【词源】源自古英语 rinnan（跑/流动），此处为名词用法，指“奔跑”这一动作'''
 
 # ==========================================
 # 4. 多核并发 API 引擎 (核心极速区)
