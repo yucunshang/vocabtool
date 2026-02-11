@@ -9,6 +9,7 @@ import zipfile
 import concurrent.futures
 import lemminflect
 import nltk
+from collections import Counter  # <--- [新增] 引入计数器
 
 # ==========================================
 # 0. 尝试导入多格式文档处理库
@@ -27,7 +28,7 @@ st.set_page_config(layout="wide", page_title="Vocab Master Pro", page_icon="🚀
 st.markdown("""
 <style>
     .stCode { font-family: 'Consolas', 'Courier New', monospace !important; font-size: 16px !important; }
-    header {visibility: hidden;} footer {visibility: hidden;}
+    header {visibility: hidden;} footer {visibility: hidden;}\
     .block-container { padding-top: 1rem; }
     [data-testid="stSidebarCollapsedControl"] {display: none;}
     [data-testid="stMetricValue"] { font-size: 28px !important; color: var(--primary-color) !important; }
@@ -327,9 +328,9 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
     return "\n".join(filter(None, results_ordered))
 
 # ==========================================
-# 6. 分析引擎 (内置无感知人名过滤拦截器)
+# 6. 分析引擎 (内置无感知人名过滤拦截器) - [已修改支持词频统计]
 # ==========================================
-def analyze_words(unique_word_list):
+def analyze_words(unique_word_list, freq_dict): # <--- [修改] 增加 freq_dict 参数
     unique_items = [] 
     JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're', 'don', 'doesn', 'didn', 'won', 'isn', 'aren', 'ain'}
     
@@ -337,8 +338,10 @@ def analyze_words(unique_word_list):
         if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
         if item_lower in JUNK_WORDS: continue
         
-        # 🛡️ 核心隐形拦截：强制人名过滤，不给 UI 暴露开关
-        # 如果这个词在 NLTK 人名库里，但不在我们的保命白名单里，直接丢弃
+        # 获取该词在本文中的频率
+        doc_freq = freq_dict.get(item_lower, 1) # <--- [新增] 获取词频
+
+        # 🛡️ 核心隐形拦截：强制人名过滤
         if item_lower in NLTK_NAMES_DB and item_lower not in SAFE_NAMES_DB:
             continue
 
@@ -347,16 +350,19 @@ def analyze_words(unique_word_list):
         if item_lower in BUILTIN_TECHNICAL_TERMS:
             domain = BUILTIN_TECHNICAL_TERMS[item_lower]
             term_rank = actual_rank if actual_rank != 99999 else 15000
-            unique_items.append({"word": f"{item_lower} ({domain})", "rank": term_rank, "raw": item_lower})
+            # [修改] 增加 freq 字段
+            unique_items.append({"word": f"{item_lower} ({domain})", "rank": term_rank, "raw": item_lower, "freq": doc_freq})
             continue
             
         if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
             display = PROPER_NOUNS_DB.get(item_lower, item_lower.title())
-            unique_items.append({"word": display, "rank": actual_rank, "raw": item_lower})
+            # [修改] 增加 freq 字段
+            unique_items.append({"word": display, "rank": actual_rank, "raw": item_lower, "freq": doc_freq})
             continue
             
         if actual_rank != 99999:
-            unique_items.append({"word": item_lower, "rank": actual_rank, "raw": item_lower})
+            # [修改] 增加 freq 字段
+            unique_items.append({"word": item_lower, "rank": actual_rank, "raw": item_lower, "freq": doc_freq})
             
     return pd.DataFrame(unique_items)
 
@@ -379,26 +385,25 @@ with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 20000, 
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 100, 10)                 
 with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 6000, 500) 
 with c5: 
-    st.write("") 
-    st.write("") 
-    show_rank = st.checkbox("🔢 附加显示 Rank", value=True)
+    # [修改] 增加了排序逻辑的选择
+    sort_mode = st.radio("📊 排序优先", ["COCA 词频 (默认)", "本文出现频率"], index=0)
+    show_rank = st.checkbox("🔢 显示详细数据", value=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# --- UI 调整：文本框与上传文件并排，取消提示语 ---
+# --- UI 调整：文本框与上传文件并排 ---
 col_input1, col_input2 = st.columns([3, 2])
 with col_input1:
     raw_text = st.text_area("📥 粘贴文本 (支持10万字以内)", height=150, key="raw_input_text")
 with col_input2:
     uploaded_file = st.file_uploader("📂 上传文档", type=["txt", "pdf", "docx", "epub"], key=f"uploader_{st.session_state.uploader_key}")
 
-# --- UI 调整：清空按钮和开始按钮全宽垂直排列 ---
 st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_container_width=True)
 btn_process = st.button("🚀 极速智能解析", type="primary", use_container_width=True)
 
 st.divider()
 
 # ==========================================
-# 8. 流水线执行
+# 8. 流水线执行 - [已修改：先还原词形再统计频率]
 # ==========================================
 if btn_process:
     with st.spinner("🧠 正在急速读取文件并进行智能解析（性能优化版）..."):
@@ -410,13 +415,19 @@ if btn_process:
             st.warning("⚠️ 未提取到任何有效文本！")
             st.session_state.is_processed = False
         elif vocab_dict:
+            # 1. 提取所有原始单词
             raw_words = re.findall(r"[a-zA-Z']+", combined_text)
-            unique_raw_words = list(set(raw_words)) 
-            lemmatized_unique = [get_lemma(w).lower() for w in unique_raw_words]
-            unique_lemmas = list(set(lemmatized_unique)) 
             
-            # 核心业务调用，内部已隐形挂载人名拦截器
-            st.session_state.base_df = analyze_words(unique_lemmas)
+            # 2. 全量词形还原 (为了统计 accurately，必须先还原再 count)
+            # 注意：这里我们不对 raw_words 去重，而是对所有词进行还原
+            all_lemmas_with_dups = [get_lemma(w).lower() for w in raw_words]
+            
+            # 3. 统计本文词频
+            lemma_counts = Counter(all_lemmas_with_dups)
+            unique_lemmas = list(lemma_counts.keys())
+            
+            # 4. 核心业务调用 (传入 freq_dict 即 lemma_counts)
+            st.session_state.base_df = analyze_words(unique_lemmas, lemma_counts)
             
             st.session_state.stats = {
                 "raw_count": len(raw_words),
@@ -448,9 +459,17 @@ if st.session_state.get("is_processed", False):
             else: return "beyond"
         
         df['final_cat'] = df.apply(categorize, axis=1)
-        df = df.sort_values(by='rank')
         
-        top_df = df[(df['rank'] >= min_rank_threshold) & (df['rank'] < 99999)].sort_values(by='rank', ascending=True).head(top_n)
+        # --- [修改] 新增排序逻辑 ---
+        if "本文出现频率" in sort_mode:
+            # 按频率倒序 (出现次数越多越靠前)，次要关键词按 Rank
+            df = df.sort_values(by=['freq', 'rank'], ascending=[False, True])
+        else:
+            # 按 COCA 排名正序 (默认)
+            df = df.sort_values(by='rank', ascending=True)
+        # -------------------
+        
+        top_df = df[(df['rank'] >= min_rank_threshold) & (df['rank'] < 99999)].head(top_n)
         
         t_top, t_target, t_beyond, t_known = st.tabs([
             f"🔥 Top {len(top_df)}", 
@@ -466,7 +485,9 @@ if st.session_state.get("is_processed", False):
                     for _, row in data_df.iterrows():
                         if show_rank:
                             rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
-                            display_lines.append(f"{row['word']} [Rank: {rank_str}]")
+                            # [修改] 展示增加了 Freq (词频)
+                            freq_str = f" | Freq: {row['freq']}"
+                            display_lines.append(f"{row['word']} [Rank: {rank_str}{freq_str}]")
                         else:
                             display_lines.append(row['word'])
                     
