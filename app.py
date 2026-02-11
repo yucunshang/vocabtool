@@ -30,6 +30,7 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-size: 28px !important; color: #007bff !important; }
     /* 参数区域样式优化 */
     .param-container { border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 20px; }
+    .copy-hint { color: #888; font-size: 14px; margin-bottom: 5px; margin-top: 10px; padding-left: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -327,25 +328,36 @@ if st.session_state.get("is_processed", False):
                 with col_ai:
                     st.markdown("#### 🤖 AI 卡片制作")
                     export_fmt = st.radio("格式", ["TXT", "CSV"], horizontal=True, key=f"fmt_{tab_key}")
-                    res_key = f"{tab_key}_{export_fmt}"
+                    pure_words = data_df['word'].tolist()
                     
-                    if st.session_state.generated_cards.get(res_key):
-                        st.success("✅ 已生成")
-                        st.download_button("📥 下载结果", st.session_state.generated_cards[res_key], f"anki_{tab_key}.{export_fmt.lower()}")
-                        st.code(st.session_state.generated_cards[res_key], language="text")
-                    else:
-                        if st.button(f"⚡ 生成 {tab_key}", key=f"btn_{tab_key}"):
-                            pure_words = data_df['word'].tolist()
-                            p_bar = st.progress(0)
-                            s_text = st.empty()
-                            res = run_concurrent_api(pure_words, get_base_prompt_template(export_fmt), user_api_key, p_bar, s_text)
-                            st.session_state.generated_cards[res_key] = res
-                            st.rerun()
+                    # 恢复：API直接调用和手动复制Prompt的双Tab设计
+                    ai_tab1, ai_tab2 = st.tabs(["⚡ 一键调用 DeepSeek", "📋 手动复制 Prompt"])
+                    
+                    with ai_tab1:
+                        res_key = f"{tab_key}_{export_fmt}"
+                        if st.session_state.generated_cards.get(res_key):
+                            st.success("✅ 已生成")
+                            st.download_button("📥 下载结果", st.session_state.generated_cards[res_key], f"anki_{tab_key}.{export_fmt.lower()}")
+                            st.code(st.session_state.generated_cards[res_key], language="text")
+                        else:
+                            if st.button(f"⚡ 生成 {tab_key}", key=f"btn_{tab_key}"):
+                                p_bar = st.progress(0)
+                                s_text = st.empty()
+                                res = run_concurrent_api(pure_words, get_base_prompt_template(export_fmt), user_api_key, p_bar, s_text)
+                                st.session_state.generated_cards[res_key] = res
+                                st.rerun()
+
+                    with ai_tab2:
+                        st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
+                        full_prompt_to_copy = f"{get_base_prompt_template(export_fmt)}\n\n待处理单词：\n{', '.join(pure_words)}"
+                        st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制</p>", unsafe_allow_html=True)
+                        st.code(full_prompt_to_copy, language='markdown')
 
         render_word_tab(tabs[0], top_df, "top")
         render_word_tab(tabs[1], target_df, "target")
         render_word_tab(tabs[2], beyond_df, "beyond")
         
         with tabs[3]:
+            st.info("💡 这是自动词形还原后的全文输出，已针对长文优化防卡死体验。")
             st.download_button("💾 下载原文", st.session_state.lemma_text, "lemmatized.txt")
             st.text_area("预览", st.session_state.lemma_text[:2000], height=300)
