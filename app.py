@@ -22,13 +22,10 @@ st.markdown("""
     .block-container { padding-top: 1rem; }
     [data-testid="stSidebarCollapsedControl"] {display: none;}
     
-    /* 优化参数面板外观 */
-    .param-box {
-        background-color: var(--secondary-background-color);
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid var(--border-color-light);
-        margin-bottom: 20px;
+    /* 优化数据看板外观 */
+    [data-testid="stMetricValue"] {
+        font-size: 28px !important;
+        color: var(--primary-color) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -176,7 +173,7 @@ def generate_ai_prompt(word_list, output_format, def_mode="single", is_term_list
     return prompt
 
 # ==========================================
-# 6. 核心分析引擎 (完全打通版)
+# 6. 核心分析引擎
 # ==========================================
 def analyze_words(unique_word_list):
     """直接对去重且还原后的单词列表进行词频定级"""
@@ -226,21 +223,20 @@ def analyze_words(unique_word_list):
 st.title("🚀 Vocab Master Pro - 全能长文解析引擎")
 st.markdown("💡 **一站式工作流**：支持粘贴整本书、长篇外刊或论文（**数十万字超长文本输入**）。系统会自动进行【词形还原】、【全量分级】并提取【Top N 精选】，极速生成双端输出。")
 
-# --- 参数配置区 ---
-st.markdown("<div class='param-box'>", unsafe_allow_html=True)
-c1, c2, c3, c4, c5 = st.columns(5)
-with c1: current_level = st.number_input("🎯 当前水平 (起)", 0, 30000, 9000, 500, help="低于此词频的视为已掌握")
-with c2: target_level = st.number_input("🎯 目标水平 (止)", 0, 30000, 15000, 500, help="高于此词频的视为超纲")
-with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10, help="从剩余生词中挑选的最核心数量")
-with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3000, 500, help="精选时忽略太简单的基础词")
-with c5: 
-    st.write("") 
-    st.write("") 
-    show_rank = st.checkbox("🔢 附加显示 Rank", value=False)
-st.markdown("</div>", unsafe_allow_html=True)
+# --- 参数配置区 (新增折叠栏) ---
+with st.expander("⚙️ 难度与筛选参数设置 (点击展开/折叠)", expanded=False):
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1: current_level = st.number_input("🎯 当前水平 (起)", 0, 30000, 9000, 500, help="低于此词频的视为已掌握")
+    with c2: target_level = st.number_input("🎯 目标水平 (止)", 0, 30000, 15000, 500, help="高于此词频的视为超纲")
+    with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10, help="从剩余生词中挑选的最核心数量")
+    with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3000, 500, help="精选时忽略太简单的基础词")
+    with c5: 
+        st.write("") 
+        st.write("") 
+        show_rank = st.checkbox("🔢 附加显示 Rank", value=False)
 
 # --- 超长文本输入区 ---
-raw_text = st.text_area("📥 在此粘贴你的超长英文原文...", height=250, placeholder="Once upon a time...")
+raw_text = st.text_area("📥 在此粘贴你的超长英文原文...", height=250, placeholder="Once upon a time, there was a...")
 btn_process = st.button("🚀 一键智能解析 (处理长文)", type="primary", use_container_width=True)
 
 st.divider()
@@ -249,16 +245,28 @@ st.divider()
 if btn_process and raw_text and vocab_dict:
     with st.spinner("🧠 正在进行亿级词形还原与全量词频匹配..."):
         
-        # 1. 提取与智能还原 (Lemmatization)
+        # 1. 提取总词数 (Total Words)
         raw_words = re.findall(r"[a-zA-Z']+", raw_text)
+        total_word_count = len(raw_words)
+        
+        # 2. 智能还原 (Lemmatization)
         lemmatized_words = [get_lemma(w) for w in raw_words]
         full_lemmatized_text = " ".join(lemmatized_words)
         
-        # 2. 去重并提取唯一词根
+        # 3. 去重提取唯一词根 (Unique Lemmas)
         unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
+        unique_word_count = len(unique_lemmas)
         
-        # 3. 词频定级
+        # 4. 词频定级与过滤无效字符
         df = analyze_words(unique_lemmas)
+        valid_word_count = len(df)
+        
+        # === 新增：全景字数统计看板 ===
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric(label="📝 原文总字数", value=f"{total_word_count:,}")
+        col_m2.metric(label="✂️ 去重词根数", value=f"{unique_word_count:,}")
+        col_m3.metric(label="🎯 纳入分级词汇", value=f"{valid_word_count:,}")
+        st.write("") # 留白
         
         if not df.empty:
             # --- 核心分类器 ---
@@ -315,8 +323,8 @@ if btn_process and raw_text and vocab_dict:
                         with t_txt: st.code(p_txt, language='markdown')
                     else: st.info("该区间暂无符合条件的单词")
 
-            # 渲染各板块
-            render_tab(t_top, top_df, "核心单义", def_mode="single", is_expander=False) # Top N 直接展示
+            # 渲染各板块 (重点、超纲、已掌握均使用折叠栏，Top N 不折叠)
+            render_tab(t_top, top_df, "核心单义", def_mode="single", is_expander=False) 
             render_tab(t_target, df[df['final_cat']=='target'], "重点", def_mode="single", is_expander=True)
             render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", def_mode="single", is_expander=True)
             render_tab(t_known, df[df['final_cat']=='known'], "熟词拆分", def_mode="split", is_expander=True)
