@@ -128,47 +128,33 @@ def extract_text_from_file(uploaded_file):
         return ""
     return ""
 
-def get_base_prompt_template(export_format="TXT"):
-    return f"""这是为您整理的最新、最完整的 Anki 制卡核心指令标准。我将严格遵守此准则为您处理所有单词列表：
+def get_base_prompt_template(export_format="CSV"):
+    """经过 Anki 严格优化的防报错指令模板"""
+    return f"""请扮演一位专业的 Anki 制卡专家。请严格按以下标准，为我提供直接可导入 Anki 的 {export_format} 格式数据。
 
-1. 核心原则：原子性 (Atomicity)
-含义拆分：若一个单词有多个不同含义（名词 vs 动词，字面义 vs 引申义），必须拆分为多条独立数据。
-严禁堆砌：每张卡片只承载一个特定语境下的含义，不准将多个释义挤在一起。
+核心原则与输出规范：
+1. 结构强制：每行代表一张卡片，严格包含两个字段：正面,背面。
+2. 分隔符：两个字段之间必须使用英文逗号 (,) 分隔。
+3. 引号包裹：每个字段的内容必须使用英文双引号 ("...") 包裹。严禁在内容中使用未转义的双引号。
+4. 卡片正面（字段1）：提供单词的自然搭配或短语。
+5. 卡片背面（字段2 - HTML排版）：包含三个部分，必须使用 <br><br> 分隔：
+   - 英文释义
+   - <em>斜体例句</em>
+   - 【词根/助记】中文解析
 
-2. 卡片正面 (Column 1: Front)
-内容：提供自然的短语或搭配 (Phrase/Collocation)，而非单个孤立单词。
-样式：使用纯文本，不需要加粗目标单词。
+💡 最终输出格式示例：
+"run a business","to manage a company<br><br><em>He runs a business.</em><br><br>【助记】源自古英语"
+"go for a run","an act of running<br><br><em>I go for a run.</em><br><br>【助记】名词用法"
 
-3. 卡片背面 (Column 2: Back - 整合页)
-背面信息必须全部合并在第二列，并使用 HTML 标签排版，包含以下三个部分：
-英文释义：简练准确。
-例句：使用 <em> 标签包裹，使例句呈现斜体。
-【词根词缀】：用中文进行词源、前缀、词根或后缀的拆解与记忆辅助。
-换行要求：三部分之间使用 <br><br> 分隔，确保界面清晰。
-结构示例：英文释义<br><br><em>斜体例句</em><br><br>【词根词缀】中文解析
-
-4. 输出格式标准 ({export_format} 格式)
-文件规范：纯文本代码块。
-分隔符：使用逗号 (Comma) 分隔字段。
-引号包裹：每个字段必须用双引号 ("...") 包裹，以防内容内部的标点导致导入错误。
-
-5. 数据清洗与优化
-拼写修正：自动修正用户列表中的明显拼写错误。
-缩写展开：对缩写（如 WFH, aka）在背面提供全称及解释。
-
-💡 最终输出示例（{export_format} 内容）：
-"run a business","to manage or operate a company<br><br><em>He quit his job to run a business selling handmade crafts.</em><br><br>【词源】源自古英语 rinnan（跑/流动），引申为“使机器运转”或“使业务流转”"
-"go for a run","an act of running for exercise<br><br><em>I go for a run every morning before work.</em><br><br>【词源】同上，此处为名词用法，指“奔跑”这一动作"
-
-导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。
-请直接输出纯文本代码块，不要包含任何多余的开场白或解释。"""
+⚠️ 极其重要的格式警告：
+绝对不要输出 Markdown 代码块标记（严禁使用 ```csv 或 ```txt ），不要有任何解释性的开场白或结束语！请直接输出纯文本数据本身！"""
 
 def call_deepseek_api(prompt_template, words):
     try: api_key = st.secrets["DEEPSEEK_API_KEY"]
     except KeyError: return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
     if not words: return "⚠️ 错误：没有需要生成的单词。"
     
-    url = "https://api.deepseek.com/chat/completions"
+    url = "[https://api.deepseek.com/chat/completions](https://api.deepseek.com/chat/completions)"
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     full_prompt = f"{prompt_template}\n\n待处理单词：\n{', '.join(words)}"
     
@@ -177,10 +163,25 @@ def call_deepseek_api(prompt_template, words):
         "messages": [{"role": "user", "content": full_prompt}],
         "temperature": 0.3
     }
+    
     try:
-        resp = requests.post(url, json=payload, headers=headers)
+        # 设置超时时间，捕获潜在网络异常
+        resp = requests.post(url, json=payload, headers=headers, timeout=60)
+        
+        if resp.status_code == 402: return "❌ 错误：DeepSeek 账户余额不足，请充值。"
+        elif resp.status_code == 401: return "❌ 错误：API Key 无效。"
+        
         resp.raise_for_status()
-        return resp.json()['choices'][0]['message']['content']
+        
+        result = resp.json()['choices'][0]['message']['content']
+        
+        # 二次清洗：强行去除 AI 可能残留的 markdown 代码块外壳
+        result = re.sub(r"^```(?:csv|txt|text)?\n", "", result, flags=re.IGNORECASE)
+        result = re.sub(r"\n```$", "", result)
+        
+        return result.strip()
+    except requests.exceptions.Timeout:
+        return "⏳ 请求超时：请稍后重试。"
     except Exception as e:
         return f"🚨 API 调用失败: {str(e)}"
 
@@ -215,15 +216,14 @@ def analyze_words(unique_word_list):
 st.title("🚀 Vocab Master Pro - 全能教研引擎")
 st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB` 原著电子书，并**内置免费 AI** 一键生成 Anki 记忆卡片。")
 
-# --- 初始化全局状态 (修复页面跳转的核心机制) ---
 if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
-if "is_processed" not in st.session_state: st.session_state.is_processed = False # 记录是否解析完毕
+if "is_processed" not in st.session_state: st.session_state.is_processed = False
 
 def clear_all_inputs():
     st.session_state.raw_input_text = ""
     st.session_state.uploader_key += 1 
-    st.session_state.is_processed = False # 清空时重置状态
+    st.session_state.is_processed = False
 
 # --- 参数配置区 ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
@@ -253,7 +253,7 @@ with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_
 st.divider()
 
 # ==========================================
-# 6. 后台硬核计算 (只在点解析时运行一次)
+# 6. 后台硬核计算
 # ==========================================
 if btn_process:
     with st.spinner("🧠 正在急速读取文件并进行智能解析（长篇巨著请稍候）..."):
@@ -262,7 +262,7 @@ if btn_process:
         if uploaded_file is not None: combined_text += "\n" + extract_text_from_file(uploaded_file)
             
         if not combined_text.strip():
-            st.warning("⚠️ 未提取到任何有效文本！如果你上传了 EPUB/PDF，可能它是纯图片扫描版，或者文件为空。")
+            st.warning("⚠️ 未提取到任何有效文本！")
             st.session_state.is_processed = False
         elif vocab_dict:
             raw_words = re.findall(r"[a-zA-Z']+", combined_text)
@@ -271,7 +271,6 @@ if btn_process:
             
             unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
             
-            # --- 存入“记忆大脑”，防止网页刷新丢失 ---
             st.session_state.base_df = analyze_words(unique_lemmas)
             st.session_state.lemma_text = full_lemmatized_text
             st.session_state.stats = {
@@ -283,11 +282,10 @@ if btn_process:
             st.session_state.is_processed = True
 
 # ==========================================
-# 7. 动态界面渲染 (依赖记忆状态，无惧刷新跳转)
+# 7. 动态界面渲染
 # ==========================================
 if st.session_state.get("is_processed", False):
     
-    # 动态调取面板数据
     stats = st.session_state.stats
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
     col_m1.metric(label="📝 解析总字数", value=f"{stats['raw_count']:,}")
@@ -295,11 +293,9 @@ if st.session_state.get("is_processed", False):
     col_m3.metric(label="🎯 纳入分级词汇", value=f"{stats['valid_count']:,}")
     col_m4.metric(label="⚡ 极速解析耗时", value=f"{stats['time']:.2f} 秒")
     
-    # 提取基准 DataFrame
     df = st.session_state.base_df.copy()
     
     if not df.empty:
-        # === 以下代码会根据你上方的滑动条【实时动态】分类，不需重新解析！ ===
         def categorize(row):
             r = row['rank']
             if r <= current_level: return "known"
@@ -334,10 +330,8 @@ if st.session_state.get("is_processed", False):
                     
                     st.divider()
                     
-                    # === 格式选择区 (点击再也不会跳没了) ===
-                    export_format = st.radio("⚙️ 选择输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
+                    export_format = st.radio("⚙️ 选择输出格式:", ["CSV", "TXT"], horizontal=True, key=f"fmt_{df_key}")
                     
-                    # === AI 双轨模式区 ===
                     ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 一键直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
                     
                     with ai_tab1:
@@ -347,14 +341,25 @@ if st.session_state.get("is_processed", False):
                         if st.button("⚡ 召唤 DeepSeek 立即生成卡片", key=f"btn_{df_key}", type="primary"):
                             with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
                                 ai_result = call_deepseek_api(custom_prompt, pure_words)
-                                st.success("🎉 生成完成！")
-                                st.code(ai_result, language="markdown")
-                                st.download_button(
-                                    label=f"📥 直接下载生成的卡片 (.{export_format.lower()})", 
-                                    data=ai_result, 
-                                    file_name=f"anki_cards_{label}.{export_format.lower()}", 
-                                    mime="text/plain" if export_format == "TXT" else "text/csv"
-                                )
+                                
+                                if "❌" in ai_result or "🚨" in ai_result or "⏳" in ai_result:
+                                    st.error(ai_result)
+                                else:
+                                    st.success("🎉 生成完成！请务必通过下方按钮下载，直接导入 Anki。")
+                                    
+                                    # 极其关键的 utf-8-sig 编码修复，保证 Anki 导入绝不乱码
+                                    mime_type = "text/csv" if export_format == "CSV" else "text/plain"
+                                    st.download_button(
+                                        label=f"📥 一键下载标准 Anki 导入文件 (.{export_format.lower()})", 
+                                        data=ai_result.encode('utf-8-sig'), 
+                                        file_name=f"anki_cards_{label}.{export_format.lower()}", 
+                                        mime=mime_type,
+                                        type="primary",
+                                        use_container_width=True
+                                    )
+                                    
+                                    st.markdown("##### 📝 预览框 (仅供查看，请勿从此处复制粘贴)")
+                                    st.code(ai_result, language="text")
                     
                     with ai_tab2:
                         st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
