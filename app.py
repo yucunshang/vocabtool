@@ -7,20 +7,32 @@ import nltk
 import json
 import time
 import requests
-import zipfile
 import concurrent.futures
+import warnings
 
-# 尝试导入多格式文档处理库
+# ==========================================
+# 0. 依赖检查与导入
+# ==========================================
+# 忽略 ebooklib 的未来警告
+warnings.filterwarnings("ignore", category=UserWarning, module='ebooklib')
+
 try:
     import PyPDF2
     import docx
 except ImportError:
     pass
 
+try:
+    import ebooklib
+    from ebooklib import epub
+    from bs4 import BeautifulSoup
+except ImportError:
+    pass # 下面代码会检查，如果缺失会提示
+
 # ==========================================
 # 1. 基础配置
 # ==========================================
-st.set_page_config(layout="wide", page_title="Vocab Master Pro V5", page_icon="🚀")
+st.set_page_config(layout="wide", page_title="Vocab Master Pro V6", page_icon="🚀")
 
 st.markdown("""
 <style>
@@ -28,24 +40,24 @@ st.markdown("""
     header {visibility: hidden;} footer {visibility: hidden;}
     .block-container { padding-top: 1rem; }
     [data-testid="stMetricValue"] { font-size: 28px !important; color: #007bff !important; }
-    /* 参数区域样式优化 */
     .param-container { border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 20px; }
     .copy-hint { color: #888; font-size: 14px; margin-bottom: 5px; margin-top: 10px; padding-left: 5px; }
+    /* 进度条样式增强 */
+    .stProgress > div > div > div > div { background-color: #00cc66; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. API Key 获取 (严格遵循原始设置)
+# 2. API Key 获取
 # ==========================================
 try:
-    # 直接读取 secrets，不做任何 UI 展示
     user_api_key = st.secrets["DEEPSEEK_API_KEY"]
 except Exception:
     st.error("❌ 未检测到 API Key配置。请在 .streamlit/secrets.toml 中配置 DEEPSEEK_API_KEY")
     st.stop()
 
 # ==========================================
-# 3. 数据与 NLP 初始化 (保持健壮版)
+# 3. 数据与 NLP 初始化
 # ==========================================
 @st.cache_data
 def load_knowledge_base():
@@ -115,8 +127,30 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 4. 文档解析 & 并发 API (线程安全)
+# 4. 文档解析 (含 EPUB 支持)
 # ==========================================
+def extract_epub_content(uploaded_file):
+    """专门处理 EPUB 格式"""
+    try:
+        # Streamlit 的 uploaded_file 是 BytesIO，ebooklib 需要写入临时文件才能读取
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".epub") as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_path = tmp_file.name
+        
+        book = epub.read_epub(tmp_path)
+        text_content = []
+        
+        for item in book.get_items():
+            if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                soup = BeautifulSoup(item.get_content(), 'html.parser')
+                text_content.append(soup.get_text())
+        
+        os.remove(tmp_path) # 清理临时文件
+        return "\n".join(text_content)
+    except Exception as e:
+        return f"EPUB 解析失败: {str(e)}"
+
 def extract_text_from_file(uploaded_file):
     ext = uploaded_file.name.split('.')[-1].lower()
     uploaded_file.seek(0)
@@ -128,10 +162,16 @@ def extract_text_from_file(uploaded_file):
         elif ext == 'docx':
             doc = docx.Document(uploaded_file)
             return " ".join([p.text for p in doc.paragraphs])
-        elif ext == 'epub': return "EPUB解析暂略" # 简化展示
-    except Exception: return ""
+        elif ext == 'epub': 
+            if 'ebooklib' not in globals():
+                return "错误：未安装 EPUB 解析库。请运行 pip install EbookLib beautifulsoup4"
+            return extract_epub_content(uploaded_file)
+    except Exception as e: return f"文件解析错误: {str(e)}"
     return ""
 
+# ==========================================
+# 5. 并发 API 引擎 (带实时反馈)
+# ==========================================
 def get_base_prompt_template(export_format="TXT"):
     return f"""【角色设定】 你是一位精通词源学、认知心理学以及 Anki 算法的“英语词汇专家与闪卡制作大师”。
 1. 核心原则：原子性 (Atomicity)
@@ -163,36 +203,57 @@ def _fetch_deepseek_chunk_safe(batch_data):
             if resp.status_code != 200: return (index, "", f"HTTP {resp.status_code}")
             
             result = resp.json()['choices'][0]['message']['content'].strip()
-            if result.startswith("```"):
-                lines = result.split('\n')
-                if lines[0].startswith("```"): lines = lines[1:]
-                if lines and lines[-1].startswith("```"): lines = lines[:-1]
-                result = '\n'.join(lines).strip()
-            return (index, result, None)
+            # 清洗 Markdown 标记
+            if "```" in result:
+                result = re.sub(r'^```\w*\n', '', result) # 去头
+                result = re.sub(r'\n```$', '', result)    # 去尾
+            return (index, result.strip(), None)
         return (index, "", "TIMEOUT")
     except Exception as e: return (index, "", str(e))
 
 def run_concurrent_api(words, prompt_template, api_key, progress_bar, status_text):
+    """
+    带详细进度反馈的并发执行器
+    """
     MAX_WORDS = 300 
     words = words[:MAX_WORDS]
-    CHUNK_SIZE = 30
+    CHUNK_SIZE = 20 # 调小一点，让进度条更顺滑
     chunks = [words[i:i + CHUNK_SIZE] for i in range(0, len(words), CHUNK_SIZE)]
     tasks = [(i, chunk, prompt_template, api_key) for i, chunk in enumerate(chunks)]
     results_map = {}
     
+    total_tasks = len(chunks)
+    start_time = time.time()
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_to_idx = {executor.submit(_fetch_deepseek_chunk_safe, task): task[0] for task in tasks}
         completed = 0
+        
         for future in concurrent.futures.as_completed(future_to_idx):
             idx, res_str, err = future.result()
-            if not err: results_map[idx] = res_str
             completed += 1
-            progress_bar.progress(completed / len(chunks))
-            status_text.markdown(f"⚡ AI 正在处理第 {completed}/{len(chunks)} 批数据...")
+            
+            # 计算进度与时间
+            elapsed = time.time() - start_time
+            avg_time = elapsed / completed
+            eta = avg_time * (total_tasks - completed)
+            
+            # 更新进度条
+            progress_val = completed / total_tasks
+            progress_bar.progress(progress_val)
+            
+            # 更新状态文案
+            if err:
+                status_text.markdown(f"⚠️ **批次 {idx+1}/{total_tasks} 失败**: {err} (正在继续...)")
+            else:
+                results_map[idx] = res_str
+                status_text.markdown(f"🚀 **AI 正在全速运转中...**\n\n已完成: `{completed}/{total_tasks}` 批次 | 预计剩余时间: `{int(eta)}s`")
 
+    # 排序拼接
     final_output = []
-    for i in range(len(chunks)):
+    for i in range(total_tasks):
         if i in results_map: final_output.append(results_map[i])
+        
     return "\n".join(final_output)
 
 def analyze_words(unique_word_list, min_rank):
@@ -203,7 +264,6 @@ def analyze_words(unique_word_list, min_rank):
         if len(item_lower) < 2 or item_lower in STOP_WORDS: continue
         
         actual_rank = vocab_dict.get(item_lower, 99999)
-        # 严格执行 rank 过滤
         if actual_rank < min_rank and actual_rank != 99999: continue
 
         if item_lower in BUILTIN_TECHNICAL_TERMS:
@@ -216,11 +276,11 @@ def analyze_words(unique_word_list, min_rank):
     return pd.DataFrame(unique_items)
 
 # ==========================================
-# 5. UI 布局 (无侧边栏，参数常驻)
+# 6. UI 布局
 # ==========================================
-st.title("🚀 Vocab Master Pro - V5")
+st.title("🚀 Vocab Master Pro - V6 (EPUB支持版)")
 
-# 初始化 Session State
+# Session State 初始化
 if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
 if "is_processed" not in st.session_state: st.session_state.is_processed = False
@@ -232,13 +292,13 @@ def clear_all_inputs():
     st.session_state.is_processed = False
     st.session_state.generated_cards = {}
 
-# --- 参数设置区域 (显式展示，不折叠) ---
+# --- 参数设置区域 ---
 st.markdown("### ⚙️ 核心参数")
 c1, c2, c3, c4 = st.columns(4)
-with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 30000, 4500, 500, help="低于此排名的词将被视为‘熟词’")
-with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 30000, 15000, 500, help="高于此排名的词将被视为‘超纲’")
+with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 30000, 4500, 500)
+with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 30000, 15000, 500)
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10)
-with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 1000, 500, help="直接过滤掉排名极高(太简单)的词")
+with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 1000, 500)
 show_rank = st.checkbox("在列表中显示词频 Rank", value=True)
 
 st.divider()
@@ -249,17 +309,18 @@ with col_input1:
     raw_text = st.text_area("📥 粘贴文本", height=150, key="raw_input_text", placeholder="在此粘贴英文内容...")
 with col_input2:
     st.markdown("#### 📂 文档解析")
-    uploaded_file = st.file_uploader("支持 TXT, PDF, DOCX", type=["txt", "pdf", "docx"], key=f"uploader_{st.session_state.uploader_key}")
+    # 更新了 type 支持 epub
+    uploaded_file = st.file_uploader("支持 TXT, PDF, DOCX, EPUB", type=["txt", "pdf", "docx", "epub"], key=f"uploader_{st.session_state.uploader_key}")
 
 col_btn1, col_btn2 = st.columns([5, 1])
 with col_btn1: btn_process = st.button("🚀 开始分析", type="primary", use_container_width=True)
 with col_btn2: st.button("🗑️ 清空", on_click=clear_all_inputs, use_container_width=True)
 
 # ==========================================
-# 6. 处理与展示逻辑
+# 7. 处理与展示逻辑
 # ==========================================
 if btn_process:
-    with st.spinner("🧠 分析中..."):
+    with st.spinner("🧠 正在解析文档结构与清洗文本..."):
         start_time = time.time()
         combined_text = raw_text
         if uploaded_file is not None: combined_text += "\n" + extract_text_from_file(uploaded_file)
@@ -271,7 +332,6 @@ if btn_process:
             lemmatized_words = [get_lemma(w) for w in raw_words]
             unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
             
-            # 将 min_rank_threshold 传入分析函数
             st.session_state.base_df = analyze_words(unique_lemmas, min_rank_threshold)
             st.session_state.lemma_text = " ".join(lemmatized_words)
             st.session_state.stats = {
@@ -330,7 +390,6 @@ if st.session_state.get("is_processed", False):
                     export_fmt = st.radio("格式", ["TXT", "CSV"], horizontal=True, key=f"fmt_{tab_key}")
                     pure_words = data_df['word'].tolist()
                     
-                    # 恢复：API直接调用和手动复制Prompt的双Tab设计
                     ai_tab1, ai_tab2 = st.tabs(["⚡ 一键调用 DeepSeek", "📋 手动复制 Prompt"])
                     
                     with ai_tab1:
@@ -338,19 +397,31 @@ if st.session_state.get("is_processed", False):
                         if st.session_state.generated_cards.get(res_key):
                             st.success("✅ 已生成")
                             st.download_button("📥 下载结果", st.session_state.generated_cards[res_key], f"anki_{tab_key}.{export_fmt.lower()}")
-                            st.code(st.session_state.generated_cards[res_key], language="text")
+                            with st.expander("查看内容", expanded=False):
+                                st.code(st.session_state.generated_cards[res_key], language="text")
                         else:
                             if st.button(f"⚡ 生成 {tab_key}", key=f"btn_{tab_key}"):
-                                p_bar = st.progress(0)
-                                s_text = st.empty()
-                                res = run_concurrent_api(pure_words, get_base_prompt_template(export_fmt), user_api_key, p_bar, s_text)
+                                # 进度条反馈区
+                                progress_container = st.empty()
+                                with progress_container.container():
+                                    st.info("🔄 初始化并发引擎...")
+                                    p_bar = st.progress(0)
+                                    s_text = st.empty()
+                                    
+                                    # 执行 API
+                                    res = run_concurrent_api(pure_words, get_base_prompt_template(export_fmt), user_api_key, p_bar, s_text)
+                                    
+                                    # 完成后清理进度条，显示成功
+                                    time.sleep(0.5)
+                                    p_bar.empty()
+                                    s_text.empty()
+                                
                                 st.session_state.generated_cards[res_key] = res
                                 st.rerun()
 
                     with ai_tab2:
                         st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
                         full_prompt_to_copy = f"{get_base_prompt_template(export_fmt)}\n\n待处理单词：\n{', '.join(pure_words)}"
-                        st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制</p>", unsafe_allow_html=True)
                         st.code(full_prompt_to_copy, language='markdown')
 
         render_word_tab(tabs[0], top_df, "top")
@@ -358,6 +429,5 @@ if st.session_state.get("is_processed", False):
         render_word_tab(tabs[2], beyond_df, "beyond")
         
         with tabs[3]:
-            st.info("💡 这是自动词形还原后的全文输出，已针对长文优化防卡死体验。")
             st.download_button("💾 下载原文", st.session_state.lemma_text, "lemmatized.txt")
             st.text_area("预览", st.session_state.lemma_text[:2000], height=300)
