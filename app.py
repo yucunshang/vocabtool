@@ -98,10 +98,9 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 3. 文档解析 & AI 接口
+# 3. 文档解析 & AI 接口 & 提示词引擎
 # ==========================================
 def extract_text_from_file(uploaded_file):
-    """支持 txt, pdf, docx, epub 多种格式解析"""
     ext = uploaded_file.name.split('.')[-1].lower()
     uploaded_file.seek(0)
     try:
@@ -129,13 +128,45 @@ def extract_text_from_file(uploaded_file):
         return ""
     return ""
 
+def get_base_prompt_template(export_format="TXT"):
+    """用户自定义的最强 Anki 制卡提示词模板 (动态切换 TXT/CSV)"""
+    return f"""这是为您整理的最新、最完整的 Anki 制卡核心指令标准。我将严格遵守此准则为您处理所有单词列表：
+
+1. 核心原则：原子性 (Atomicity)
+含义拆分：若一个单词有多个不同含义（名词 vs 动词，字面义 vs 引申义），必须拆分为多条独立数据。
+严禁堆砌：每张卡片只承载一个特定语境下的含义，不准将多个释义挤在一起。
+
+2. 卡片正面 (Column 1: Front)
+内容：提供自然的短语或搭配 (Phrase/Collocation)，而非单个孤立单词。
+样式：使用纯文本，不需要加粗目标单词。
+
+3. 卡片背面 (Column 2: Back - 整合页)
+背面信息必须全部合并在第二列，并使用 HTML 标签排版，包含以下三个部分：
+英文释义：简练准确。
+例句：使用 <em> 标签包裹，使例句呈现斜体。
+【词根词缀】：用中文进行词源、前缀、词根或后缀的拆解与记忆辅助。
+换行要求：三部分之间使用 <br><br> 分隔，确保界面清晰。
+结构示例：英文释义<br><br><em>斜体例句</em><br><br>【词根词缀】中文解析
+
+4. 输出格式标准 ({export_format} 格式)
+文件规范：纯文本代码块。
+分隔符：使用逗号 (Comma) 分隔字段。
+引号包裹：每个字段必须用双引号 ("...") 包裹，以防内容内部的标点导致导入错误。
+
+5. 数据清洗与优化
+拼写修正：自动修正用户列表中的明显拼写错误。
+缩写展开：对缩写（如 WFH, aka）在背面提供全称及解释。
+
+💡 最终输出示例（{export_format} 内容）：
+"run a business","to manage or operate a company<br><br><em>He quit his job to run a business selling handmade crafts.</em><br><br>【词源】源自古英语 rinnan（跑/流动），引申为“使机器运转”或“使业务流转”"
+"go for a run","an act of running for exercise<br><br><em>I go for a run every morning before work.</em><br><br>【词源】同上，此处为名词用法，指“奔跑”这一动作"
+
+导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。
+请直接输出纯文本代码块，不要包含任何多余的开场白或解释。"""
+
 def call_deepseek_api(prompt_template, words):
-    """从 Streamlit Server 安全调用 API"""
-    try:
-        api_key = st.secrets["DEEPSEEK_API_KEY"]
-    except KeyError:
-        return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
-    
+    try: api_key = st.secrets["DEEPSEEK_API_KEY"]
+    except KeyError: return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
     if not words: return "⚠️ 错误：没有需要生成的单词。"
     
     url = "https://api.deepseek.com/chat/completions"
@@ -147,7 +178,6 @@ def call_deepseek_api(prompt_template, words):
         "messages": [{"role": "user", "content": full_prompt}],
         "temperature": 0.3
     }
-    
     try:
         resp = requests.post(url, json=payload, headers=headers)
         resp.raise_for_status()
@@ -164,7 +194,6 @@ def analyze_words(unique_word_list):
     for item_lower in unique_word_list:
         if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
         if item_lower in JUNK_WORDS: continue
-        
         actual_rank = vocab_dict.get(item_lower, 99999)
         
         if item_lower in BUILTIN_TECHNICAL_TERMS:
@@ -172,12 +201,10 @@ def analyze_words(unique_word_list):
             term_rank = actual_rank if actual_rank != 99999 else 15000
             unique_items.append({"word": f"{item_lower} ({domain})", "rank": term_rank, "raw": item_lower})
             continue
-        
         if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
             display = PROPER_NOUNS_DB.get(item_lower, item_lower.title())
             unique_items.append({"word": display, "rank": actual_rank, "raw": item_lower})
             continue
-            
         if actual_rank != 99999:
             unique_items.append({"word": item_lower, "rank": actual_rank, "raw": item_lower})
             
@@ -198,7 +225,6 @@ def clear_all_inputs():
 # --- 参数配置区 ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
 c1, c2, c3, c4, c5 = st.columns(5)
-# 明确标注为词汇量
 with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 30000, 7500, 500)
 with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 30000, 15000, 500)
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10)
@@ -226,10 +252,8 @@ st.divider()
 if btn_process:
     with st.spinner("🧠 正在急速读取文件并进行智能解析（长篇巨著请稍候）..."):
         start_time = time.time()
-        
         combined_text = raw_text
-        if uploaded_file is not None:
-            combined_text += "\n" + extract_text_from_file(uploaded_file)
+        if uploaded_file is not None: combined_text += "\n" + extract_text_from_file(uploaded_file)
             
         if not combined_text.strip():
             st.warning("⚠️ 未提取到任何有效文本！如果你上传了 EPUB/PDF，可能它是纯图片扫描版，或者文件为空。")
@@ -240,7 +264,6 @@ if btn_process:
             
             unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
             df = analyze_words(unique_lemmas)
-            
             process_time = time.time() - start_time
             
             col_m1, col_m2, col_m3, col_m4 = st.columns(4)
@@ -266,18 +289,10 @@ if btn_process:
                     "📝 原文防卡死下载"
                 ])
                 
-                # --- AI 动态 Prompt 定义 (格式更宽泛，支持 CSV/TXT) ---
-                default_prompt = """请扮演一位专业的 Anki 制卡专家。请严格为以下单词生成记忆卡片数据。
-核心原则：
-1. 极简速记：仅提供1个最核心、最符合现代语境的释义。
-2. 结构(每字段用英文逗号或制表符分隔，内容加双引号)："单词或短语", "英文释义<br><br><em>斜体例句</em><br><br>中文助记"
-请直接输出纯文本 (CSV 或 TXT 格式均可) 的代码块，不要包含任何多余的开场白或解释。"""
-
                 def render_tab(tab_obj, data_df, label, expand_default=False, df_key=""):
                     with tab_obj:
                         if not data_df.empty:
                             pure_words = data_df['word'].tolist()
-                            
                             display_lines = []
                             for _, row in data_df.iterrows():
                                 if show_rank:
@@ -286,21 +301,39 @@ if btn_process:
                                 else:
                                     display_lines.append(row['word'])
                             
-                            with st.expander("👁️ 查看单词列表", expanded=expand_default):
+                            with st.expander("👁️ 查看提取单词列表", expanded=expand_default):
                                 st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制单词</p>", unsafe_allow_html=True)
                                 st.code("\n".join(display_lines), language='text')
                             
-                            st.markdown(f"#### 🤖 AI 一键制卡引擎 ({label})")
-                            st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可直接生成记忆卡片！")
+                            st.divider()
                             
-                            custom_prompt = st.text_area("📝 自定义 AI Prompt (可动态修改)", value=default_prompt, height=130, key=f"prompt_{df_key}")
+                            # === 格式选择区 ===
+                            export_format = st.radio("⚙️ 选择输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
                             
-                            if st.button("⚡ 召唤 DeepSeek 立即生成卡片", key=f"btn_{df_key}", type="primary"):
-                                with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
-                                    ai_result = call_deepseek_api(custom_prompt, pure_words)
-                                    st.success("🎉 生成完成！")
-                                    st.code(ai_result, language="markdown")
-                                    st.download_button(label="📥 直接下载生成的卡片 (.csv/.txt)", data=ai_result, file_name=f"anki_cards_{label}.csv", mime="text/plain")
+                            # === AI 双轨模式区 ===
+                            ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 一键直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
+                            
+                            with ai_tab1:
+                                st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可一键编纂制卡数据！")
+                                custom_prompt = st.text_area("📝 自定义 AI Prompt (可修改)", value=get_base_prompt_template(export_format), height=250, key=f"prompt_{df_key}")
+                                
+                                if st.button("⚡ 召唤 DeepSeek 立即生成卡片", key=f"btn_{df_key}", type="primary"):
+                                    with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
+                                        ai_result = call_deepseek_api(custom_prompt, pure_words)
+                                        st.success("🎉 生成完成！")
+                                        st.code(ai_result, language="markdown")
+                                        st.download_button(
+                                            label=f"📥 直接下载生成的卡片 (.{export_format.lower()})", 
+                                            data=ai_result, 
+                                            file_name=f"anki_cards_{label}.{export_format.lower()}", 
+                                            mime="text/plain" if export_format == "TXT" else "text/csv"
+                                        )
+                            
+                            with ai_tab2:
+                                st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
+                                full_prompt_to_copy = f"{get_base_prompt_template(export_format)}\n\n待处理单词：\n{', '.join(pure_words)}"
+                                st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制</p>", unsafe_allow_html=True)
+                                st.code(full_prompt_to_copy, language='markdown')
                         else: st.info("该区间暂无单词")
 
                 render_tab(t_top, top_df, "Top精选", expand_default=True, df_key="top") 
