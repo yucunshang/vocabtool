@@ -7,26 +7,38 @@ import nltk
 import io
 
 # ==========================================
-# 0. 基础配置
+# 0. 基础配置与 CSS (适配手机)
 # ==========================================
 st.set_page_config(
-    page_title="Prompt Gen", 
+    page_title="Vocab Master", 
     page_icon="📱", 
-    layout="centered", 
+    layout="centered",  # 手机端改为 centered 更聚焦
     initial_sidebar_state="collapsed"
 )
 
 st.markdown("""
 <style>
+    /* 界面紧凑化 */
     .block-container { padding-top: 1rem; padding-bottom: 3rem; }
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     [data-testid="stSidebarCollapsedControl"] {display: none;}
+    
+    /* 按钮优化：大尺寸适合手指点击 */
     .stButton>button {
-        width: 100%; border-radius: 12px; height: 3.5em; font-weight: bold; font-size: 18px !important;
+        width: 100%; border-radius: 12px; height: 3.5em; font-weight: bold; font-size: 16px !important;
         margin-top: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
-    .stTextArea>div>div>textarea { font-size: 16px !important; border-radius: 10px; }
-    .stNumberInput input { font-size: 18px !important; }
+    
+    /* 文本框优化：方便复制，防止字体过小 */
+    .stTextArea textarea { font-size: 14px !important; border-radius: 10px; }
+    
+    /* 设置栏样式 */
+    [data-testid="stExpander"] { border-radius: 10px; border: 1px solid #ddd; margin-bottom: 20px; }
+    
+    /* 标签页优化 */
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 5px; }
+    .stTabs [aria-selected="true"] { background-color: #ff4b4b !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -47,9 +59,6 @@ setup_nltk()
 
 @st.cache_data
 def load_data():
-    """
-    加载词频数据，保留所有行（不去重），以解决一词多义导致的漏词问题。
-    """
     possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next((f for f in possible_files if os.path.exists(f)), None)
     
@@ -58,72 +67,69 @@ def load_data():
             df = pd.read_csv(file_path)
             cols = [str(c).strip().lower() for c in df.columns]
             df.columns = cols
-            
             w_col = next((c for c in cols if 'word' in c), cols[0])
             r_col = next((c for c in cols if 'rank' in c), cols[1])
             
-            # 清洗
+            # 清洗与类型转换
             df = df.dropna(subset=[w_col])
             df[w_col] = df[w_col].astype(str).str.lower().str.strip()
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
             df = df.dropna(subset=[r_col])
-            
-            # 排序
             df = df.sort_values(r_col)
             
-            # 1. 字典：Word -> Rank (供文本提取用)
-            # 这里如果遇到重复词，默认保留最后的（或者任意一个，影响不大）
+            # 字典：用于快速查询 Rank
             vocab_dict = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
-            
-            # 2. DataFrame (供刷词用，保留所有行)
             return vocab_dict, df, r_col, w_col
-            
         except Exception as e:
             st.error(f"数据加载出错: {e}")
             return {}, None, None, None
     return {}, None, None, None
 
 VOCAB_DICT, FULL_DF, RANK_COL, WORD_COL = load_data()
-
 def get_lemma(word): return lemminflect.getLemma(word, upos='VERB')[0] 
 
 # ==========================================
-# 2. Prompt 生成逻辑 (更新：小写 + 详细词源)
+# 2. 动态 Prompt 生成器 (基于全局设置)
 # ==========================================
-def generate_strict_prompt(words):
+def generate_dynamic_prompt(words, settings):
     word_list_str = ", ".join(words)
+    
+    # 解析设置
+    fmt = settings.get("format", "CSV")
+    ex_count = settings.get("example_count", 1)
+    lang = settings.get("lang", "Chinese")
+    
+    # 这里的 Prompt 严格遵循您之前的要求：
+    # 1. 小写短语
+    # 2. 词源只解释组件
+    # 3. 例句大写
+    # 4. 无表头
+    
     prompt = f"""Role: High-Efficiency Anki Card Creator
-Task: Convert the provided word list into a strict CSV data block.
+Task: Convert the provided word list into a strict {fmt} data block.
 
 --- OUTPUT FORMAT RULES ---
-1. Structure: 2 Columns only. Comma-separated. All fields double-quoted.
+1. Structure: {'2 Columns (Front, Back)' if fmt=='CSV' else 'Custom Text Format'}.
    Format: "Front","Back"
-   Header: **Do NOT output a header row.** Only output the data rows.
+   Header: **Do NOT output a header row.**
 
 2. Column 1 (Front):
-   - Content: A natural, short English phrase or collocation containing the target word.
-   - Style: **ALL LOWERCASE** (do not capitalize the first letter). 
-   - Example: "a limestone quarry", not "A limestone quarry".
+   - Content: A natural, short English phrase/collocation.
+   - Style: **ALL LOWERCASE**.
 
 3. Column 2 (Back):
-   - Content: Definition + Example + Etymology.
-   - HTML Layout: Definition <br> <br> <em>Example Sentence</em> <br> <br> 【源】Etymology
-   - definition style: Concise English, **start with lowercase**.
-   - example style: Wrapped in <em>, **start with lowercase**.
-   - Spacing: Use double <br> tags ( <br> <br> ) between sections.
+   - Content: Definition + {ex_count} Example(s) + Etymology.
+   - HTML Layout: Definition <br> <br> <em>Example</em> <br> <br> 【源】Etymology
+   - Definition Language: {lang} & English concise (Start with lowercase).
+   - Example Style: **Start with UPPERCASE** (Normal sentence case). Wrapped in <em>.
+   - Spacing: Double <br> tags.
 
-4. Etymology Style (Detailed):
-   - Format: 【源】Root (Chinese Meaning) + Affix (Chinese Meaning) → Logic.
-   - Requirement: **MUST provide the Chinese meaning** for roots/affixes.
-   - Example 1: 【源】pro- (向前) + gress (走) → 前进
-   - Example 2: 【源】Lat. 'vigere' (活跃) → 精力
+4. Etymology Style:
+   - Only explain roots/affixes in {lang}.
+   - Format: 【源】Root (Meaning) + Affix (Meaning)
+   - Do NOT explain the final word meaning.
 
-5. Atomicity Principle (Strict):
-   - If a word has distinct meanings, **generate SEPARATE rows**.
-
-6. Output: 
-   - Code Block ONLY. 
-   - NO header line.
+5. Atomicity: Separate rows for distinct meanings.
 
 --- WORD LIST ---
 {word_list_str}
@@ -133,122 +139,177 @@ Task: Convert the provided word list into a strict CSV data block.
 # ==========================================
 # 3. 辅助功能
 # ==========================================
-def extract_text_from_file(uploaded_file):
+def extract_text(file_obj):
     try:
-        ext = uploaded_file.name.split('.')[-1].lower()
-        if ext == 'txt': return uploaded_file.getvalue().decode("utf-8", errors="ignore")
+        ext = file_obj.name.split('.')[-1].lower()
+        if ext == 'txt': return file_obj.getvalue().decode("utf-8", errors="ignore")
         elif ext == 'pdf':
-            import PyPDF2; reader = PyPDF2.PdfReader(uploaded_file)
+            import PyPDF2; reader = PyPDF2.PdfReader(file_obj)
             return " ".join([p.extract_text() for p in reader.pages if p.extract_text()])
         elif ext == 'docx':
-            import docx; doc = docx.Document(uploaded_file)
+            import docx; doc = docx.Document(file_obj)
             return " ".join([p.text for p in doc.paragraphs])
     except: return ""
     return ""
 
-def process_text_input(text, min_rank, max_rank):
-    words = re.findall(r"[a-zA-Z']+", text)
-    lemmas = set(get_lemma(w).lower() for w in words if len(w)>=2)
-    filtered = [(w, VOCAB_DICT.get(w, 99999)) for w in lemmas]
-    filtered = [w for w, r in filtered if min_rank <= r <= max_rank]
-    filtered.sort(key=lambda w: VOCAB_DICT.get(w, 99999))
-    return filtered
+def classify_words(text, current_lvl, target_lvl):
+    raw_words = re.findall(r"[a-zA-Z']+", text)
+    lemmas = set(get_lemma(w).lower() for w in raw_words if len(w)>=2)
+    
+    mastered, target, beyond = [], [], []
+    
+    for w in lemmas:
+        rank = VOCAB_DICT.get(w, 99999) # 99999 = Unknown/Rare
+        
+        if rank <= current_lvl:
+            mastered.append((w, rank))
+        elif current_lvl < rank <= target_lvl:
+            target.append((w, rank))
+        else:
+            beyond.append((w, rank))
+            
+    # 排序
+    mastered.sort(key=lambda x: x[1])
+    target.sort(key=lambda x: x[1])
+    beyond.sort(key=lambda x: x[1])
+    
+    return [x[0] for x in mastered], [x[0] for x in target], [x[0] for x in beyond]
 
 # ==========================================
-# 4. 主界面
+# 4. 主界面逻辑
 # ==========================================
-st.title("⚡️ Anki Master")
+st.title("⚡️ Vocab Master")
 
 if FULL_DF is None:
     st.error("⚠️ 缺少词频文件 (coca_cleaned.csv)")
 else:
-    mode = st.radio("功能", ["🔢 刷词", "📖 提取", "🛠️ 转换"], horizontal=True, label_visibility="collapsed")
+    # ------------------------------------------------
+    # 🟢 需求3：折叠栏放在所有功能上面 (全局设置)
+    # ------------------------------------------------
+    with st.expander("⚙️ 生成设置 (Prompt Settings)", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            set_format = st.selectbox("导出格式", ["CSV", "TXT"], index=0)
+            set_lang = st.selectbox("释义语言", ["Chinese", "English"], index=0)
+        with c2:
+            set_ex_count = st.number_input("例句数量", 1, 3, 1)
+            set_case = st.selectbox("风格", ["Front:Phrase (Lower)", "Front:Word"], index=0)
+    
+    # 包装设置
+    global_settings = {
+        "format": set_format,
+        "lang": set_lang,
+        "example_count": set_ex_count
+    }
+
+    # --- 导航 ---
+    mode = st.radio("功能模式", ["🔢 词频刷词", "📖 文本提取", "🛠️ 格式转换"], horizontal=True, label_visibility="collapsed")
     
     # ------------------------------------------------
-    # 模式 1: 刷词 (凑单模式)
+    # 模式 1: 刷词 (Range)
     # ------------------------------------------------
-    if mode == "🔢 刷词":
-        st.caption("从指定排名开始，自动凑齐数量")
+    if mode == "🔢 词频刷词":
+        st.caption("按排名批量生成单词卡")
+        c1, c2 = st.columns(2)
+        with c1: start_rank = st.number_input("起始排名", 8000, step=50)
+        with c2: count = st.number_input("生成数量", 50, step=10)
+            
+        filtered = FULL_DF[FULL_DF[RANK_COL] >= start_rank].sort_values(RANK_COL).head(count)
+        words = filtered[WORD_COL].tolist()
         
-        col1, col2 = st.columns(2)
-        with col1:
-            start_rank = st.number_input("起始排名", value=8000, step=50)
-        with col2:
-            count = st.number_input("生成数量", value=50, step=10)
+        if words:
+            real_range = f"{int(filtered.iloc[0][RANK_COL])}-{int(filtered.iloc[-1][RANK_COL])}"
+            st.info(f"提取 {len(words)} 个单词 ({real_range})")
             
-        # 逻辑：筛选 >= start_rank 的所有词，排序，取前 count 个
-        filtered_df = FULL_DF[FULL_DF[RANK_COL] >= start_rank].sort_values(RANK_COL)
-        selected_df = filtered_df.head(count)
-        target_words = selected_df[WORD_COL].tolist()
-        
-        if target_words:
-            real_start = int(selected_df.iloc[0][RANK_COL])
-            real_end = int(selected_df.iloc[-1][RANK_COL])
+            # 🟢 需求1：单词列表要可以复制
+            st.text_area("📋 单词列表 (全选复制)", ", ".join(words), height=100)
             
-            st.info(f"✅ 已提取 **{len(target_words)}** 个单词")
-            st.caption(f"实际排名范围: {real_start} - {real_end}")
-            
-            with st.expander("👀 查看单词列表"):
-                st.text(", ".join(target_words))
-
-            if st.button("🚀 生成 Prompt"):
-                prompt = generate_strict_prompt(target_words)
+            if st.button("🚀 生成 Prompt", type="primary"):
+                prompt = generate_dynamic_prompt(words, global_settings)
                 st.code(prompt, language="markdown")
-                st.success("请复制上方代码 -> 发送给 ChatGPT")
+                st.success("点击右上角复制 -> 发给 AI")
         else:
-            st.warning("该排名之后没有更多单词了。")
+            st.warning("无数据")
 
     # ------------------------------------------------
-    # 模式 2: 提取
+    # 模式 2: 提取 (Extract) - 🟢 需求2：三栏功能回归
     # ------------------------------------------------
-    elif mode == "📖 提取":
-        inp = st.radio("方式", ["粘贴", "上传"], horizontal=True, label_visibility="collapsed")
-        txt = ""
-        target_words = []
+    elif mode == "📖 文本提取":
+        st.caption("分析文章，按你的词汇量分级 (无 Top N 限制)")
         
-        if inp == "粘贴": txt = st.text_area("文本", height=100)
-        else: 
-            up = st.file_uploader("文件", type=["txt","pdf","docx"])
-            if up: txt = extract_text_from_file(up)
+        # 词汇量设置
+        col_a, col_b = st.columns(2)
+        with col_a: 
+            curr_lvl = st.number_input("当前词汇量 (Current)", value=4000, step=500)
+        with col_b: 
+            targ_lvl = st.number_input("目标词汇量 (Target)", value=8000, step=500)
         
-        if txt and st.button("提取"):
-            target_words = process_text_input(txt, 3000, 20000)
-            st.session_state['temp_ext'] = target_words
-        
-        if 'temp_ext' in st.session_state: target_words = st.session_state['temp_ext']
-
-        if target_words:
-            if len(target_words)>100: 
-                target_words=target_words[:100]
-                st.warning("已截取前 100 个")
+        # 输入
+        inp_type = st.radio("Input", ["粘贴文本", "上传文件"], horizontal=True, label_visibility="collapsed")
+        raw_text = ""
+        if inp_type == "粘贴文本":
+            raw_text = st.text_area("在此粘贴", height=150)
+        else:
+            up = st.file_uploader("支持 TXT/PDF/DOCX", type=["txt","pdf","docx"])
+            if up: raw_text = extract_text(up)
             
-            st.info(f"提取到 {len(target_words)} 个生词")
-            if st.button("🚀 生成 Prompt"):
-                prompt = generate_strict_prompt(target_words)
-                st.code(prompt, language="markdown")
+        # 处理与展示
+        if raw_text and st.button("🔍 分析单词", type="primary"):
+            w_mastered, w_target, w_beyond = classify_words(raw_text, curr_lvl, targ_lvl)
+            
+            # 🟢 需求2：三栏展示 (手机端用 Tabs 最合适)
+            tab1, tab2, tab3 = st.tabs([
+                f"🎯 重点 ({len(w_target)})", 
+                f"✅ 已掌握 ({len(w_mastered)})", 
+                f"🚀 超纲 ({len(w_beyond)})"
+            ])
+            
+            # --- Tab 1: 重点单词 ---
+            with tab1:
+                if w_target:
+                    st.success("这些是你当前阶段最需要背的词！")
+                    # 🟢 需求2：可以复制，折叠
+                    with st.expander("📋 展开/复制列表", expanded=True):
+                        st.text_area("Target Words", ", ".join(w_target), height=150, key="txt_target")
+                    
+                    if st.button("🚀 为重点词生成 Prompt"):
+                        prompt = generate_dynamic_prompt(w_target, global_settings)
+                        st.code(prompt, language="markdown")
+                else:
+                    st.info("此区间无单词")
+
+            # --- Tab 2: 已掌握 ---
+            with tab2:
+                if w_mastered:
+                    st.caption("低于当前词汇量的词：")
+                    with st.expander("📋 展开/复制列表"):
+                        st.text_area("Mastered Words", ", ".join(w_mastered), height=150, key="txt_mastered")
+                else: st.write("无")
+
+            # --- Tab 3: 超纲 ---
+            with tab3:
+                if w_beyond:
+                    st.caption("高于目标词汇量或生僻词：")
+                    with st.expander("📋 展开/复制列表"):
+                        st.text_area("Beyond Words", ", ".join(w_beyond), height=150, key="txt_beyond")
+                else: st.write("无")
 
     # ------------------------------------------------
     # 模式 3: 转换
     # ------------------------------------------------
-    elif mode == "🛠️ 转换":
-        st.markdown("### 📥 AI 结果转 Anki 文件")
-        st.caption("自动补全表头，支持 Anki 直接导入")
+    elif mode == "🛠️ 格式转换":
+        st.markdown("### 📥 AI 结果转 Anki CSV")
+        st.caption("粘贴 AI 返回的纯数据 (No Header)，自动下载")
         
-        csv_input = st.text_area("粘贴内容", height=200, placeholder='"phrase","def..."')
+        csv_in = st.text_area("粘贴内容", height=200, placeholder='"phrase","def..."')
         
-        if csv_input:
-            csv_content = csv_input.strip()
-            # 自动补全 Header
-            if '"Front","Back"' not in csv_content and "Front,Back" not in csv_content:
-                final_csv = '"Front","Back"\n' + csv_content
-            else:
-                final_csv = csv_content
-            
+        if csv_in:
+            csv_str = csv_in.strip()
+            # 保持纯净，不加 Header
             st.download_button(
-                label="📥 下载 .csv (Anki Ready)",
-                data=final_csv.encode('utf-8'),
-                file_name="anki_import.csv",
-                mime="text/csv",
+                "📥 下载 .csv (纯数据)",
+                csv_str.encode('utf-8'),
+                "anki_import.csv",
+                "text/csv",
                 type="primary"
             )
-            st.success("下载后 -> 分享到 Anki -> 直接 Import")
