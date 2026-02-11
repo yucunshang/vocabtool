@@ -9,22 +9,32 @@ import time
 import requests
 import zipfile
 import concurrent.futures
+import tempfile
+import csv
+import io
+import random
 
 # ==========================================
 # 0. 依赖降级处理 (体验升级)
 # ==========================================
 HAS_PYPDF2 = False
 HAS_DOCX = False
+HAS_GENANKI = False
+
 try:
     import PyPDF2
     HAS_PYPDF2 = True
-except ImportError:
-    pass
+except ImportError: pass
+
 try:
     import docx
     HAS_DOCX = True
-except ImportError:
-    pass
+except ImportError: pass
+
+try:
+    import genanki
+    HAS_GENANKI = True
+except ImportError: pass
 
 # ==========================================
 # 1. 基础配置
@@ -43,8 +53,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-if not (HAS_PYPDF2 and HAS_DOCX):
-    st.warning("⚠️ 部分文件处理依赖未安装，暂不支持解析 PDF 和 DOCX。如需完整体验，请在终端运行: `pip install PyPDF2 python-docx`")
+if not (HAS_PYPDF2 and HAS_DOCX and HAS_GENANKI):
+    missing = []
+    if not HAS_PYPDF2: missing.append("PyPDF2")
+    if not HAS_DOCX: missing.append("python-docx")
+    if not HAS_GENANKI: missing.append("genanki")
+    st.warning(f"⚠️ 缺少可选依赖包: `{', '.join(missing)}`。如需完整体验（解析文档及直出 Anki 包），请运行: `pip install {' '.join(missing)}`")
 
 # ==========================================
 # 2. 数据与 NLP 初始化
@@ -176,6 +190,67 @@ def get_base_prompt_template(export_format="TXT"):
 导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。"""
 
 # ==========================================
+# 3.5 Anki 牌组原生打包引擎 (终极杀器)
+# ==========================================
+def create_apkg_from_csv(csv_content, deck_name="Vocab Master Pro Deck"):
+    if not HAS_GENANKI:
+        return None
+        
+    model_id = 1607392319 
+    anki_model = genanki.Model(
+        model_id,
+        'Vocab Master Pro Model',
+        fields=[
+            {'name': 'Front'},
+            {'name': 'Back'},
+        ],
+        templates=[
+            {
+                'name': 'Card 1',
+                'qfmt': '<div class="front">{{Front}}</div>',
+                'afmt': '{{FrontSide}}<hr id="answer"><div class="back">{{Back}}</div>',
+            },
+        ],
+        css='''
+        .card { font-family: 'Arial', sans-serif; font-size: 18px; text-align: center; color: #333; background-color: #f9f9f9; padding: 20px;}
+        .front { font-size: 32px; font-weight: bold; color: #1a1a1a; margin-bottom: 25px; margin-top: 15px;}
+        hr#answer { border: 0; border-bottom: 2px dashed #ccc; margin: 20px 0; }
+        .back { text-align: left; line-height: 1.6; font-size: 18px; color: #444;}
+        em { color: #0066cc; font-style: italic; font-weight: 500; background-color: #f0f7ff; padding: 2px 5px; border-radius: 4px;}
+        '''
+    )
+
+    deck_id = random.randrange(1 << 30, 1 << 31)
+    anki_deck = genanki.Deck(deck_id, deck_name)
+
+    f = io.StringIO(csv_content.strip())
+    reader = csv.reader(f)
+    
+    valid_cards = 0
+    for row in reader:
+        if len(row) >= 2:
+            front = row[0].strip()
+            back = row[1].strip()
+            if front and back:
+                note = genanki.Note(model=anki_model, fields=[front, back])
+                anki_deck.add_note(note)
+                valid_cards += 1
+
+    if valid_cards == 0:
+        raise ValueError("未能从文本中解析出有效的卡片数据。")
+
+    package = genanki.Package(anki_deck)
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.apkg') as tmp:
+        package.write_to_file(tmp.name)
+        tmp.seek(0)
+        apkg_bytes = tmp.read()
+    
+    try: os.remove(tmp.name)
+    except: pass
+        
+    return apkg_bytes
+
+# ==========================================
 # 4. 多核并发 API 引擎 (鲁棒性增强)
 # ==========================================
 def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
@@ -201,7 +276,6 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
             elif resp.status_code == 401: return "❌ ERROR_401_INVALID_KEY"
             resp.raise_for_status()
             
-            # API 异常格式拦截
             try:
                 resp_data = resp.json()
                 result = resp_data['choices'][0]['message']['content'].strip()
@@ -296,7 +370,6 @@ if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = "
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
 if "is_processed" not in st.session_state: st.session_state.is_processed = False
 
-# 修复：一键清空增加 st.rerun() 强制刷新 UI
 def clear_all_inputs():
     st.session_state.raw_input_text = ""
     st.session_state.uploader_key += 1 
@@ -332,7 +405,7 @@ with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_
 st.divider()
 
 # ==========================================
-# 7. 后台硬核计算 (性能优化前置过滤)
+# 7. 后台硬核计算 (性能极速版)
 # ==========================================
 if btn_process:
     with st.spinner("🧠 正在急速读取文件并进行智能解析（性能优化版）..."):
@@ -347,7 +420,6 @@ if btn_process:
             raw_words = re.findall(r"[a-zA-Z']+", combined_text)
             unique_raw_words = list(set(raw_words))
             
-            # 性能优化：在调用较慢的 lemminflect 前，先过滤掉杂项和单字母（除了 a, i）
             JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're', 'a', 'i'}
             filtered_words = [w for w in unique_raw_words if len(w) > 1 or w.lower() in ['a', 'i']]
             filtered_words = [w for w in filtered_words if w.lower() not in JUNK_WORDS]
@@ -366,7 +438,7 @@ if btn_process:
             st.session_state.is_processed = True
 
 # ==========================================
-# 8. 动态界面渲染 (彻底解决状态丢失)
+# 8. 动态界面渲染 (终极防白屏、双下载按钮)
 # ==========================================
 if st.session_state.get("is_processed", False):
     
@@ -415,7 +487,7 @@ if st.session_state.get("is_processed", False):
                     
                     st.divider()
                     
-                    export_format = st.radio("⚙️ 选择输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
+                    export_format = st.radio("⚙️ 选择输出格式:", ["CSV", "TXT"], horizontal=True, key=f"fmt_{df_key}")
                     
                     ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 并发极速直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
                     
@@ -425,11 +497,10 @@ if st.session_state.get("is_processed", False):
                         custom_prompt = st.text_area(
                             "📝 自定义 AI Prompt (可修改)", 
                             value=get_base_prompt_template(export_format), 
-                            height=500, 
+                            height=350, 
                             key=f"prompt_{df_key}_{export_format}"
                         )
                         
-                        # ----- 核心修复区：状态缓存机制 -----
                         generate_btn_key = f"btn_{df_key}_{export_format}"
                         result_state_key = f"ai_result_{df_key}_{export_format}"
                         time_state_key = f"ai_time_{df_key}_{export_format}"
@@ -442,11 +513,9 @@ if st.session_state.get("is_processed", False):
                             ai_result = call_deepseek_api_chunked(custom_prompt, pure_words, progress_bar, status_text)
                             ai_duration = time.time() - ai_start_time
                             
-                            # 写入缓存，防止由于点击下载按钮导致的重载丢失数据
                             st.session_state[result_state_key] = ai_result
                             st.session_state[time_state_key] = ai_duration
 
-                        # 如果缓存中存在当前Tab及格式的数据，直接渲染下载区
                         if result_state_key in st.session_state:
                             ai_result = st.session_state[result_state_key]
                             ai_duration = st.session_state.get(time_state_key, 0)
@@ -456,16 +525,37 @@ if st.session_state.get("is_processed", False):
                             else:
                                 st.success(f"### 🎉 编纂全部完成！(总耗时: **{ai_duration:.2f}** 秒)")
                                 
-                                mime_type = "text/csv" if export_format == "CSV" else "text/plain"
-                                st.download_button(
-                                    label=f"📥 一键下载标准 Anki 导入文件 (.{export_format.lower()})", 
-                                    data=ai_result.encode('utf-8-sig'),  # 添加 BOM，防止 Excel/CSV 乱码
-                                    file_name=f"anki_cards_{label}.{export_format.lower()}", 
-                                    mime=mime_type,
-                                    type="primary",
-                                    use_container_width=True,
-                                    key=f"download_{df_key}_{export_format}"
-                                )
+                                # 双栏炫酷下载区
+                                col_dl1, col_dl2 = st.columns(2)
+                                
+                                with col_dl1:
+                                    mime_type = "text/csv" if export_format == "CSV" else "text/plain"
+                                    st.download_button(
+                                        label=f"📄 下载基础源文件 (.{export_format.lower()})", 
+                                        data=ai_result.encode('utf-8-sig'),
+                                        file_name=f"anki_cards_{label}.{export_format.lower()}", 
+                                        mime=mime_type,
+                                        use_container_width=True,
+                                        key=f"download_{df_key}_{export_format}"
+                                    )
+                                
+                                with col_dl2:
+                                    if HAS_GENANKI:
+                                        try:
+                                            apkg_bytes = create_apkg_from_csv(ai_result, f"Vocab Pro - {label}词汇")
+                                            st.download_button(
+                                                label="🎁 一键下载 Anki 牌组包 (.apkg)", 
+                                                data=apkg_bytes, 
+                                                file_name=f"Vocab_Pro_{label}.apkg", 
+                                                mime="application/octet-stream",
+                                                type="primary", 
+                                                use_container_width=True,
+                                                key=f"dl_apkg_{df_key}_{export_format}"
+                                            )
+                                        except Exception as e:
+                                            st.error(f"打包失败，请检查 AI 吐出的数据格式是否出现混乱: {e}")
+                                    else:
+                                        st.button("🎁 一键下载 Anki 牌组包 (需安装 genanki)", disabled=True, use_container_width=True)
                                 
                                 st.markdown("##### 📝 预览框")
                                 st.code(ai_result, language="text")
