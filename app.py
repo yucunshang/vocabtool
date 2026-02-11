@@ -8,33 +8,14 @@ import json
 import time
 import requests
 import zipfile
-import concurrent.futures
-import tempfile
-import csv
-import io
-import random
+import concurrent.futures  # 多核并发引擎
 
-# ==========================================
-# 0. 依赖降级处理 (体验升级)
-# ==========================================
-HAS_PYPDF2 = False
-HAS_DOCX = False
-HAS_GENANKI = False
-
+# 尝试导入多格式文档处理库
 try:
     import PyPDF2
-    HAS_PYPDF2 = True
-except ImportError: pass
-
-try:
     import docx
-    HAS_DOCX = True
-except ImportError: pass
-
-try:
-    import genanki
-    HAS_GENANKI = True
-except ImportError: pass
+except ImportError:
+    st.error("⚠️ 缺少文件处理依赖。请在终端运行: pip install PyPDF2 python-docx")
 
 # ==========================================
 # 1. 基础配置
@@ -53,20 +34,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-if not (HAS_PYPDF2 and HAS_DOCX and HAS_GENANKI):
-    missing = []
-    if not HAS_PYPDF2: missing.append("PyPDF2")
-    if not HAS_DOCX: missing.append("python-docx")
-    if not HAS_GENANKI: missing.append("genanki")
-    st.warning(f"⚠️ 缺少可选依赖包: `{', '.join(missing)}`。如需完整体验（解析文档及直出 Anki 包），请运行: `pip install {' '.join(missing)}`")
-
 # ==========================================
 # 2. 数据与 NLP 初始化
 # ==========================================
 @st.cache_data
 def load_knowledge_base():
     try:
+        # 确保 data 目录存在，如果不存在则提示
         if not os.path.exists('data'):
+            # 这里可以做容错，如果没有文件返回空字典，防止报错崩溃
             return {}, {}, {}, set()
             
         with open('data/terms.json', 'r', encoding='utf-8') as f: terms = {k.lower(): v for k, v in json.load(f).items()}
@@ -75,6 +51,7 @@ def load_knowledge_base():
         with open('data/ambiguous.json', 'r', encoding='utf-8') as f: ambiguous = set(json.load(f))
         return terms, proper, patch, ambiguous
     except Exception as e:
+        # 生产环境静默失败或仅打印日志，避免弹窗吓到用户
         print(f"Knowledge base load error: {e}")
         return {}, {}, {}, set()
 
@@ -116,6 +93,7 @@ def load_vocab():
         except: pass
     
     for word, rank in BUILTIN_PATCH_VOCAB.items(): vocab[word] = rank
+    # 常用词强制覆盖 rank
     URGENT_OVERRIDES = {
         "china": 400, "turkey": 1500, "march": 500, "may": 100, "august": 1500, "polish": 2500,
         "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
@@ -137,11 +115,9 @@ def extract_text_from_file(uploaded_file):
         if ext == 'txt':
             return uploaded_file.getvalue().decode("utf-8", errors="ignore")
         elif ext == 'pdf':
-            if not HAS_PYPDF2: return ""
             reader = PyPDF2.PdfReader(uploaded_file)
             return " ".join([page.extract_text() for page in reader.pages if page.extract_text()])
         elif ext == 'docx':
-            if not HAS_DOCX: return ""
             doc = docx.Document(uploaded_file)
             return " ".join([p.text for p in doc.paragraphs])
         elif ext == 'epub':
@@ -190,70 +166,10 @@ def get_base_prompt_template(export_format="TXT"):
 导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。"""
 
 # ==========================================
-# 3.5 Anki 牌组原生打包引擎 (终极杀器)
-# ==========================================
-def create_apkg_from_csv(csv_content, deck_name="Vocab Master Pro Deck"):
-    if not HAS_GENANKI:
-        return None
-        
-    model_id = 1607392319 
-    anki_model = genanki.Model(
-        model_id,
-        'Vocab Master Pro Model',
-        fields=[
-            {'name': 'Front'},
-            {'name': 'Back'},
-        ],
-        templates=[
-            {
-                'name': 'Card 1',
-                'qfmt': '<div class="front">{{Front}}</div>',
-                'afmt': '{{FrontSide}}<hr id="answer"><div class="back">{{Back}}</div>',
-            },
-        ],
-        css='''
-        .card { font-family: 'Arial', sans-serif; font-size: 18px; text-align: center; color: #333; background-color: #f9f9f9; padding: 20px;}
-        .front { font-size: 32px; font-weight: bold; color: #1a1a1a; margin-bottom: 25px; margin-top: 15px;}
-        hr#answer { border: 0; border-bottom: 2px dashed #ccc; margin: 20px 0; }
-        .back { text-align: left; line-height: 1.6; font-size: 18px; color: #444;}
-        em { color: #0066cc; font-style: italic; font-weight: 500; background-color: #f0f7ff; padding: 2px 5px; border-radius: 4px;}
-        '''
-    )
-
-    deck_id = random.randrange(1 << 30, 1 << 31)
-    anki_deck = genanki.Deck(deck_id, deck_name)
-
-    f = io.StringIO(csv_content.strip())
-    reader = csv.reader(f)
-    
-    valid_cards = 0
-    for row in reader:
-        if len(row) >= 2:
-            front = row[0].strip()
-            back = row[1].strip()
-            if front and back:
-                note = genanki.Note(model=anki_model, fields=[front, back])
-                anki_deck.add_note(note)
-                valid_cards += 1
-
-    if valid_cards == 0:
-        raise ValueError("未能从文本中解析出有效的卡片数据。")
-
-    package = genanki.Package(anki_deck)
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.apkg') as tmp:
-        package.write_to_file(tmp.name)
-        tmp.seek(0)
-        apkg_bytes = tmp.read()
-    
-    try: os.remove(tmp.name)
-    except: pass
-        
-    return apkg_bytes
-
-# ==========================================
-# 4. 多核并发 API 引擎 (鲁棒性增强)
+# 4. 多核并发 API 引擎 (核心极速区)
 # ==========================================
 def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
+    """内部工作线程：负责单一批次的极速请求"""
     url = "https://api.deepseek.com/chat/completions".strip()
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     system_enforcement = "\n\n【系统绝对强制指令】现在我已经发送了单词列表，请立即且直接输出最终的数据代码，绝对不准回复“好的”、“没问题”等任何客套话，绝对不准使用 ```csv 等 Markdown 语法包裹代码！"
@@ -276,11 +192,7 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
             elif resp.status_code == 401: return "❌ ERROR_401_INVALID_KEY"
             resp.raise_for_status()
             
-            try:
-                resp_data = resp.json()
-                result = resp_data['choices'][0]['message']['content'].strip()
-            except (KeyError, ValueError, IndexError) as e:
-                return f"\n🚨 API 返回格式异常或解析失败: {str(e)[:100]}"
+            result = resp.json()['choices'][0]['message']['content'].strip()
             
             if result.startswith("```"):
                 lines = result.split('\n')
@@ -290,12 +202,11 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
             return result
             
         return f"\n🚨 批次超时或被限流，此批次 ({len(batch_words)}词) 生成失败。"
-    except requests.exceptions.RequestException as e:
-        return f"\n🚨 批次请求网络异常: {str(e)}"
     except Exception as e:
-        return f"\n🚨 批次请求发生未知异常: {str(e)}"
+        return f"\n🚨 批次请求发生异常: {str(e)}"
 
 def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text):
+    """多线程并发控制器"""
     try: api_key = st.secrets["DEEPSEEK_API_KEY"]
     except KeyError: return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
     
@@ -313,7 +224,7 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
     
     results_ordered = [None] * len(chunks)
     
-    status_text.markdown("🚀 **并发任务已发射！** 正在全速连接算力集群...")
+    status_text.markdown("🚀 **并发任务已发射！** 正在全速生成首批卡片（首次返回约需 8~12 秒，请稍候）...")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_to_index = {
@@ -343,7 +254,10 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
 # ==========================================
 def analyze_words(unique_word_list):
     unique_items = [] 
+    JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're'}
     for item_lower in unique_word_list:
+        if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
+        if item_lower in JUNK_WORDS: continue
         actual_rank = vocab_dict.get(item_lower, 99999)
         
         if item_lower in BUILTIN_TECHNICAL_TERMS:
@@ -374,8 +288,8 @@ def clear_all_inputs():
     st.session_state.raw_input_text = ""
     st.session_state.uploader_key += 1 
     st.session_state.is_processed = False
+    # 清除旧的分析结果
     if 'base_df' in st.session_state: del st.session_state.base_df
-    st.rerun()
 
 # --- 参数配置区 ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
@@ -405,7 +319,7 @@ with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_
 st.divider()
 
 # ==========================================
-# 7. 后台硬核计算 (性能极速版)
+# 7. 后台硬核计算
 # ==========================================
 if btn_process:
     with st.spinner("🧠 正在急速读取文件并进行智能解析（性能优化版）..."):
@@ -417,16 +331,20 @@ if btn_process:
             st.warning("⚠️ 未提取到任何有效文本！")
             st.session_state.is_processed = False
         elif vocab_dict:
+            # 1. 提取单词
             raw_words = re.findall(r"[a-zA-Z']+", combined_text)
-            unique_raw_words = list(set(raw_words))
             
-            JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're', 'a', 'i'}
-            filtered_words = [w for w in unique_raw_words if len(w) > 1 or w.lower() in ['a', 'i']]
-            filtered_words = [w for w in filtered_words if w.lower() not in JUNK_WORDS]
+            # 2. 词形还原 (优化：仅提取不拼接全文，大幅节省内存)
+            # 使用 set 先去重再还原效率不一定高，因为 context 丢失，但这里 get_lemma 是单词处理，
+            # 我们可以先对 raw_words 做 set 减少 get_lemma 调用次数 (如果单词量极大)
+            # 不过为了保持频率统计的潜在准确性(虽然这里没用到频次)，直接处理列表也行。
+            # 既然是 stable 优化，我们只做去重后的 lemma
             
-            lemmatized_unique = [get_lemma(w).lower() for w in filtered_words]
-            unique_lemmas = list(set(lemmatized_unique))
+            unique_raw_words = list(set(raw_words)) # 先去重，减少 get_lemma 调用
+            lemmatized_unique = [get_lemma(w).lower() for w in unique_raw_words]
+            unique_lemmas = list(set(lemmatized_unique)) # 再次去重 (run -> run, running -> run)
             
+            # 3. 核心分析
             st.session_state.base_df = analyze_words(unique_lemmas)
             
             st.session_state.stats = {
@@ -438,7 +356,7 @@ if btn_process:
             st.session_state.is_processed = True
 
 # ==========================================
-# 8. 动态界面渲染 (终极防白屏、双下载按钮)
+# 8. 动态界面渲染
 # ==========================================
 if st.session_state.get("is_processed", False):
     
@@ -462,6 +380,7 @@ if st.session_state.get("is_processed", False):
         df = df.sort_values(by='rank')
         top_df = df[df['rank'] >= min_rank_threshold].sort_values(by='rank', ascending=True).head(top_n)
         
+        # 移除 "原文防卡死下载" Tab
         t_top, t_target, t_beyond, t_known = st.tabs([
             f"🔥 Top {len(top_df)}", 
             f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
@@ -487,7 +406,7 @@ if st.session_state.get("is_processed", False):
                     
                     st.divider()
                     
-                    export_format = st.radio("⚙️ 选择输出格式:", ["CSV", "TXT"], horizontal=True, key=f"fmt_{df_key}")
+                    export_format = st.radio("⚙️ 选择输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
                     
                     ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 并发极速直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
                     
@@ -497,65 +416,39 @@ if st.session_state.get("is_processed", False):
                         custom_prompt = st.text_area(
                             "📝 自定义 AI Prompt (可修改)", 
                             value=get_base_prompt_template(export_format), 
-                            height=350, 
+                            height=500, 
                             key=f"prompt_{df_key}_{export_format}"
                         )
                         
-                        generate_btn_key = f"btn_{df_key}_{export_format}"
-                        result_state_key = f"ai_result_{df_key}_{export_format}"
-                        time_state_key = f"ai_time_{df_key}_{export_format}"
-
-                        if st.button("⚡ 召唤 DeepSeek 极速生成卡片", key=generate_btn_key, type="primary"):
+                        if st.button("⚡ 召唤 DeepSeek 极速生成卡片", key=f"btn_{df_key}", type="primary"):
+                            
                             progress_bar = st.progress(0)
                             status_text = st.empty()
+                            status_text.markdown("**⚡ 正在连接 DeepSeek 云端算力集群...**") 
                             
+                            # ⏳ 开始精准计时
                             ai_start_time = time.time()
-                            ai_result = call_deepseek_api_chunked(custom_prompt, pure_words, progress_bar, status_text)
-                            ai_duration = time.time() - ai_start_time
                             
-                            st.session_state[result_state_key] = ai_result
-                            st.session_state[time_state_key] = ai_duration
-
-                        if result_state_key in st.session_state:
-                            ai_result = st.session_state[result_state_key]
-                            ai_duration = st.session_state.get(time_state_key, 0)
+                            ai_result = call_deepseek_api_chunked(custom_prompt, pure_words, progress_bar, status_text)
+                            
+                            # ⏳ 结束精准计时
+                            ai_duration = time.time() - ai_start_time
                             
                             if "❌" in ai_result and len(ai_result) < 100:
                                 st.error(ai_result)
                             else:
-                                st.success(f"### 🎉 编纂全部完成！(总耗时: **{ai_duration:.2f}** 秒)")
+                                # 🏅 终极跑分墙展示
+                                status_text.markdown(f"### 🎉 编纂全部完成！(总耗时: **{ai_duration:.2f}** 秒)")
                                 
-                                # 双栏炫酷下载区
-                                col_dl1, col_dl2 = st.columns(2)
-                                
-                                with col_dl1:
-                                    mime_type = "text/csv" if export_format == "CSV" else "text/plain"
-                                    st.download_button(
-                                        label=f"📄 下载基础源文件 (.{export_format.lower()})", 
-                                        data=ai_result.encode('utf-8-sig'),
-                                        file_name=f"anki_cards_{label}.{export_format.lower()}", 
-                                        mime=mime_type,
-                                        use_container_width=True,
-                                        key=f"download_{df_key}_{export_format}"
-                                    )
-                                
-                                with col_dl2:
-                                    if HAS_GENANKI:
-                                        try:
-                                            apkg_bytes = create_apkg_from_csv(ai_result, f"Vocab Pro - {label}词汇")
-                                            st.download_button(
-                                                label="🎁 一键下载 Anki 牌组包 (.apkg)", 
-                                                data=apkg_bytes, 
-                                                file_name=f"Vocab_Pro_{label}.apkg", 
-                                                mime="application/octet-stream",
-                                                type="primary", 
-                                                use_container_width=True,
-                                                key=f"dl_apkg_{df_key}_{export_format}"
-                                            )
-                                        except Exception as e:
-                                            st.error(f"打包失败，请检查 AI 吐出的数据格式是否出现混乱: {e}")
-                                    else:
-                                        st.button("🎁 一键下载 Anki 牌组包 (需安装 genanki)", disabled=True, use_container_width=True)
+                                mime_type = "text/csv" if export_format == "CSV" else "text/plain"
+                                st.download_button(
+                                    label=f"📥 一键下载标准 Anki 导入文件 (.{export_format.lower()})", 
+                                    data=ai_result.encode('utf-8-sig'), 
+                                    file_name=f"anki_cards_{label}.{export_format.lower()}", 
+                                    mime=mime_type,
+                                    type="primary",
+                                    use_container_width=True
+                                )
                                 
                                 st.markdown("##### 📝 预览框")
                                 st.code(ai_result, language="text")
