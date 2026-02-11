@@ -9,7 +9,7 @@ import time
 import requests
 import zipfile
 
-# 尝试导入多格式文档处理库 (彻底抛弃 BeautifulSoup，采用提速百倍的正则引擎)
+# 尝试导入多格式文档处理库
 try:
     import PyPDF2
     import docx
@@ -30,7 +30,6 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-size: 28px !important; color: var(--primary-color) !important; }
     .param-box { background-color: var(--secondary-background-color); padding: 15px 20px 5px 20px; border-radius: 10px; border: 1px solid var(--border-color-light); margin-bottom: 20px; }
     .copy-hint { color: #888; font-size: 14px; margin-bottom: 5px; margin-top: 10px; padding-left: 5px; }
-    .exam-note { color: #666; font-size: 14px; margin-top: -15px; margin-bottom: 20px; padding-left: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -121,7 +120,6 @@ def extract_text_from_file(uploaded_file):
                     if filename.endswith(('.html', '.xhtml', '.htm', '.xml')):
                         try:
                             content = z.read(filename).decode('utf-8', errors='ignore')
-                            # 核心优化：采用正则暴力剥离 HTML 标签，性能碾压 BeautifulSoup
                             clean_text = re.sub(r'<[^>]+>', ' ', content)
                             text_blocks.append(clean_text)
                         except: pass
@@ -200,8 +198,9 @@ def clear_all_inputs():
 # --- 参数配置区 ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
 c1, c2, c3, c4, c5 = st.columns(5)
-with c1: current_level = st.number_input("🎯 当前水平 (起)", 0, 30000, 7500, 500)
-with c2: target_level = st.number_input("🎯 目标水平 (止)", 0, 30000, 15000, 500)
+# 明确标注为词汇量
+with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 30000, 7500, 500)
+with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 30000, 15000, 500)
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10)
 with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3500, 500)
 with c5: 
@@ -209,8 +208,6 @@ with c5:
     st.write("") 
     show_rank = st.checkbox("🔢 附加显示 Rank", value=True)
 st.markdown("</div>", unsafe_allow_html=True)
-
-st.markdown("<p class='exam-note'>💡 <b>词汇量参考：</b>中考 ≈ 3500 &nbsp;|&nbsp; 高考 ≈ 5500 &nbsp;|&nbsp; 四级(CET4) ≈ 7500 &nbsp;|&nbsp; 六级(CET6) ≈ 9500 &nbsp;|&nbsp; 考研/雅思 ≈ 12000 &nbsp;|&nbsp; 托福/GRE ≈ 15000+</p>", unsafe_allow_html=True)
 
 # --- 双通道多格式输入 ---
 col_input1, col_input2 = st.columns([3, 2])
@@ -227,7 +224,6 @@ with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_
 st.divider()
 
 if btn_process:
-    # 核心修复：把文件提取和耗时的工作，全部放到 spinner 转圈动画内部！
     with st.spinner("🧠 正在急速读取文件并进行智能解析（长篇巨著请稍候）..."):
         start_time = time.time()
         
@@ -270,11 +266,12 @@ if btn_process:
                     "📝 原文防卡死下载"
                 ])
                 
-                default_prompt = """请扮演一位专业的 Anki 制卡专家。请严格为以下单词生成 CSV 导入格式。
+                # --- AI 动态 Prompt 定义 (格式更宽泛，支持 CSV/TXT) ---
+                default_prompt = """请扮演一位专业的 Anki 制卡专家。请严格为以下单词生成记忆卡片数据。
 核心原则：
 1. 极简速记：仅提供1个最核心、最符合现代语境的释义。
-2. 结构(每字段用英文逗号分隔，内容加双引号)："单词或短语", "英文释义<br><br><em>斜体例句</em><br><br>中文助记"
-请直接输出标准 CSV 代码块，不要包含任何多余解释。"""
+2. 结构(每字段用英文逗号或制表符分隔，内容加双引号)："单词或短语", "英文释义<br><br><em>斜体例句</em><br><br>中文助记"
+请直接输出纯文本 (CSV 或 TXT 格式均可) 的代码块，不要包含任何多余的开场白或解释。"""
 
                 def render_tab(tab_obj, data_df, label, expand_default=False, df_key=""):
                     with tab_obj:
@@ -298,12 +295,12 @@ if btn_process:
                             
                             custom_prompt = st.text_area("📝 自定义 AI Prompt (可动态修改)", value=default_prompt, height=130, key=f"prompt_{df_key}")
                             
-                            if st.button("⚡ 召唤 DeepSeek 立即生成 CSV", key=f"btn_{df_key}", type="primary"):
+                            if st.button("⚡ 召唤 DeepSeek 立即生成卡片", key=f"btn_{df_key}", type="primary"):
                                 with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
                                     ai_result = call_deepseek_api(custom_prompt, pure_words)
                                     st.success("🎉 生成完成！")
                                     st.code(ai_result, language="markdown")
-                                    st.download_button(label="📥 直接下载生成的 Anki 卡片 (.csv)", data=ai_result, file_name=f"anki_cards_{label}.csv", mime="text/csv")
+                                    st.download_button(label="📥 直接下载生成的卡片 (.csv/.txt)", data=ai_result, file_name=f"anki_cards_{label}.csv", mime="text/plain")
                         else: st.info("该区间暂无单词")
 
                 render_tab(t_top, top_df, "Top精选", expand_default=True, df_key="top") 
