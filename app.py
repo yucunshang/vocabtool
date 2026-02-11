@@ -90,12 +90,27 @@ def load_vocab():
         except: pass
     
     for word, rank in BUILTIN_PATCH_VOCAB.items(): vocab[word] = rank
+    
+    # 手动降级/覆盖特定单词的权重 (将常用数字词/序数词强行压到 1000 以内)
     URGENT_OVERRIDES = {
         "china": 400, "turkey": 1500, "march": 500, "may": 100, "august": 1500, "polish": 2500,
         "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
         "january": 400, "february": 400, "april": 400, "june": 400, "july": 400, "september": 400, "october": 400, "november": 400, "december": 400,
         "usa": 200, "uk": 200, "google": 1000, "apple": 1000, "microsoft": 1500
     }
+    
+    # 追加：常见基数词与序数词降级名单
+    number_words = [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+        "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+        "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion",
+        "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+        "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth", "twentieth",
+        "thirtieth", "fortieth", "fiftieth", "sixtieth", "seventieth", "eightieth", "ninetieth", "hundredth", "thousandth"
+    ]
+    for nw in number_words:
+        URGENT_OVERRIDES[nw] = 1000
+
     for word, rank in URGENT_OVERRIDES.items(): vocab[word] = rank
     return vocab
 
@@ -136,14 +151,12 @@ def get_dynamic_prompt_template(export_format, front_style, add_pos, def_lang, e
     """
     动态生成 Anki 极速制卡 Prompt (带严格语义约束模式)
     """
-    # 1. 动态构建 Front 要求
     front_desc = "A natural phrase or collocation using the specific meaning." if front_style == "phrase" else "The target word itself."
     if add_pos:
         front_desc += " MUST append the precise part of speech tag at the end, e.g., ' (v)', ' (n)', ' (adj)'."
     else:
         front_desc += " Do NOT add part of speech tags."
 
-    # 2. 动态构建 Back 释义要求
     def_map = {
         "en": "English definition of the specific meaning",
         "zh": "Chinese definition of the specific meaning",
@@ -151,26 +164,21 @@ def get_dynamic_prompt_template(export_format, front_style, add_pos, def_lang, e
     }
     def_desc = def_map.get(def_lang, "English definition")
 
-    # 3. 动态构建例句要求 (含标号与空格排版)
     if ex_count == 0:
         ex_desc = ""
     elif ex_count == 1:
         ex_desc = "<br><br><em>Italicized example sentence</em>"
     else:
-        # 序号标记并用 <br><br> 隔开，保证 Anki 导入后排版清晰
         examples = [f"{i+1}. <em>Italicized example sentence {i+1}</em>" for i in range(ex_count)]
         ex_desc = "<br><br>" + " <br><br> ".join(examples)
 
-    # 4. 动态构建词源要求
     ety_desc = "<br><br>【词根词缀/词源】Chinese etymology or affix explanation." if add_ety else ""
     
-    # 5. 一词多义处理规则
     if split_polysemy:
         poly_rule = "Atomicity: ONE meaning per row. Polysemous words MUST be split into multiple separate rows. NEVER stack multiple definitions in one card."
     else:
         poly_rule = "One Card Per Word: Generate EXACTLY ONE row per input word. Extract ONLY the single most common/primary meaning. NEVER split a word into multiple cards."
 
-    # 6. 生成最终的 Prompt
     prompt = f"""# Role
 You are an expert English linguist and a highly precise Anki flashcard generator.
 
@@ -317,12 +325,13 @@ def clear_all_inputs():
     st.session_state.is_processed = False
     if 'base_df' in st.session_state: del st.session_state.base_df
 
+# === 更新：按照截图设置参数默认值 ===
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
 c1, c2, c3, c4, c5 = st.columns(5)
-with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 30000, 7500, 500)
-with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 30000, 15000, 500)
-with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10)
-with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3500, 500)
+with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 30000, 9000, 500)     # 修改默认值为 9000
+with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 30000, 15000, 500)    # 修改默认值为 15000
+with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 100, 10)                 # 修改默认值为 100
+with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 10000, 500) # 修改默认值为 10000
 with c5: 
     st.write("") 
     st.write("") 
@@ -419,29 +428,27 @@ if st.session_state.get("is_processed", False):
                     
                     st.divider()
                     
-                    # --- 升级版卡片参数定制 UI ---
                     st.markdown("#### ⚙️ 定制卡片内容")
                     ui_col1, ui_col2 = st.columns(2)
                     
+                    # === 更新：按照截图设置制卡界面的默认单选框和复选框 ===
                     with ui_col1:
                         st.markdown("**正面配置 (Front)**")
-                        export_format = st.radio("输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
-                        ui_front = st.radio("呈现形式:", ["短语/搭配 (Phrase)", "仅单词 (Word Only)"], horizontal=True, key=f"front_{df_key}")
+                        export_format = st.radio("输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}", index=0)
+                        ui_front = st.radio("呈现形式:", ["短语/搭配 (Phrase)", "仅单词 (Word Only)"], horizontal=True, key=f"front_{df_key}", index=0)
                         ui_pos = st.checkbox("附加词性标示 (如 v, n)", value=True, key=f"pos_{df_key}")
-                        ui_poly = st.radio("多义词处理:", ["拆分为多张卡片 (原版默认)", "仅生成核心释义 (1词1卡)"], index=0, horizontal=True, key=f"poly_{df_key}")
+                        ui_poly = st.radio("多义词处理:", ["拆分为多张卡片 (原版默认)", "仅生成核心释义 (1词1卡)"], index=1, horizontal=True, key=f"poly_{df_key}") # 默认选中第二项
 
                     with ui_col2:
                         st.markdown("**背面配置 (Back)**")
-                        ui_def = st.radio("释义语言:", ["纯英文 (EN)", "纯中文 (ZH)", "中英双语 (EN+ZH)"], index=2, horizontal=True, key=f"def_{df_key}")
+                        ui_def = st.radio("释义语言:", ["纯英文 (EN)", "纯中文 (ZH)", "中英双语 (EN+ZH)"], index=0, horizontal=True, key=f"def_{df_key}") # 默认选中纯英文
                         ui_ex = st.slider("例句数量:", 0, 5, 1, key=f"ex_{df_key}")
                         ui_ety = st.checkbox("包含【词根词缀/词源】", value=True, key=f"ety_{df_key}")
 
-                    # 将 UI 选择映射为内部变量
                     front_style_val = "phrase" if "短语" in ui_front else "word"
                     def_lang_val = "en" if "纯英文" in ui_def else "zh" if "纯中文" in ui_def else "en_zh"
                     split_poly_val = True if "拆分" in ui_poly else False
                     
-                    # 动态生成最终 Prompt
                     custom_prompt_text = get_dynamic_prompt_template(
                         export_format=export_format,
                         front_style=front_style_val,
@@ -452,7 +459,6 @@ if st.session_state.get("is_processed", False):
                         split_polysemy=split_poly_val
                     )
                     
-                    # 提取纯单词列表用于 API 请求
                     words_to_process = data_df['raw'].tolist()
 
                     ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 并发极速直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
@@ -495,7 +501,7 @@ if st.session_state.get("is_processed", False):
                                 st.code(ai_result, language="text")
                     
                     with ai_tab2:
-                        st.info("💡 如果您想使用 ChatGPT/Gemini 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
+                        st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
                         full_prompt_to_copy = f"{custom_prompt_text}\n\n待处理单词：\n{', '.join(words_to_process)}"
                         st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制</p>", unsafe_allow_html=True)
                         st.code(full_prompt_to_copy, language='markdown')
