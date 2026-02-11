@@ -129,39 +129,35 @@ def extract_text_from_file(uploaded_file):
     return ""
 
 def get_base_prompt_template(export_format="TXT"):
-    """完美还原用户定制的5段式高阶 Prompt，并针对 Anki 导入加固"""
+    """一字不差地还原用户指定的制卡核心指令标准"""
     return f"""这是为您整理的最新、最完整的 Anki 制卡核心指令标准。我将严格遵守此准则为您处理所有单词列表：
 
 1. 核心原则：原子性 (Atomicity)
-- 含义拆分：若一个单词有多个不同含义（名词 vs 动词，字面义 vs 引申义），必须拆分为多条独立数据。
-- 严禁堆砌：每张卡片只承载一个特定语境下的含义，不准将多个释义挤在一起。
-
+含义拆分：若一个单词有多个不同含义（名词 vs 动词，字面义 vs 引申义），必须拆分为多条独立数据。
+严禁堆砌：每张卡片只承载一个特定语境下的含义，不准将多个释义挤在一起。
 2. 卡片正面 (Column 1: Front)
-- 内容：提供自然的短语或搭配 (Phrase/Collocation)，而非单个孤立单词。
-- 样式：使用纯文本，不需要加粗目标单词。
-
+内容：提供自然的短语或搭配 (Phrase/Collocation)，而非单个孤立单词。
+样式：使用纯文本，不需要加粗目标单词。
 3. 卡片背面 (Column 2: Back - 整合页)
-- 背面信息必须全部合并在第二列，并使用 HTML 标签排版，包含以下三个部分：
-  - 英文释义：简练准确。
-  - 例句：使用 <em> 标签包裹，使例句呈现斜体。
-  - 【词根词缀】：用中文进行词源、前缀、词根或后缀的拆解与记忆辅助。
-- 换行要求：三部分之间使用 <br><br> 分隔，确保界面清晰。
-- 结构示例：英文释义<br><br><em>斜体例句</em><br><br>【词根词缀】中文解析
+背面信息必须全部合并在第二列，并使用 HTML 标签排版，包含以下三个部分：
 
+英文释义：简练准确。
+例句：使用 <em> 标签包裹，使例句呈现斜体。
+【词根词缀】：用中文进行词源、前缀、词根或后缀的拆解与记忆辅助。
+换行要求：三部分之间使用 <br><br> 分隔，确保界面清晰。
+结构示例：英文释义<br><br><em>斜体例句</em><br><br>【词根词缀】中文解析
 4. 输出格式标准 ({export_format} 格式)
-- 文件规范：请直接输出纯文本数据本身。严禁使用任何 Markdown 代码块标签（如 ```csv 或 ```txt ），严禁有任何开场白。
-- 分隔符：使用逗号 (Comma) 分隔字段。
-- 引号包裹：每个字段必须用双引号 ("...") 包裹，以防内容内部的标点导致导入错误。
-
+文件规范：纯文本代码块。
+分隔符：使用逗号 (Comma) 分隔字段。
+引号包裹：每个字段必须用双引号 ("...") 包裹，以防内容内部的标点导致导入错误。
 5. 数据清洗与优化
-- 拼写修正：自动修正用户列表中的明显拼写错误。
-- 缩写展开：对缩写（如 WFH, aka）在背面提供全称及解释。
-
+拼写修正：自动修正用户列表中的明显拼写错误。
+缩写展开：对缩写（如 WFH, aka）在背面提供全称及解释。
 💡 最终输出示例（{export_format} 内容）：
 "run a business","to manage or operate a company<br><br><em>He quit his job to run a business selling handmade crafts.</em><br><br>【词源】源自古英语 rinnan（跑/流动），引申为“使机器运转”或“使业务流转”"
 "go for a run","an act of running for exercise<br><br><em>I go for a run every morning before work.</em><br><br>【词源】同上，此处为名词用法，指“奔跑”这一动作"
-
-导入提醒：在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。"""
+导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。
+如果您确认以上指令无误，请发送您的单词列表，我将立即开始。"""
 
 def call_deepseek_api(prompt_template, words):
     try: api_key = st.secrets["DEEPSEEK_API_KEY"]
@@ -188,7 +184,7 @@ def call_deepseek_api(prompt_template, words):
         
         result = resp.json()['choices'][0]['message']['content']
         
-        # 终极数据清洗：暴力剥离 AI 残留的 Markdown 标记
+        # 终极数据清洗：暴力剥离 AI 残留的 Markdown 标记，不影响用户纯净的 Prompt
         result = result.strip()
         if result.startswith("```"):
             lines = result.split('\n')
@@ -353,8 +349,8 @@ if st.session_state.get("is_processed", False):
                     
                     with ai_tab1:
                         st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可一键编纂制卡数据！")
-                        # 增高文本框，适配这套庞大的超级指令
-                        custom_prompt = st.text_area("📝 自定义 AI Prompt (可修改)", value=get_base_prompt_template(export_format), height=450, key=f"prompt_{df_key}")
+                        # 高度调大，适配你原版一字不差的详细指令
+                        custom_prompt = st.text_area("📝 自定义 AI Prompt (可修改)", value=get_base_prompt_template(export_format), height=500, key=f"prompt_{df_key}")
                         
                         if st.button("⚡ 召唤 DeepSeek 立即生成卡片", key=f"btn_{df_key}", type="primary"):
                             with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
@@ -366,7 +362,6 @@ if st.session_state.get("is_processed", False):
                                     st.success("🎉 生成完成！请务必通过下方按钮下载，直接导入 Anki。")
                                     
                                     mime_type = "text/csv" if export_format == "CSV" else "text/plain"
-                                    # utf-8-sig 是为了保证 Anki 导入不乱码的核心保护机制
                                     st.download_button(
                                         label=f"📥 一键下载标准 Anki 导入文件 (.{export_format.lower()})", 
                                         data=ai_result.encode('utf-8-sig'), 
