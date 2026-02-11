@@ -37,11 +37,12 @@ st.markdown("""
         margin-bottom: 20px;
     }
     
-    /* 复制提示文字高亮 */
+    /* 修复：复制提示文字显示不全的问题（去除了负边距） */
     .copy-hint {
         color: #888;
         font-size: 14px;
-        margin-bottom: -10px;
+        margin-bottom: 5px; 
+        margin-top: 10px;
         padding-left: 5px;
     }
 </style>
@@ -240,6 +241,14 @@ def analyze_words(unique_word_list):
 st.title("🚀 Vocab Master Pro - 全能长文解析引擎")
 st.markdown("💡 **一站式工作流**：支持粘贴整本书、长篇外刊或论文（**数十万字超长文本输入**）。系统会自动进行【词形还原】、【全量分级】并提取【Top N 精选】，极速生成双端输出。")
 
+# --- 初始化 Session State（用于清空文本框） ---
+if "raw_input_text" not in st.session_state:
+    st.session_state.raw_input_text = ""
+
+def clear_text():
+    """回调函数：清空输入框绑定的 session state"""
+    st.session_state.raw_input_text = ""
+
 # --- 参数配置区 (直观展示，不折叠) ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -254,8 +263,15 @@ with c5:
 st.markdown("</div>", unsafe_allow_html=True)
 
 # --- 超长文本输入区 ---
-raw_text = st.text_area("📥 在此粘贴你的超长英文原文...", height=250, placeholder="Once upon a time, there was a...")
-btn_process = st.button("🚀 一键智能解析 (处理长文)", type="primary", use_container_width=True)
+raw_text = st.text_area("📥 在此粘贴你的超长英文原文...", height=250, placeholder="Once upon a time, there was a...", key="raw_input_text")
+
+# --- 按钮区（新增一键清空） ---
+col_btn1, col_btn2 = st.columns([5, 1])
+with col_btn1:
+    btn_process = st.button("🚀 一键智能解析 (处理长文)", type="primary", use_container_width=True)
+with col_btn2:
+    # 点击时触发 clear_text 回调函数，清空文本并刷新页面，底下的结果也会一同消失
+    st.button("🗑️ 一键清空", on_click=clear_text, use_container_width=True)
 
 st.divider()
 
@@ -310,7 +326,7 @@ if btn_process and raw_text and vocab_dict:
                 "📝 词形还原全文输出"
             ])
             
-            # 渲染通用函数 (所有列表全部应用折叠栏，并增加复制指引)
+            # 渲染通用函数 (修复了提示文案显示不全的问题)
             def render_tab(tab_obj, data_df, label, def_mode, expand_default=False):
                 with tab_obj:
                     if not data_df.empty:
