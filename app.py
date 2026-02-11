@@ -48,16 +48,11 @@ setup_nltk()
 @st.cache_data
 def load_data():
     """
-    修复版加载逻辑：
-    1. 不再对单词进行去重 (drop_duplicates)。
-    2. 允许同一个单词出现在不同的排名（解决一词多义导致的漏词问题）。
+    加载词频数据，保留所有行（不去重），以解决一词多义导致的漏词问题。
     """
     possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next((f for f in possible_files if os.path.exists(f)), None)
     
-    vocab_dict = {} # Word -> Rank (供文本提取模式用，默认保留第一次出现的Rank)
-    rank_map = {}   # Rank -> [Words] (供刷词模式用，保留所有)
-
     if file_path:
         try:
             df = pd.read_csv(file_path)
@@ -67,40 +62,33 @@ def load_data():
             w_col = next((c for c in cols if 'word' in c), cols[0])
             r_col = next((c for c in cols if 'rank' in c), cols[1])
             
-            # 基础清洗：去空、小写
+            # 清洗
             df = df.dropna(subset=[w_col])
             df[w_col] = df[w_col].astype(str).str.lower().str.strip()
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
             df = df.dropna(subset=[r_col])
             
-            # 【关键修改】不再执行 drop_duplicates(subset=[w_col])
-            # 我们保留所有行，确保 Rank 8000 的 splash 也能被索引到
+            # 排序
+            df = df.sort_values(r_col)
             
-            # 构建 Rank -> Word 列表 (一对多)
-            for index, row in df.iterrows():
-                r = int(row[r_col])
-                w = row[w_col]
-                if r not in rank_map:
-                    rank_map[r] = []
-                rank_map[r].append(w)
+            # 1. 字典：Word -> Rank (供文本提取用)
+            # 这里如果遇到重复词，默认保留最后的（或者任意一个，影响不大）
+            vocab_dict = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
             
-            # 构建 Word -> Rank (文本模式用)
-            # 这里如果为了严谨，我们倒序遍历，保留排名靠前的那个
-            # 或者直接由 pandas 默认处理
-            df_unique = df.sort_values(r_col).drop_duplicates(subset=[w_col])
-            vocab_dict = pd.Series(df_unique[r_col].values, index=df_unique[w_col]).to_dict()
-
+            # 2. DataFrame (供刷词用，保留所有行)
+            return vocab_dict, df, r_col, w_col
+            
         except Exception as e:
             st.error(f"数据加载出错: {e}")
-            
-    return vocab_dict, rank_map
+            return {}, None, None, None
+    return {}, None, None, None
 
-VOCAB_DICT, RANK_MAP = load_data()
+VOCAB_DICT, FULL_DF, RANK_COL, WORD_COL = load_data()
 
 def get_lemma(word): return lemminflect.getLemma(word, upos='VERB')[0] 
 
 # ==========================================
-# 2. Prompt 生成逻辑
+# 2. Prompt 生成逻辑 (更新：小写 + 详细词源)
 # ==========================================
 def generate_strict_prompt(words):
     word_list_str = ", ".join(words)
@@ -114,19 +102,26 @@ Task: Convert the provided word list into a strict CSV data block.
 
 2. Column 1 (Front):
    - Content: A natural, short English phrase or collocation containing the target word.
-   - Style: Plain text.
+   - Style: **ALL LOWERCASE** (do not capitalize the first letter). 
+   - Example: "a limestone quarry", not "A limestone quarry".
 
 3. Column 2 (Back):
    - Content: Definition + Example + Etymology.
    - HTML Layout: Definition <br> <br> <em>Example Sentence</em> <br> <br> 【源】Etymology
-   - Constraints: 
-     - Use double <br> tags ( <br> <br> ) between sections to ensure clear visual spacing.
-     - Example sentence must be wrapped in <em> tags.
+   - definition style: Concise English, **start with lowercase**.
+   - example style: Wrapped in <em>, **start with lowercase**.
+   - Spacing: Use double <br> tags ( <br> <br> ) between sections.
 
-4. Atomicity Principle (Strict):
+4. Etymology Style (Detailed):
+   - Format: 【源】Root (Chinese Meaning) + Affix (Chinese Meaning) → Logic.
+   - Requirement: **MUST provide the Chinese meaning** for roots/affixes.
+   - Example 1: 【源】pro- (向前) + gress (走) → 前进
+   - Example 2: 【源】Lat. 'vigere' (活跃) → 精力
+
+5. Atomicity Principle (Strict):
    - If a word has distinct meanings, **generate SEPARATE rows**.
 
-5. Output: 
+6. Output: 
    - Code Block ONLY. 
    - NO header line.
 
@@ -164,47 +159,44 @@ def process_text_input(text, min_rank, max_rank):
 # ==========================================
 st.title("⚡️ Anki Master")
 
-if not RANK_MAP:
-    st.error("⚠️ 缺少词频文件或加载失败")
+if FULL_DF is None:
+    st.error("⚠️ 缺少词频文件 (coca_cleaned.csv)")
 else:
     mode = st.radio("功能", ["🔢 刷词", "📖 提取", "🛠️ 转换"], horizontal=True, label_visibility="collapsed")
     
     # ------------------------------------------------
-    # 模式 1: 刷词 (纯净版)
+    # 模式 1: 刷词 (凑单模式)
     # ------------------------------------------------
     if mode == "🔢 刷词":
-        st.caption("从指定排名提取 (保留重复词)")
+        st.caption("从指定排名开始，自动凑齐数量")
         
         col1, col2 = st.columns(2)
         with col1:
             start_rank = st.number_input("起始排名", value=8000, step=50)
         with col2:
-            end_rank = st.number_input("结束排名", value=8050, step=50)
+            count = st.number_input("生成数量", value=50, step=10)
             
-        if start_rank >= end_rank:
-            st.warning("范围错误")
-        else:
-            target_words = []
-            # 简单遍历范围，直接取 map 里的值
-            for r in range(start_rank, end_rank + 1):
-                if r in RANK_MAP:
-                    target_words.extend(RANK_MAP[r])
+        # 逻辑：筛选 >= start_rank 的所有词，排序，取前 count 个
+        filtered_df = FULL_DF[FULL_DF[RANK_COL] >= start_rank].sort_values(RANK_COL)
+        selected_df = filtered_df.head(count)
+        target_words = selected_df[WORD_COL].tolist()
+        
+        if target_words:
+            real_start = int(selected_df.iloc[0][RANK_COL])
+            real_end = int(selected_df.iloc[-1][RANK_COL])
             
-            # 不再进行去重 (dict.fromkeys)，保留所有提取到的词
+            st.info(f"✅ 已提取 **{len(target_words)}** 个单词")
+            st.caption(f"实际排名范围: {real_start} - {real_end}")
             
-            if target_words:
-                st.info(f"✅ 区间 {start_rank}-{end_rank} 提取到 **{len(target_words)}** 个单词")
-                
-                # 预览
-                with st.expander("查看单词列表"):
-                    st.text(", ".join(target_words))
+            with st.expander("👀 查看单词列表"):
+                st.text(", ".join(target_words))
 
-                if st.button("🚀 生成 Prompt"):
-                    prompt = generate_strict_prompt(target_words)
-                    st.code(prompt, language="markdown")
-                    st.success("请复制上方代码 -> 发送给 ChatGPT")
-            else:
-                st.warning("该区间没有单词。")
+            if st.button("🚀 生成 Prompt"):
+                prompt = generate_strict_prompt(target_words)
+                st.code(prompt, language="markdown")
+                st.success("请复制上方代码 -> 发送给 ChatGPT")
+        else:
+            st.warning("该排名之后没有更多单词了。")
 
     # ------------------------------------------------
     # 模式 2: 提取
@@ -240,7 +232,7 @@ else:
     # ------------------------------------------------
     elif mode == "🛠️ 转换":
         st.markdown("### 📥 AI 结果转 Anki 文件")
-        st.caption("粘贴 ChatGPT 的代码块，自动生成标准 CSV")
+        st.caption("自动补全表头，支持 Anki 直接导入")
         
         csv_input = st.text_area("粘贴内容", height=200, placeholder='"phrase","def..."')
         
@@ -253,7 +245,7 @@ else:
                 final_csv = csv_content
             
             st.download_button(
-                label="📥 下载 .csv (自动补全格式)",
+                label="📥 下载 .csv (Anki Ready)",
                 data=final_csv.encode('utf-8'),
                 file_name="anki_import.csv",
                 mime="text/csv",
