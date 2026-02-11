@@ -36,6 +36,14 @@ st.markdown("""
         border: 1px solid var(--border-color-light);
         margin-bottom: 20px;
     }
+    
+    /* 复制提示文字高亮 */
+    .copy-hint {
+        color: #888;
+        font-size: 14px;
+        margin-bottom: -10px;
+        padding-left: 5px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -302,7 +310,7 @@ if btn_process and raw_text and vocab_dict:
                 "📝 词形还原全文输出"
             ])
             
-            # 渲染通用函数 (所有列表全部应用折叠栏)
+            # 渲染通用函数 (所有列表全部应用折叠栏，并增加复制指引)
             def render_tab(tab_obj, data_df, label, def_mode, expand_default=False):
                 with tab_obj:
                     if not data_df.empty:
@@ -316,8 +324,9 @@ if btn_process and raw_text and vocab_dict:
                             else:
                                 display_lines.append(row['word'])
                         
-                        # 统一加折叠栏
+                        # 统一加折叠栏与明确的复制指引
                         with st.expander("👁️ 查看完整单词列表", expanded=expand_default):
+                            st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制单词</p>", unsafe_allow_html=True)
                             st.code("\n".join(display_lines), language='text')
                         
                         st.markdown(f"**🤖 AI 指令 ({label})**")
@@ -327,12 +336,15 @@ if btn_process and raw_text and vocab_dict:
                         p_txt = generate_ai_prompt(pure_words, 'txt', def_mode, is_term_list=has_term)
                         
                         t_csv, t_txt = st.tabs(["📋 CSV 指令", "📝 TXT 指令"])
-                        with t_csv: st.code(p_csv, language='markdown')
-                        with t_txt: st.code(p_txt, language='markdown')
+                        with t_csv: 
+                            st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制指令</p>", unsafe_allow_html=True)
+                            st.code(p_csv, language='markdown')
+                        with t_txt: 
+                            st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制指令</p>", unsafe_allow_html=True)
+                            st.code(p_txt, language='markdown')
                     else: st.info("该区间暂无符合条件的单词")
 
             # 渲染各板块
-            # 🔥 Top N 默认展开折叠栏，方便第一眼看到；其他默认收起
             render_tab(t_top, top_df, "核心单义", def_mode="single", expand_default=True) 
             render_tab(t_target, df[df['final_cat']=='target'], "重点", def_mode="single", expand_default=False)
             render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", def_mode="single", expand_default=False)
@@ -341,4 +353,5 @@ if btn_process and raw_text and vocab_dict:
             # 渲染还原原文板块
             with t_raw:
                 st.info("💡 这是自动词形还原（Lemmatized）后的超长文本输出，可直接复制用于其他 NLP 分析。")
+                st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制全文</p>", unsafe_allow_html=True)
                 st.code(full_lemmatized_text, language='text')
