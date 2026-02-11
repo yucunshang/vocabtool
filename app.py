@@ -129,7 +129,6 @@ def extract_text_from_file(uploaded_file):
     return ""
 
 def get_base_prompt_template(export_format="TXT"):
-    """用户自定义的最强 Anki 制卡提示词模板 (动态切换 TXT/CSV)"""
     return f"""这是为您整理的最新、最完整的 Anki 制卡核心指令标准。我将严格遵守此准则为您处理所有单词列表：
 
 1. 核心原则：原子性 (Atomicity)
@@ -211,16 +210,20 @@ def analyze_words(unique_word_list):
     return pd.DataFrame(unique_items)
 
 # ==========================================
-# 5. UI 与流水线
+# 5. UI 与流水线状态管理
 # ==========================================
 st.title("🚀 Vocab Master Pro - 全能教研引擎")
 st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB` 原著电子书，并**内置免费 AI** 一键生成 Anki 记忆卡片。")
 
+# --- 初始化全局状态 (修复页面跳转的核心机制) ---
 if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
+if "is_processed" not in st.session_state: st.session_state.is_processed = False # 记录是否解析完毕
+
 def clear_all_inputs():
     st.session_state.raw_input_text = ""
     st.session_state.uploader_key += 1 
+    st.session_state.is_processed = False # 清空时重置状态
 
 # --- 参数配置区 ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
@@ -249,6 +252,9 @@ with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_
 
 st.divider()
 
+# ==========================================
+# 6. 后台硬核计算 (只在点解析时运行一次)
+# ==========================================
 if btn_process:
     with st.spinner("🧠 正在急速读取文件并进行智能解析（长篇巨著请稍候）..."):
         start_time = time.time()
@@ -257,95 +263,116 @@ if btn_process:
             
         if not combined_text.strip():
             st.warning("⚠️ 未提取到任何有效文本！如果你上传了 EPUB/PDF，可能它是纯图片扫描版，或者文件为空。")
+            st.session_state.is_processed = False
         elif vocab_dict:
             raw_words = re.findall(r"[a-zA-Z']+", combined_text)
             lemmatized_words = [get_lemma(w) for w in raw_words]
             full_lemmatized_text = " ".join(lemmatized_words)
             
             unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
-            df = analyze_words(unique_lemmas)
-            process_time = time.time() - start_time
             
-            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-            col_m1.metric(label="📝 解析总字数", value=f"{len(raw_words):,}")
-            col_m2.metric(label="✂️ 去重词根数", value=f"{len(unique_lemmas):,}")
-            col_m3.metric(label="🎯 纳入分级词汇", value=f"{len(df):,}")
-            col_m4.metric(label="⚡ 极速解析耗时", value=f"{process_time:.2f} 秒")
-            
-            if not df.empty:
-                def categorize(row):
-                    r = row['rank']
-                    if r <= current_level: return "known"
-                    elif r <= target_level: return "target"
-                    else: return "beyond"
-                
-                df['final_cat'] = df.apply(categorize, axis=1)
-                df = df.sort_values(by='rank')
-                top_df = df[df['rank'] >= min_rank_threshold].sort_values(by='rank', ascending=True).head(top_n)
-                
-                t_top, t_target, t_beyond, t_known, t_raw = st.tabs([
-                    f"🔥 Top {len(top_df)}", f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
-                    f"🔴 超纲 ({len(df[df['final_cat']=='beyond'])})", f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
-                    "📝 原文防卡死下载"
-                ])
-                
-                def render_tab(tab_obj, data_df, label, expand_default=False, df_key=""):
-                    with tab_obj:
-                        if not data_df.empty:
-                            pure_words = data_df['word'].tolist()
-                            display_lines = []
-                            for _, row in data_df.iterrows():
-                                if show_rank:
-                                    rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
-                                    display_lines.append(f"{row['word']} [Rank: {rank_str}]")
-                                else:
-                                    display_lines.append(row['word'])
-                            
-                            with st.expander("👁️ 查看提取单词列表", expanded=expand_default):
-                                st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制单词</p>", unsafe_allow_html=True)
-                                st.code("\n".join(display_lines), language='text')
-                            
-                            st.divider()
-                            
-                            # === 格式选择区 ===
-                            export_format = st.radio("⚙️ 选择输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
-                            
-                            # === AI 双轨模式区 ===
-                            ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 一键直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
-                            
-                            with ai_tab1:
-                                st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可一键编纂制卡数据！")
-                                custom_prompt = st.text_area("📝 自定义 AI Prompt (可修改)", value=get_base_prompt_template(export_format), height=250, key=f"prompt_{df_key}")
-                                
-                                if st.button("⚡ 召唤 DeepSeek 立即生成卡片", key=f"btn_{df_key}", type="primary"):
-                                    with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
-                                        ai_result = call_deepseek_api(custom_prompt, pure_words)
-                                        st.success("🎉 生成完成！")
-                                        st.code(ai_result, language="markdown")
-                                        st.download_button(
-                                            label=f"📥 直接下载生成的卡片 (.{export_format.lower()})", 
-                                            data=ai_result, 
-                                            file_name=f"anki_cards_{label}.{export_format.lower()}", 
-                                            mime="text/plain" if export_format == "TXT" else "text/csv"
-                                        )
-                            
-                            with ai_tab2:
-                                st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
-                                full_prompt_to_copy = f"{get_base_prompt_template(export_format)}\n\n待处理单词：\n{', '.join(pure_words)}"
-                                st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制</p>", unsafe_allow_html=True)
-                                st.code(full_prompt_to_copy, language='markdown')
-                        else: st.info("该区间暂无单词")
+            # --- 存入“记忆大脑”，防止网页刷新丢失 ---
+            st.session_state.base_df = analyze_words(unique_lemmas)
+            st.session_state.lemma_text = full_lemmatized_text
+            st.session_state.stats = {
+                "raw_count": len(raw_words),
+                "unique_count": len(unique_lemmas),
+                "valid_count": len(st.session_state.base_df),
+                "time": time.time() - start_time
+            }
+            st.session_state.is_processed = True
 
-                render_tab(t_top, top_df, "Top精选", expand_default=True, df_key="top") 
-                render_tab(t_target, df[df['final_cat']=='target'], "重点", expand_default=False, df_key="target")
-                render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", expand_default=False, df_key="beyond")
-                render_tab(t_known, df[df['final_cat']=='known'], "熟词", expand_default=False, df_key="known")
-                
-                with t_raw:
-                    st.info("💡 这是自动词形还原后的全文输出，已针对长文优化防卡死体验。")
-                    st.download_button(label="💾 一键下载完整词形还原原文 (.txt)", data=full_lemmatized_text, file_name="lemmatized_text.txt", mime="text/plain", type="primary")
-                    if len(full_lemmatized_text) > 50000:
-                        st.warning("⚠️ 文本超长，仅展示前 50,000 字符。")
-                        st.code(full_lemmatized_text[:50000] + "\n\n... [请下载查看完整内容] ...", language='text')
-                    else:
-                        st.code(full_lemmatized_text, language='text')
+# ==========================================
+# 7. 动态界面渲染 (依赖记忆状态，无惧刷新跳转)
+# ==========================================
+if st.session_state.get("is_processed", False):
+    
+    # 动态调取面板数据
+    stats = st.session_state.stats
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    col_m1.metric(label="📝 解析总字数", value=f"{stats['raw_count']:,}")
+    col_m2.metric(label="✂️ 去重词根数", value=f"{stats['unique_count']:,}")
+    col_m3.metric(label="🎯 纳入分级词汇", value=f"{stats['valid_count']:,}")
+    col_m4.metric(label="⚡ 极速解析耗时", value=f"{stats['time']:.2f} 秒")
+    
+    # 提取基准 DataFrame
+    df = st.session_state.base_df.copy()
+    
+    if not df.empty:
+        # === 以下代码会根据你上方的滑动条【实时动态】分类，不需重新解析！ ===
+        def categorize(row):
+            r = row['rank']
+            if r <= current_level: return "known"
+            elif r <= target_level: return "target"
+            else: return "beyond"
+        
+        df['final_cat'] = df.apply(categorize, axis=1)
+        df = df.sort_values(by='rank')
+        top_df = df[df['rank'] >= min_rank_threshold].sort_values(by='rank', ascending=True).head(top_n)
+        
+        t_top, t_target, t_beyond, t_known, t_raw = st.tabs([
+            f"🔥 Top {len(top_df)}", f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
+            f"🔴 超纲 ({len(df[df['final_cat']=='beyond'])})", f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
+            "📝 原文防卡死下载"
+        ])
+        
+        def render_tab(tab_obj, data_df, label, expand_default=False, df_key=""):
+            with tab_obj:
+                if not data_df.empty:
+                    pure_words = data_df['word'].tolist()
+                    display_lines = []
+                    for _, row in data_df.iterrows():
+                        if show_rank:
+                            rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
+                            display_lines.append(f"{row['word']} [Rank: {rank_str}]")
+                        else:
+                            display_lines.append(row['word'])
+                    
+                    with st.expander("👁️ 查看单词列表", expanded=expand_default):
+                        st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制单词</p>", unsafe_allow_html=True)
+                        st.code("\n".join(display_lines), language='text')
+                    
+                    st.divider()
+                    
+                    # === 格式选择区 (点击再也不会跳没了) ===
+                    export_format = st.radio("⚙️ 选择输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
+                    
+                    # === AI 双轨模式区 ===
+                    ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 一键直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
+                    
+                    with ai_tab1:
+                        st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可一键编纂制卡数据！")
+                        custom_prompt = st.text_area("📝 自定义 AI Prompt (可修改)", value=get_base_prompt_template(export_format), height=250, key=f"prompt_{df_key}")
+                        
+                        if st.button("⚡ 召唤 DeepSeek 立即生成卡片", key=f"btn_{df_key}", type="primary"):
+                            with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
+                                ai_result = call_deepseek_api(custom_prompt, pure_words)
+                                st.success("🎉 生成完成！")
+                                st.code(ai_result, language="markdown")
+                                st.download_button(
+                                    label=f"📥 直接下载生成的卡片 (.{export_format.lower()})", 
+                                    data=ai_result, 
+                                    file_name=f"anki_cards_{label}.{export_format.lower()}", 
+                                    mime="text/plain" if export_format == "TXT" else "text/csv"
+                                )
+                    
+                    with ai_tab2:
+                        st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
+                        full_prompt_to_copy = f"{get_base_prompt_template(export_format)}\n\n待处理单词：\n{', '.join(pure_words)}"
+                        st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制</p>", unsafe_allow_html=True)
+                        st.code(full_prompt_to_copy, language='markdown')
+                else: st.info("该区间暂无单词")
+
+        render_tab(t_top, top_df, "Top精选", expand_default=True, df_key="top") 
+        render_tab(t_target, df[df['final_cat']=='target'], "重点", expand_default=False, df_key="target")
+        render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", expand_default=False, df_key="beyond")
+        render_tab(t_known, df[df['final_cat']=='known'], "熟词", expand_default=False, df_key="known")
+        
+        with t_raw:
+            st.info("💡 这是自动词形还原后的全文输出，已针对长文优化防卡死体验。")
+            st.download_button(label="💾 一键下载完整词形还原原文 (.txt)", data=st.session_state.lemma_text, file_name="lemmatized_text.txt", mime="text/plain", type="primary")
+            if len(st.session_state.lemma_text) > 50000:
+                st.warning("⚠️ 文本超长，仅展示前 50,000 字符。")
+                st.code(st.session_state.lemma_text[:50000] + "\n\n... [请下载查看完整内容] ...", language='text')
+            else:
+                st.code(st.session_state.lemma_text, language='text')
