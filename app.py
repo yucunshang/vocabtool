@@ -7,13 +7,15 @@ import nltk
 import json
 import time
 import requests
+import zipfile
 
 # 尝试导入多格式文档处理库，如果没有则提示
 try:
     import PyPDF2
     import docx
+    from bs4 import BeautifulSoup
 except ImportError:
-    st.error("⚠️ 缺少文件处理依赖。请在终端运行: pip install PyPDF2 python-docx")
+    st.error("⚠️ 缺少文件处理依赖。请在终端运行: pip install PyPDF2 python-docx beautifulsoup4")
 
 # ==========================================
 # 1. 基础配置
@@ -29,7 +31,6 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-size: 28px !important; color: var(--primary-color) !important; }
     .param-box { background-color: var(--secondary-background-color); padding: 15px 20px 5px 20px; border-radius: 10px; border: 1px solid var(--border-color-light); margin-bottom: 20px; }
     .copy-hint { color: #888; font-size: 14px; margin-bottom: 5px; margin-top: 10px; padding-left: 5px; }
-    .exam-tag { font-size: 12px; background: #e0e0e0; color: #333; padding: 2px 6px; border-radius: 4px; margin-left: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -62,7 +63,6 @@ def setup_nltk():
 setup_nltk()
 
 def get_lemma(w):
-    """提取词根 (更细粒度)"""
     lemmas_dict = lemminflect.getAllLemmas(w)
     if not lemmas_dict: return w.lower()
     for pos in ['ADJ', 'ADV', 'VERB', 'NOUN']:
@@ -99,10 +99,9 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 3. 核心功能映射：考试大纲 & AI
+# 3. 核心功能映射：考试大纲 & 文档解析 & AI
 # ==========================================
 def get_exam_syllabus(rank):
-    """内置 COCA Rank 到 国内外考试大纲 的映射关系"""
     if rank == 99999: return "未收录/超纲"
     if rank <= 1500: return "小学/初中"
     if rank <= 3500: return "中考核心"
@@ -114,7 +113,7 @@ def get_exam_syllabus(rank):
     return "极难词汇"
 
 def extract_text_from_file(uploaded_file):
-    """支持 txt, pdf, docx 多种格式解析"""
+    """支持 txt, pdf, docx, epub 多种格式解析"""
     ext = uploaded_file.name.split('.')[-1].lower()
     try:
         if ext == 'txt':
@@ -125,14 +124,29 @@ def extract_text_from_file(uploaded_file):
         elif ext == 'docx':
             doc = docx.Document(uploaded_file)
             return " ".join([p.text for p in doc.paragraphs])
+        elif ext == 'epub':
+            # EPUB 本质是 ZIP 包，提取里面的 html/xhtml 进行纯文本清洗
+            text_blocks = []
+            with zipfile.ZipFile(uploaded_file) as z:
+                for filename in z.namelist():
+                    if filename.endswith(('.html', '.xhtml', '.htm')):
+                        content = z.read(filename)
+                        soup = BeautifulSoup(content, 'html.parser')
+                        text_blocks.append(soup.get_text(separator=' ', strip=True))
+            return " ".join(text_blocks)
     except Exception as e:
         st.error(f"文件解析失败: {e}")
         return ""
     return ""
 
-def call_deepseek_api(api_key, prompt_template, words):
-    """调用 DeepSeek 接口直接生成制卡 CSV"""
-    if not api_key: return "⚠️ 错误：未提供 API Key 或 管理员密码。"
+def call_deepseek_api(prompt_template, words):
+    """从 Streamlit Server 安全调用 API，彻底隔离前端"""
+    try:
+        # 直接从后端环境变量读取，用户在前端绝对抓取不到这个 Key
+        api_key = st.secrets["DEEPSEEK_API_KEY"]
+    except KeyError:
+        return "⚠️ 站长配置错误：未在 Streamlit 后台配置 DEEPSEEK_API_KEY 环境变量。"
+    
     if not words: return "⚠️ 错误：没有需要生成的单词。"
     
     url = "https://api.deepseek.com/chat/completions"
@@ -150,7 +164,7 @@ def call_deepseek_api(api_key, prompt_template, words):
         resp.raise_for_status()
         return resp.json()['choices'][0]['message']['content']
     except Exception as e:
-        return f"🚨 API 调用失败，请检查网络或 Key 是否正确。\n详细错误: {str(e)}"
+        return f"🚨 API 调用失败: {str(e)}"
 
 # ==========================================
 # 4. 分析引擎
@@ -185,7 +199,7 @@ def analyze_words(unique_word_list):
 # 5. UI 与流水线
 # ==========================================
 st.title("🚀 Vocab Master Pro - 全能智能教研引擎")
-st.markdown("💡 支持粘贴长文或上传 `TXT / PDF / DOCX`，自动大纲映射，并内置 **DeepSeek AI** 一键生成 Anki 记忆卡片。")
+st.markdown("💡 支持粘贴长文或上传 `TXT / PDF / DOCX / EPUB`，自动大纲映射，并**内置免费 AI 接口**一键生成 Anki 记忆卡片。")
 
 if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
@@ -196,8 +210,8 @@ def clear_all_inputs():
 # --- 参数配置区 ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
 c1, c2, c3, c4, c5 = st.columns(5)
-with c1: current_level = st.number_input("🎯 当前水平 (起)", 0, 30000, 7500, 500, help="低于此词频的视为已掌握")
-with c2: target_level = st.number_input("🎯 目标水平 (止)", 0, 30000, 15000, 500, help="高于此词频的视为超纲")
+with c1: current_level = st.number_input("🎯 当前水平 (起)", 0, 30000, 7500, 500)
+with c2: target_level = st.number_input("🎯 目标水平 (止)", 0, 30000, 15000, 500)
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10)
 with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3500, 500)
 with c5: 
@@ -206,13 +220,13 @@ with c5:
     show_visual = st.checkbox("📊 显示可视化反馈", value=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# --- 双通道多格式输入 ---
+# --- 双通道多格式输入 (支持 EPUB) ---
 col_input1, col_input2 = st.columns([3, 2])
 with col_input1:
     raw_text = st.text_area("📥 粘贴文本 (支持10万字以内)", height=150, key="raw_input_text")
 with col_input2:
-    st.info("💡 **多格式解析**：支持超大 `.txt`, `.pdf`, `.docx` 原著文件 👇")
-    uploaded_file = st.file_uploader("📂 上传文档", type=["txt", "pdf", "docx"], key=f"uploader_{st.session_state.uploader_key}")
+    st.info("💡 **多格式解析**：直接拖入电子书/论文原著 👇")
+    uploaded_file = st.file_uploader("📂 上传文档", type=["txt", "pdf", "docx", "epub"], key=f"uploader_{st.session_state.uploader_key}")
 
 col_btn1, col_btn2 = st.columns([5, 1])
 with col_btn1: btn_process = st.button("🚀 极速智能解析", type="primary", use_container_width=True)
@@ -227,7 +241,7 @@ if uploaded_file is not None:
 if btn_process and combined_text.strip() and vocab_dict:
     start_time = time.time()
     
-    with st.spinner("🧠 正在进行多线程词汇拆解与大纲映射..."):
+    with st.spinner("🧠 正在提取、去重、还原并映射考试大纲..."):
         raw_words = re.findall(r"[a-zA-Z']+", combined_text)
         lemmatized_words = [get_lemma(w) for w in raw_words]
         full_lemmatized_text = " ".join(lemmatized_words)
@@ -244,12 +258,10 @@ if btn_process and combined_text.strip() and vocab_dict:
         col_m4.metric(label="⚡ 极速解析耗时", value=f"{process_time:.2f} 秒")
         
         if not df.empty:
-            # === 可视化反馈区 (可选) ===
             if show_visual:
                 st.subheader("📊 词汇分布大纲雷达图")
                 chart_data = df['syllabus'].value_counts()
                 st.bar_chart(chart_data, color="#ff4b4b")
-                st.caption("👆 通过上图可直观判断这篇文章对应国内哪种考试难度。")
                 st.divider()
             
             def categorize(row):
@@ -280,7 +292,6 @@ if btn_process and combined_text.strip() and vocab_dict:
                     if not data_df.empty:
                         pure_words = data_df['word'].tolist()
                         
-                        # 展示大纲映射标签
                         display_lines = []
                         for _, row in data_df.iterrows():
                             rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
@@ -290,41 +301,21 @@ if btn_process and combined_text.strip() and vocab_dict:
                             st.code("\n".join(display_lines), language='text')
                         
                         # ==========================================
-                        # 🤖 原生内置 DeepSeek AI 引擎 (安全鉴权版)
+                        # 🤖 原生内置 DeepSeek AI 引擎 (对用户完全无感)
                         # ==========================================
                         st.markdown(f"#### 🤖 AI 一键制卡引擎 ({label})")
+                        st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可直接生成记忆卡片！")
                         
-                        col_ai1, col_ai2 = st.columns([1, 1])
-                        with col_ai1:
-                            ai_pwd = st.text_input("🔑 鉴权密码 / API Key", type="password", placeholder="输入站长密码或您自己的 DeepSeek Key", key=f"pwd_{df_key}")
-                        with col_ai2:
-                            st.write("")
-                            st.write("")
-                            st.caption("访客必须自备 Key；站长输入特权密码即可直接调用内置额度。")
-                        
-                        custom_prompt = st.text_area("📝 自定义 AI Prompt (可动态修改)", value=default_prompt, height=150, key=f"prompt_{df_key}")
+                        custom_prompt = st.text_area("📝 自定义 AI Prompt (可动态修改)", value=default_prompt, height=130, key=f"prompt_{df_key}")
                         
                         if st.button("⚡ 召唤 DeepSeek 立即生成 CSV", key=f"btn_{df_key}", type="primary"):
-                            with st.spinner("AI 正在光速编纂卡片，请稍候..."):
-                                # --- 核心鉴权逻辑 ---
-                                actual_key = ""
-                                try:
-                                    # 如果输入的密码等于后台设置的站长密码，则提取隐藏的 API Key
-                                    if ai_pwd == st.secrets["APP_PASSWORD"]:
-                                        actual_key = st.secrets["DEEPSEEK_API_KEY"]
-                                    else:
-                                        # 否则，把用户输入的当成他们自己的 API Key
-                                        actual_key = ai_pwd
-                                except:
-                                    # 本地测试如果没有 secrets 文件，直接使用输入的字符串
-                                    actual_key = ai_pwd
-                                
-                                ai_result = call_deepseek_api(actual_key, custom_prompt, pure_words)
+                            with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
+                                # 服务器后端调用，前端绝对安全
+                                ai_result = call_deepseek_api(custom_prompt, pure_words)
                                 
                                 st.success("🎉 生成完成！")
                                 st.code(ai_result, language="markdown")
                                 
-                                # 支持直接把 AI 结果存成 CSV 文件下载
                                 st.download_button(
                                     label="📥 直接下载生成的 Anki 卡片 (.csv)",
                                     data=ai_result,
