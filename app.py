@@ -8,7 +8,7 @@ import json
 import time
 import requests
 import zipfile
-import concurrent.futures  # 多核并发引擎
+import concurrent.futures
 
 # 尝试导入多格式文档处理库
 try:
@@ -132,37 +132,45 @@ def extract_text_from_file(uploaded_file):
         return ""
     return ""
 
-def get_dynamic_prompt_template(export_format, front_style, add_pos, def_lang, ex_count, add_ety):
+def get_dynamic_prompt_template(export_format, front_style, add_pos, def_lang, ex_count, add_ety, split_polysemy):
     """
-    动态生成 Anki 极速制卡 Prompt
+    动态生成 Anki 极速制卡 Prompt (带严格语义约束模式)
     """
     # 1. 动态构建 Front 要求
-    front_desc = "A natural phrase or collocation using the primary meaning." if front_style == "phrase" else "The target word itself."
+    front_desc = "A natural phrase or collocation using the specific meaning." if front_style == "phrase" else "The target word itself."
     if add_pos:
-        front_desc += " MUST append the part of speech tag at the end, e.g., ' (v)', ' (n)', ' (adj)'."
+        front_desc += " MUST append the precise part of speech tag at the end, e.g., ' (v)', ' (n)', ' (adj)'."
     else:
         front_desc += " Do NOT add part of speech tags."
 
     # 2. 动态构建 Back 释义要求
     def_map = {
-        "en": "English definition of the primary meaning",
-        "zh": "Chinese definition of the primary meaning",
+        "en": "English definition of the specific meaning",
+        "zh": "Chinese definition of the specific meaning",
         "en_zh": "English definition followed by Chinese definition separated by a slash (/)"
     }
     def_desc = def_map.get(def_lang, "English definition")
 
-    # 3. 动态构建例句要求
+    # 3. 动态构建例句要求 (含标号与空格排版)
     if ex_count == 0:
         ex_desc = ""
     elif ex_count == 1:
         ex_desc = "<br><br><em>Italicized example sentence</em>"
     else:
-        ex_desc = f"<br><br><em>{ex_count} Italicized example sentences separated by <br></em>"
+        # 序号标记并用 <br><br> 隔开，保证 Anki 导入后排版清晰
+        examples = [f"{i+1}. <em>Italicized example sentence {i+1}</em>" for i in range(ex_count)]
+        ex_desc = "<br><br>" + " <br><br> ".join(examples)
 
     # 4. 动态构建词源要求
     ety_desc = "<br><br>【词根词缀/词源】Chinese etymology or affix explanation." if add_ety else ""
+    
+    # 5. 一词多义处理规则
+    if split_polysemy:
+        poly_rule = "Atomicity: ONE meaning per row. Polysemous words MUST be split into multiple separate rows. NEVER stack multiple definitions in one card."
+    else:
+        poly_rule = "One Card Per Word: Generate EXACTLY ONE row per input word. Extract ONLY the single most common/primary meaning. NEVER split a word into multiple cards."
 
-    # 5. 生成最终的 Prompt
+    # 6. 生成最终的 Prompt
     prompt = f"""# Role
 You are an expert English linguist and a highly precise Anki flashcard generator.
 
@@ -170,10 +178,11 @@ You are an expert English linguist and a highly precise Anki flashcard generator
 Process the user's input words, auto-correct any spelling errors/abbreviations, and generate Anki flashcards strictly following the rules below.
 
 # Strict Rules
-1. Format: Pure {export_format} format in a single code block. NO conversational filler, NO greetings, NO markdown formatting outside the code block.
+1. Format: Pure {export_format} format in a single code block. NO conversational filler, NO markdown formatting outside the code block.
 2. Structure: STRICTLY TWO COLUMNS per row. Format: "Column 1","Column 2"
 3. Quotes: Both columns MUST be wrapped in double quotes. Use single quotes (' ') inside the text if needed.
-4. One Card Per Word: Generate EXACTLY ONE row per input word. Extract ONLY the single most common/primary meaning. NEVER split a word into multiple cards. NEVER stack multiple definitions.
+4. {poly_rule}
+5. Strict Alignment (CRITICAL): The generated phrase, part of speech (if requested), definition, example sentence(s), and etymology MUST strictly logically align with the EXACT SAME specific meaning of the target word. Do not mix definitions or examples of different meanings in a single card.
 
 # Content Formatting
 - Column 1 (Front): {front_desc} Do NOT bold or highlight the target word.
@@ -410,23 +419,27 @@ if st.session_state.get("is_processed", False):
                     
                     st.divider()
                     
-                    # --- 新增的卡片参数定制 UI ---
+                    # --- 升级版卡片参数定制 UI ---
                     st.markdown("#### ⚙️ 定制卡片内容")
                     ui_col1, ui_col2 = st.columns(2)
+                    
                     with ui_col1:
-                        st.markdown("**正面 (Front)**")
+                        st.markdown("**正面配置 (Front)**")
                         export_format = st.radio("输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
                         ui_front = st.radio("呈现形式:", ["短语/搭配 (Phrase)", "仅单词 (Word Only)"], horizontal=True, key=f"front_{df_key}")
-                        ui_pos = st.checkbox("附加词性缩写 (如 v, n)", value=True, key=f"pos_{df_key}")
+                        ui_pos = st.checkbox("附加词性标示 (如 v, n)", value=True, key=f"pos_{df_key}")
+                        ui_poly = st.radio("多义词处理:", ["拆分为多张卡片 (原版默认)", "仅生成核心释义 (1词1卡)"], index=0, horizontal=True, key=f"poly_{df_key}")
+
                     with ui_col2:
-                        st.markdown("**背面 (Back)**")
+                        st.markdown("**背面配置 (Back)**")
                         ui_def = st.radio("释义语言:", ["纯英文 (EN)", "纯中文 (ZH)", "中英双语 (EN+ZH)"], index=2, horizontal=True, key=f"def_{df_key}")
-                        ui_ex = st.slider("例句数量:", 0, 3, 1, key=f"ex_{df_key}")
+                        ui_ex = st.slider("例句数量:", 0, 5, 1, key=f"ex_{df_key}")
                         ui_ety = st.checkbox("包含【词根词缀/词源】", value=True, key=f"ety_{df_key}")
 
                     # 将 UI 选择映射为内部变量
                     front_style_val = "phrase" if "短语" in ui_front else "word"
                     def_lang_val = "en" if "纯英文" in ui_def else "zh" if "纯中文" in ui_def else "en_zh"
+                    split_poly_val = True if "拆分" in ui_poly else False
                     
                     # 动态生成最终 Prompt
                     custom_prompt_text = get_dynamic_prompt_template(
@@ -435,10 +448,11 @@ if st.session_state.get("is_processed", False):
                         add_pos=ui_pos,
                         def_lang=def_lang_val,
                         ex_count=ui_ex,
-                        add_ety=ui_ety
+                        add_ety=ui_ety,
+                        split_polysemy=split_poly_val
                     )
                     
-                    # 这里提取 raw 字段传入，避免把领域的 (医学) 或者 [Rank: 1500] 喂给 AI 导致识别紊乱
+                    # 提取纯单词列表用于 API 请求
                     words_to_process = data_df['raw'].tolist()
 
                     ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 并发极速直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
@@ -447,9 +461,9 @@ if st.session_state.get("is_processed", False):
                         st.info("💡 站长已为您内置专属 AI 算力。采用 **多核并发技术**，极速响应，告别卡死！")
                         
                         custom_prompt = st.text_area(
-                            "📝 最终 AI Prompt (自动生成，可手动微调)", 
+                            "📝 最终 AI Prompt (系统已根据您的设置动态生成，支持手动微调)", 
                             value=custom_prompt_text, 
-                            height=350, 
+                            height=380, 
                             key=f"prompt_{df_key}_{export_format}"
                         )
                         
@@ -481,7 +495,7 @@ if st.session_state.get("is_processed", False):
                                 st.code(ai_result, language="text")
                     
                     with ai_tab2:
-                        st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
+                        st.info("💡 如果您想使用 ChatGPT/Gemini 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
                         full_prompt_to_copy = f"{custom_prompt_text}\n\n待处理单词：\n{', '.join(words_to_process)}"
                         st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制</p>", unsafe_allow_html=True)
                         st.code(full_prompt_to_copy, language='markdown')
