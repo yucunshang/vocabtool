@@ -273,8 +273,8 @@ def analyze_words(unique_word_list):
 # ==========================================
 # 6. UI 与流水线状态管理
 # ==========================================
-st.title("🚀 Vocab Master Pro - 全能教研引擎")
-st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB` 原著电子书，并**内置免费 AI** 一键生成 Anki 记忆卡片。")
+st.title("🚀 Vocab Master Pro - V5")
+st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB文件，并**内置免费 AI** 一键生成 Anki 记忆卡片。")
 
 if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
