@@ -7,98 +7,67 @@ import nltk
 import json
 import time
 import requests
-import concurrent.futures
-import warnings
+import zipfile
+import concurrent.futures  # 多核并发引擎
 
-# ==========================================
-# 0. 依赖检查与导入
-# ==========================================
-# 忽略 ebooklib 的未来警告
-warnings.filterwarnings("ignore", category=UserWarning, module='ebooklib')
-
+# 尝试导入多格式文档处理库
 try:
     import PyPDF2
     import docx
 except ImportError:
-    pass
-
-try:
-    import ebooklib
-    from ebooklib import epub
-    from bs4 import BeautifulSoup
-except ImportError:
-    pass # 下面代码会检查，如果缺失会提示
+    st.error("⚠️ 缺少文件处理依赖。请在终端运行: pip install PyPDF2 python-docx")
 
 # ==========================================
 # 1. 基础配置
 # ==========================================
-st.set_page_config(layout="wide", page_title="Vocab Master Pro V6", page_icon="🚀")
+st.set_page_config(layout="wide", page_title="Vocab Master Pro", page_icon="🚀")
 
 st.markdown("""
 <style>
     .stCode { font-family: 'Consolas', 'Courier New', monospace !important; font-size: 16px !important; }
     header {visibility: hidden;} footer {visibility: hidden;}
     .block-container { padding-top: 1rem; }
-    [data-testid="stMetricValue"] { font-size: 28px !important; color: #007bff !important; }
-    .param-container { border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 20px; }
+    [data-testid="stSidebarCollapsedControl"] {display: none;}
+    [data-testid="stMetricValue"] { font-size: 28px !important; color: var(--primary-color) !important; }
+    .param-box { background-color: var(--secondary-background-color); padding: 15px 20px 5px 20px; border-radius: 10px; border: 1px solid var(--border-color-light); margin-bottom: 20px; }
     .copy-hint { color: #888; font-size: 14px; margin-bottom: 5px; margin-top: 10px; padding-left: 5px; }
-    /* 进度条样式增强 */
-    .stProgress > div > div > div > div { background-color: #00cc66; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. API Key 获取
-# ==========================================
-try:
-    user_api_key = st.secrets["DEEPSEEK_API_KEY"]
-except Exception:
-    st.error("❌ 未检测到 API Key配置。请在 .streamlit/secrets.toml 中配置 DEEPSEEK_API_KEY")
-    st.stop()
-
-# ==========================================
-# 3. 数据与 NLP 初始化
+# 2. 数据与 NLP 初始化
 # ==========================================
 @st.cache_data
 def load_knowledge_base():
-    data = {"terms": {}, "proper": {}, "patch": {}, "ambiguous": set()}
     try:
-        if os.path.exists('data/terms.json'):
-            with open('data/terms.json', 'r', encoding='utf-8') as f: data["terms"] = {k.lower(): v for k, v in json.load(f).items()}
-        if os.path.exists('data/proper.json'):
-            with open('data/proper.json', 'r', encoding='utf-8') as f: data["proper"] = {k.lower(): v for k, v in json.load(f).items()}
-        if os.path.exists('data/patch.json'):
-            with open('data/patch.json', 'r', encoding='utf-8') as f: data["patch"] = json.load(f)
-        if os.path.exists('data/ambiguous.json'):
-            with open('data/ambiguous.json', 'r', encoding='utf-8') as f: data["ambiguous"] = set(json.load(f))
-    except Exception: pass
-    return data["terms"], data["proper"], data["patch"], data["ambiguous"]
+        with open('data/terms.json', 'r', encoding='utf-8') as f: terms = {k.lower(): v for k, v in json.load(f).items()}
+        with open('data/proper.json', 'r', encoding='utf-8') as f: proper = {k.lower(): v for k, v in json.load(f).items()}
+        with open('data/patch.json', 'r', encoding='utf-8') as f: patch = json.load(f)
+        with open('data/ambiguous.json', 'r', encoding='utf-8') as f: ambiguous = set(json.load(f))
+        return terms, proper, patch, ambiguous
+    except FileNotFoundError:
+        st.error("⚠️ 缺少 data/ 文件夹下的 JSON 知识库文件！")
+        return {}, {}, {}, set()
 
 BUILTIN_TECHNICAL_TERMS, PROPER_NOUNS_DB, BUILTIN_PATCH_VOCAB, AMBIGUOUS_WORDS = load_knowledge_base()
 
 @st.cache_resource
 def setup_nltk():
-    try: nltk.data.find('corpora/wordnet')
-    except LookupError:
-        root_dir = os.path.dirname(os.path.abspath(__file__))
-        nltk_data_dir = os.path.join(root_dir, 'nltk_data')
-        os.makedirs(nltk_data_dir, exist_ok=True)
-        nltk.data.path.append(nltk_data_dir)
-        for pkg in ['averaged_perceptron_tagger', 'punkt', 'wordnet']:
-            try: nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
-            except: pass
-
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    nltk_data_dir = os.path.join(root_dir, 'nltk_data')
+    os.makedirs(nltk_data_dir, exist_ok=True)
+    nltk.data.path.append(nltk_data_dir)
+    for pkg in ['averaged_perceptron_tagger', 'punkt']:
+        try: nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
+        except: pass
 setup_nltk()
 
 def get_lemma(w):
-    if not w: return ""
-    try:
-        lemmas_dict = lemminflect.getAllLemmas(w)
-        if not lemmas_dict: return w.lower()
-        for pos in ['VERB', 'NOUN', 'ADJ', 'ADV']:
-            if pos in lemmas_dict: return lemmas_dict[pos][0]
-        return list(lemmas_dict.values())[0][0]
-    except: return w.lower()
+    lemmas_dict = lemminflect.getAllLemmas(w)
+    if not lemmas_dict: return w.lower()
+    for pos in ['ADJ', 'ADV', 'VERB', 'NOUN']:
+        if pos in lemmas_dict: return lemmas_dict[pos][0]
+    return list(lemmas_dict.values())[0][0]
 
 @st.cache_data
 def load_vocab():
@@ -115,225 +84,254 @@ def load_vocab():
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce').fillna(99999)
             df = df.sort_values(r_col, ascending=True).drop_duplicates(subset=[w_col], keep='first')
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
-        except Exception: pass
+        except: pass
     
-    if BUILTIN_PATCH_VOCAB:
-        for word, rank in BUILTIN_PATCH_VOCAB.items(): vocab[word] = rank
-    
-    URGENT_OVERRIDES = {"china": 400, "usa": 200, "uk": 200, "google": 1000, "apple": 1000}
+    for word, rank in BUILTIN_PATCH_VOCAB.items(): vocab[word] = rank
+    URGENT_OVERRIDES = {
+        "china": 400, "turkey": 1500, "march": 500, "may": 100, "august": 1500, "polish": 2500,
+        "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
+        "january": 400, "february": 400, "april": 400, "june": 400, "july": 400, "september": 400, "october": 400, "november": 400, "december": 400,
+        "usa": 200, "uk": 200, "google": 1000, "apple": 1000, "microsoft": 1500
+    }
     for word, rank in URGENT_OVERRIDES.items(): vocab[word] = rank
     return vocab
 
 vocab_dict = load_vocab()
 
 # ==========================================
-# 4. 文档解析 (含 EPUB 支持)
+# 3. 文档解析 & AI 提示词引擎
 # ==========================================
-def extract_epub_content(uploaded_file):
-    """专门处理 EPUB 格式"""
-    try:
-        # Streamlit 的 uploaded_file 是 BytesIO，ebooklib 需要写入临时文件才能读取
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".epub") as tmp_file:
-            tmp_file.write(uploaded_file.getvalue())
-            tmp_path = tmp_file.name
-        
-        book = epub.read_epub(tmp_path)
-        text_content = []
-        
-        for item in book.get_items():
-            if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                soup = BeautifulSoup(item.get_content(), 'html.parser')
-                text_content.append(soup.get_text())
-        
-        os.remove(tmp_path) # 清理临时文件
-        return "\n".join(text_content)
-    except Exception as e:
-        return f"EPUB 解析失败: {str(e)}"
-
 def extract_text_from_file(uploaded_file):
     ext = uploaded_file.name.split('.')[-1].lower()
     uploaded_file.seek(0)
     try:
-        if ext == 'txt': return uploaded_file.getvalue().decode("utf-8", errors="ignore")
+        if ext == 'txt':
+            return uploaded_file.getvalue().decode("utf-8", errors="ignore")
         elif ext == 'pdf':
             reader = PyPDF2.PdfReader(uploaded_file)
             return " ".join([page.extract_text() for page in reader.pages if page.extract_text()])
         elif ext == 'docx':
             doc = docx.Document(uploaded_file)
             return " ".join([p.text for p in doc.paragraphs])
-        elif ext == 'epub': 
-            if 'ebooklib' not in globals():
-                return "错误：未安装 EPUB 解析库。请运行 pip install EbookLib beautifulsoup4"
-            return extract_epub_content(uploaded_file)
-    except Exception as e: return f"文件解析错误: {str(e)}"
+        elif ext == 'epub':
+            text_blocks = []
+            with zipfile.ZipFile(uploaded_file) as z:
+                for filename in z.namelist():
+                    if filename.endswith(('.html', '.xhtml', '.htm', '.xml')):
+                        try:
+                            content = z.read(filename).decode('utf-8', errors='ignore')
+                            clean_text = re.sub(r'<[^>]+>', ' ', content)
+                            text_blocks.append(clean_text)
+                        except: pass
+            return " ".join(text_blocks)
+    except Exception as e:
+        st.error(f"文件解析失败: {e}")
+        return ""
     return ""
 
-# ==========================================
-# 5. 并发 API 引擎 (带实时反馈)
-# ==========================================
 def get_base_prompt_template(export_format="TXT"):
-    return f"""【角色设定】 你是一位精通词源学、认知心理学以及 Anki 算法的“英语词汇专家与闪卡制作大师”。
-1. 核心原则：原子性 (Atomicity)
-若一个单词有多个常用含义，必须拆分为多条独立数据。
-2. 卡片正面 (Column 1)
-提供自然的短语或搭配 (Phrase/Collocation)。
-3. 卡片背面 (Column 2 - 整合页)
-使用 HTML 标签排版，包含三个部分，用 <br><br> 分隔：
-英文释义 <br><br> <em>斜体例句</em> <br><br> 【中文词源/记忆法】
-4. 输出格式标准 ({export_format} 格式)
-纯文本代码块，无 Markdown 包裹。逗号分隔，字段用双引号包裹。
-"""
+    return f"""【角色设定】 你是一位精通词源学、认知心理学以及 Anki 算法的“英语词汇专家与闪卡制作大师”。接下来的对话中，请严格遵守以下 5 项制卡标准，处理我提供的所有单词列表：：
 
-def _fetch_deepseek_chunk_safe(batch_data):
-    index, batch_words, prompt_template, api_key = batch_data
-    url = "https://api.deepseek.com/chat/completions"
+1. 核心原则：原子性 (Atomicity)
+含义拆分：若一个单词有多个常用含义（名词 vs 动词，字面义 vs 引申义等），必须拆分为多条独立数据。
+严禁堆砌：每张卡片只承载一个特定语境下的含义，不准将多个释义挤在一起。
+2. 卡片正面 (Column 1: Front)
+内容：提供自然的短语或搭配 (Phrase/Collocation)，而非单个孤立单词。
+样式：使用纯文本，不需要加粗目标单词。
+3. 卡片背面 (Column 2: Back - 整合页)
+背面信息必须全部合并在第二列，并使用 HTML 标签排版，包含以下三个部分：
+
+英文释义：简练准确。
+例句：使用 <em> 标签包裹，使例句呈现斜体。
+【词根词缀】：用中文进行词源、前缀、词根或后缀的拆解与记忆辅助。
+换行要求：三部分之间使用 <br><br> 分隔，确保界面清晰。
+结构示例：英文释义<br><br><em>斜体例句</em><br><br>【词根、词源、词缀】的中文解析
+4. 输出格式标准 ({export_format} 格式)
+文件规范：纯文本代码块。
+分隔符：使用逗号 (Comma) 分隔字段。
+引号包裹：每个字段必须用双引号 ("...") 包裹，以防内容内部的标点导致导入错误。
+5. 数据清洗与优化
+拼写修正：自动修正用户列表中的明显拼写错误。
+缩写展开：对缩写（如 WFH, aka）在背面提供全称及解释。
+💡 最终输出示例（{export_format} 内容）：
+"run a business","to manage or operate a company<br><br><em>He quit his job to run a business selling handmade crafts.</em><br><br>【词源】源自古英语 rinnan（跑/流动），引申为“使机器运转”或“使业务流转”"
+"go for a run","an act of running for exercise<br><br><em>I go for a run every morning before work.</em><br><br>【词源】源自古英语 rinnan（跑/流动），此处为名词用法，指“奔跑”这一动作"
+导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。"""
+
+# ==========================================
+# 4. 多核并发 API 引擎 (核心极速区)
+# ==========================================
+def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
+    """内部工作线程：负责单一批次的极速请求"""
+    url = "https://api.deepseek.com/chat/completions".strip()
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-    system_enforcement = "\n\n【系统绝对强制指令】直接输出最终的数据代码，不要回复“好的”，不要使用 ```csv 包裹！"
+    system_enforcement = "\n\n【系统绝对强制指令】现在我已经发送了单词列表，请立即且直接输出最终的数据代码，绝对不准回复“好的”、“没问题”等任何客套话，绝对不准使用 ```csv 等 Markdown 语法包裹代码！"
     full_prompt = f"{prompt_template}{system_enforcement}\n\n待处理单词列表：\n{', '.join(batch_words)}"
     
-    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": full_prompt}], "temperature": 0.3, "max_tokens": 4096}
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": full_prompt}],
+        "temperature": 0.3,
+        "max_tokens": 4096
+    }
     
     try:
         for attempt in range(3):
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            resp = requests.post(url, json=payload, headers=headers, timeout=90)
             if resp.status_code == 429: 
                 time.sleep(2 * (attempt + 1))
                 continue
-            if resp.status_code != 200: return (index, "", f"HTTP {resp.status_code}")
+            if resp.status_code == 402: return "❌ ERROR_402_NO_BALANCE"
+            elif resp.status_code == 401: return "❌ ERROR_401_INVALID_KEY"
+            resp.raise_for_status()
             
             result = resp.json()['choices'][0]['message']['content'].strip()
-            # 清洗 Markdown 标记
-            if "```" in result:
-                result = re.sub(r'^```\w*\n', '', result) # 去头
-                result = re.sub(r'\n```$', '', result)    # 去尾
-            return (index, result.strip(), None)
-        return (index, "", "TIMEOUT")
-    except Exception as e: return (index, "", str(e))
+            
+            if result.startswith("```"):
+                lines = result.split('\n')
+                if lines[0].startswith("```"): lines = lines[1:]
+                if lines and lines[-1].startswith("```"): lines = lines[:-1]
+                result = '\n'.join(lines).strip()
+            return result
+            
+        return f"\n🚨 批次超时或被限流，此批次 ({len(batch_words)}词) 生成失败。"
+    except Exception as e:
+        return f"\n🚨 批次请求发生异常: {str(e)}"
 
-def run_concurrent_api(words, prompt_template, api_key, progress_bar, status_text):
-    """
-    带详细进度反馈的并发执行器
-    """
-    MAX_WORDS = 300 
-    words = words[:MAX_WORDS]
-    CHUNK_SIZE = 20 # 调小一点，让进度条更顺滑
-    chunks = [words[i:i + CHUNK_SIZE] for i in range(0, len(words), CHUNK_SIZE)]
-    tasks = [(i, chunk, prompt_template, api_key) for i, chunk in enumerate(chunks)]
-    results_map = {}
+def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text):
+    """多线程并发控制器 (极速反馈 + 跑分解锁版)"""
+    try: api_key = st.secrets["DEEPSEEK_API_KEY"]
+    except KeyError: return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
     
-    total_tasks = len(chunks)
-    start_time = time.time()
+    if not words: return "⚠️ 错误：没有需要生成的单词。"
+    
+    # 🔓 跑分墙解禁：为了测试超越 Gemini，单次上限提升到 300 词！
+    MAX_WORDS = 250
+    if len(words) > MAX_WORDS:
+        st.warning(f"⚠️ 为保证并发稳定，本次仅截取前 **{MAX_WORDS}** 个单词。")
+        words = words[:MAX_WORDS]
+
+    # 黄金切割：30词一批。250词刚好分9批，5个线程两波即可打完！
+    CHUNK_SIZE = 30  
+    chunks = [words[i:i + CHUNK_SIZE] for i in range(0, len(words), CHUNK_SIZE)]
+    total_words = len(words)
+    processed_count = 0
+    
+    results_ordered = [None] * len(chunks)
+    
+    status_text.markdown("🚀 **并发任务已发射！** 正在全速生成首批卡片（首次返回约需 8~12 秒，请稍候）...")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_idx = {executor.submit(_fetch_deepseek_chunk_safe, task): task[0] for task in tasks}
-        completed = 0
+        future_to_index = {
+            executor.submit(_fetch_deepseek_chunk, chunk, prompt_template, api_key): i 
+            for i, chunk in enumerate(chunks)
+        }
         
-        for future in concurrent.futures.as_completed(future_to_idx):
-            idx, res_str, err = future.result()
-            completed += 1
+        for future in concurrent.futures.as_completed(future_to_index):
+            idx = future_to_index[future]
+            chunk_size = len(chunks[idx])
+            res = future.result()
             
-            # 计算进度与时间
-            elapsed = time.time() - start_time
-            avg_time = elapsed / completed
-            eta = avg_time * (total_tasks - completed)
+            if "ERROR_402_NO_BALANCE" in res: return "❌ 错误：DeepSeek 账户余额不足，请充值。"
+            if "ERROR_401_INVALID_KEY" in res: return "❌ 错误：API Key 无效。"
             
-            # 更新进度条
-            progress_val = completed / total_tasks
-            progress_bar.progress(progress_val)
+            results_ordered[idx] = res 
             
-            # 更新状态文案
-            if err:
-                status_text.markdown(f"⚠️ **批次 {idx+1}/{total_tasks} 失败**: {err} (正在继续...)")
-            else:
-                results_map[idx] = res_str
-                status_text.markdown(f"🚀 **AI 正在全速运转中...**\n\n已完成: `{completed}/{total_tasks}` 批次 | 预计剩余时间: `{int(eta)}s`")
+            processed_count += chunk_size
+            current_progress = min(processed_count / total_words, 1.0)
+            progress_bar.progress(current_progress)
+            status_text.markdown(f"**⚡ AI 多核并发全速编纂中：** `{processed_count} / {total_words}` 词")
 
-    # 排序拼接
-    final_output = []
-    for i in range(total_tasks):
-        if i in results_map: final_output.append(results_map[i])
-        
-    return "\n".join(final_output)
+    return "\n".join(filter(None, results_ordered))
 
-def analyze_words(unique_word_list, min_rank):
+# ==========================================
+# 5. 分析引擎
+# ==========================================
+def analyze_words(unique_word_list):
     unique_items = [] 
-    STOP_WORDS = {'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i', 'it'}
-    
+    JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're'}
     for item_lower in unique_word_list:
-        if len(item_lower) < 2 or item_lower in STOP_WORDS: continue
-        
+        if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
+        if item_lower in JUNK_WORDS: continue
         actual_rank = vocab_dict.get(item_lower, 99999)
-        if actual_rank < min_rank and actual_rank != 99999: continue
-
+        
         if item_lower in BUILTIN_TECHNICAL_TERMS:
-             unique_items.append({"word": f"{item_lower}", "rank": actual_rank, "raw": item_lower})
-        elif actual_rank != 99999:
+            domain = BUILTIN_TECHNICAL_TERMS[item_lower]
+            term_rank = actual_rank if actual_rank != 99999 else 15000
+            unique_items.append({"word": f"{item_lower} ({domain})", "rank": term_rank, "raw": item_lower})
+            continue
+        if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
+            display = PROPER_NOUNS_DB.get(item_lower, item_lower.title())
+            unique_items.append({"word": display, "rank": actual_rank, "raw": item_lower})
+            continue
+        if actual_rank != 99999:
             unique_items.append({"word": item_lower, "rank": actual_rank, "raw": item_lower})
-        elif item_lower in PROPER_NOUNS_DB:
-             unique_items.append({"word": item_lower, "rank": 99999, "raw": item_lower})
             
     return pd.DataFrame(unique_items)
 
 # ==========================================
-# 6. UI 布局
+# 6. UI 与流水线状态管理
 # ==========================================
-st.title("🚀 Vocab Master Pro - V6 (EPUB支持版)")
+st.title("🚀 Vocab Master Pro - V5")
+st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB文件，并**内置免费 AI** 一键生成 Anki 记忆卡片。")
 
-# Session State 初始化
 if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
 if "is_processed" not in st.session_state: st.session_state.is_processed = False
-if "generated_cards" not in st.session_state: st.session_state.generated_cards = {} 
 
 def clear_all_inputs():
     st.session_state.raw_input_text = ""
     st.session_state.uploader_key += 1 
     st.session_state.is_processed = False
-    st.session_state.generated_cards = {}
 
-# --- 参数设置区域 ---
-st.markdown("### ⚙️ 核心参数")
-c1, c2, c3, c4 = st.columns(4)
-with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 30000, 4500, 500)
+# --- 参数配置区 ---
+st.markdown("<div class='param-box'>", unsafe_allow_html=True)
+c1, c2, c3, c4, c5 = st.columns(5)
+with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 30000, 7500, 500)
 with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 30000, 15000, 500)
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10)
-with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 1000, 500)
-show_rank = st.checkbox("在列表中显示词频 Rank", value=True)
+with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3500, 500)
+with c5: 
+    st.write("") 
+    st.write("") 
+    show_rank = st.checkbox("🔢 附加显示 Rank", value=True)
+st.markdown("</div>", unsafe_allow_html=True)
+
+# --- 双通道多格式输入 ---
+col_input1, col_input2 = st.columns([3, 2])
+with col_input1:
+    raw_text = st.text_area("📥 粘贴文本 (支持10万字以内)", height=150, key="raw_input_text")
+with col_input2:
+    st.info("💡 **多格式解析**：直接拖入电子书/论文原著 👇")
+    uploaded_file = st.file_uploader("📂 上传文档", type=["txt", "pdf", "docx", "epub"], key=f"uploader_{st.session_state.uploader_key}")
+
+col_btn1, col_btn2 = st.columns([5, 1])
+with col_btn1: btn_process = st.button("🚀 极速智能解析", type="primary", use_container_width=True)
+with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_container_width=True)
 
 st.divider()
 
-# --- 输入区 ---
-col_input1, col_input2 = st.columns([3, 2])
-with col_input1:
-    raw_text = st.text_area("📥 粘贴文本", height=150, key="raw_input_text", placeholder="在此粘贴英文内容...")
-with col_input2:
-    st.markdown("#### 📂 文档解析")
-    # 更新了 type 支持 epub
-    uploaded_file = st.file_uploader("支持 TXT, PDF, DOCX, EPUB", type=["txt", "pdf", "docx", "epub"], key=f"uploader_{st.session_state.uploader_key}")
-
-col_btn1, col_btn2 = st.columns([5, 1])
-with col_btn1: btn_process = st.button("🚀 开始分析", type="primary", use_container_width=True)
-with col_btn2: st.button("🗑️ 清空", on_click=clear_all_inputs, use_container_width=True)
-
 # ==========================================
-# 7. 处理与展示逻辑
+# 7. 后台硬核计算
 # ==========================================
 if btn_process:
-    with st.spinner("🧠 正在解析文档结构与清洗文本..."):
+    with st.spinner("🧠 正在急速读取文件并进行智能解析（长篇巨著请稍候）..."):
         start_time = time.time()
         combined_text = raw_text
         if uploaded_file is not None: combined_text += "\n" + extract_text_from_file(uploaded_file)
             
         if not combined_text.strip():
-            st.warning("⚠️ 内容为空")
-        else:
-            raw_words = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", combined_text)
+            st.warning("⚠️ 未提取到任何有效文本！")
+            st.session_state.is_processed = False
+        elif vocab_dict:
+            raw_words = re.findall(r"[a-zA-Z']+", combined_text)
             lemmatized_words = [get_lemma(w) for w in raw_words]
+            full_lemmatized_text = " ".join(lemmatized_words)
+            
             unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
             
-            st.session_state.base_df = analyze_words(unique_lemmas, min_rank_threshold)
-            st.session_state.lemma_text = " ".join(lemmatized_words)
+            st.session_state.base_df = analyze_words(unique_lemmas)
+            st.session_state.lemma_text = full_lemmatized_text
             st.session_state.stats = {
                 "raw_count": len(raw_words),
                 "unique_count": len(unique_lemmas),
@@ -341,16 +339,18 @@ if btn_process:
                 "time": time.time() - start_time
             }
             st.session_state.is_processed = True
-            st.session_state.generated_cards = {} 
 
+# ==========================================
+# 8. 动态界面渲染
+# ==========================================
 if st.session_state.get("is_processed", False):
+    
     stats = st.session_state.stats
-    with st.container():
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("总词数", f"{stats['raw_count']:,}")
-        c2.metric("去重后", f"{stats['unique_count']:,}")
-        c3.metric("有效词", f"{stats['valid_count']:,}")
-        c4.metric("耗时", f"{stats['time']:.2f}s")
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    col_m1.metric(label="📝 解析总字数", value=f"{stats['raw_count']:,}")
+    col_m2.metric(label="✂️ 去重词根数", value=f"{stats['unique_count']:,}")
+    col_m3.metric(label="🎯 纳入分级词汇", value=f"{stats['valid_count']:,}")
+    col_m4.metric(label="⚡ 极速解析耗时", value=f"{stats['time']:.2f} 秒")
     
     df = st.session_state.base_df.copy()
     
@@ -363,71 +363,96 @@ if st.session_state.get("is_processed", False):
         
         df['final_cat'] = df.apply(categorize, axis=1)
         df = df.sort_values(by='rank')
-        
         top_df = df[df['rank'] >= min_rank_threshold].sort_values(by='rank', ascending=True).head(top_n)
-        target_df = df[df['final_cat']=='target']
-        beyond_df = df[df['final_cat']=='beyond']
         
-        tabs = st.tabs(["🔥 Top精选", "🟡 重点词汇", "🔴 超纲词汇", "📝 原文下载"])
+        t_top, t_target, t_beyond, t_known, t_raw = st.tabs([
+            f"🔥 Top {len(top_df)}", f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
+            f"🔴 超纲 ({len(df[df['final_cat']=='beyond'])})", f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
+            "📝 原文防卡死下载"
+        ])
         
-        def render_word_tab(tab_obj, data_df, tab_key):
+        def render_tab(tab_obj, data_df, label, expand_default=False, df_key=""):
             with tab_obj:
-                if data_df.empty:
-                    st.info("该区间暂无单词")
-                    return
-
-                col_list, col_ai = st.columns([1, 2])
-                with col_list:
-                    st.markdown(f"**单词预览 ({len(data_df)})**")
-                    display_text = []
-                    for _, row in data_df.iterrows():
-                        suffix = f" [{int(row['rank'])}]" if show_rank and row['rank'] != 99999 else ""
-                        display_text.append(f"{row['word']}{suffix}")
-                    st.text_area("列表", value="\n".join(display_text), height=400, label_visibility="collapsed")
-
-                with col_ai:
-                    st.markdown("#### 🤖 AI 卡片制作")
-                    export_fmt = st.radio("格式", ["TXT", "CSV"], horizontal=True, key=f"fmt_{tab_key}")
+                if not data_df.empty:
                     pure_words = data_df['word'].tolist()
+                    display_lines = []
+                    for _, row in data_df.iterrows():
+                        if show_rank:
+                            rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
+                            display_lines.append(f"{row['word']} [Rank: {rank_str}]")
+                        else:
+                            display_lines.append(row['word'])
                     
-                    ai_tab1, ai_tab2 = st.tabs(["⚡ 一键调用 DeepSeek", "📋 手动复制 Prompt"])
+                    with st.expander("👁️ 查看单词列表", expanded=expand_default):
+                        st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制单词</p>", unsafe_allow_html=True)
+                        st.code("\n".join(display_lines), language='text')
+                    
+                    st.divider()
+                    
+                    export_format = st.radio("⚙️ 选择输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
+                    
+                    ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 并发极速直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
                     
                     with ai_tab1:
-                        res_key = f"{tab_key}_{export_fmt}"
-                        if st.session_state.generated_cards.get(res_key):
-                            st.success("✅ 已生成")
-                            st.download_button("📥 下载结果", st.session_state.generated_cards[res_key], f"anki_{tab_key}.{export_fmt.lower()}")
-                            with st.expander("查看内容", expanded=False):
-                                st.code(st.session_state.generated_cards[res_key], language="text")
-                        else:
-                            if st.button(f"⚡ 生成 {tab_key}", key=f"btn_{tab_key}"):
-                                # 进度条反馈区
-                                progress_container = st.empty()
-                                with progress_container.container():
-                                    st.info("🔄 初始化并发引擎...")
-                                    p_bar = st.progress(0)
-                                    s_text = st.empty()
-                                    
-                                    # 执行 API
-                                    res = run_concurrent_api(pure_words, get_base_prompt_template(export_fmt), user_api_key, p_bar, s_text)
-                                    
-                                    # 完成后清理进度条，显示成功
-                                    time.sleep(0.5)
-                                    p_bar.empty()
-                                    s_text.empty()
+                        st.info("💡 站长已为您内置专属 AI 算力。采用 **多核并发技术**，极速响应，告别卡死！")
+                        
+                        custom_prompt = st.text_area(
+                            "📝 自定义 AI Prompt (可修改)", 
+                            value=get_base_prompt_template(export_format), 
+                            height=500, 
+                            key=f"prompt_{df_key}_{export_format}"
+                        )
+                        
+                        if st.button("⚡ 召唤 DeepSeek 极速生成卡片", key=f"btn_{df_key}", type="primary"):
+                            
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            status_text.markdown("**⚡ 正在连接 DeepSeek 云端算力集群...**") 
+                            
+                            # ⏳ 开始精准计时
+                            ai_start_time = time.time()
+                            
+                            ai_result = call_deepseek_api_chunked(custom_prompt, pure_words, progress_bar, status_text)
+                            
+                            # ⏳ 结束精准计时
+                            ai_duration = time.time() - ai_start_time
+                            
+                            if "❌" in ai_result and len(ai_result) < 100:
+                                st.error(ai_result)
+                            else:
+                                # 🏅 终极跑分墙展示
+                                status_text.markdown(f"### 🎉 编纂全部完成！(总耗时: **{ai_duration:.2f}** 秒)")
                                 
-                                st.session_state.generated_cards[res_key] = res
-                                st.rerun()
-
+                                mime_type = "text/csv" if export_format == "CSV" else "text/plain"
+                                st.download_button(
+                                    label=f"📥 一键下载标准 Anki 导入文件 (.{export_format.lower()})", 
+                                    data=ai_result.encode('utf-8-sig'), 
+                                    file_name=f"anki_cards_{label}.{export_format.lower()}", 
+                                    mime=mime_type,
+                                    type="primary",
+                                    use_container_width=True
+                                )
+                                
+                                st.markdown("##### 📝 预览框 (仅供查看，请勿从此处手动复制拖拽，以免格式错乱)")
+                                st.code(ai_result, language="text")
+                    
                     with ai_tab2:
                         st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
-                        full_prompt_to_copy = f"{get_base_prompt_template(export_fmt)}\n\n待处理单词：\n{', '.join(pure_words)}"
+                        full_prompt_to_copy = f"{get_base_prompt_template(export_format)}\n\n待处理单词：\n{', '.join(pure_words)}"
+                        st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制</p>", unsafe_allow_html=True)
                         st.code(full_prompt_to_copy, language='markdown')
+                else: st.info("该区间暂无单词")
 
-        render_word_tab(tabs[0], top_df, "top")
-        render_word_tab(tabs[1], target_df, "target")
-        render_word_tab(tabs[2], beyond_df, "beyond")
+        render_tab(t_top, top_df, "Top精选", expand_default=True, df_key="top") 
+        render_tab(t_target, df[df['final_cat']=='target'], "重点", expand_default=False, df_key="target")
+        render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", expand_default=False, df_key="beyond")
+        render_tab(t_known, df[df['final_cat']=='known'], "熟词", expand_default=False, df_key="known")
         
-        with tabs[3]:
-            st.download_button("💾 下载原文", st.session_state.lemma_text, "lemmatized.txt")
-            st.text_area("预览", st.session_state.lemma_text[:2000], height=300)
+        with t_raw:
+            st.info("💡 这是自动词形还原后的全文输出，已针对长文优化防卡死体验。")
+            st.download_button(label="💾 一键下载完整词形还原原文 (.txt)", data=st.session_state.lemma_text, file_name="lemmatized_text.txt", mime="text/plain", type="primary")
+            if len(st.session_state.lemma_text) > 50000:
+                st.warning("⚠️ 文本超长，仅展示前 50,000 字符。")
+                st.code(st.session_state.lemma_text[:50000] + "\n\n... [请下载查看完整内容] ...", language='text')
+            else:
+                st.code(st.session_state.lemma_text, language='text')
