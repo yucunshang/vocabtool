@@ -9,7 +9,7 @@ import time
 import requests
 import zipfile
 
-# 尝试导入多格式文档处理库，如果没有则提示
+# 尝试导入多格式文档处理库
 try:
     import PyPDF2
     import docx
@@ -31,6 +31,7 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-size: 28px !important; color: var(--primary-color) !important; }
     .param-box { background-color: var(--secondary-background-color); padding: 15px 20px 5px 20px; border-radius: 10px; border: 1px solid var(--border-color-light); margin-bottom: 20px; }
     .copy-hint { color: #888; font-size: 14px; margin-bottom: 5px; margin-top: 10px; padding-left: 5px; }
+    .exam-note { color: #666; font-size: 14px; margin-top: -15px; margin-bottom: 20px; padding-left: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -99,22 +100,12 @@ def load_vocab():
 vocab_dict = load_vocab()
 
 # ==========================================
-# 3. 核心功能映射：考试大纲 & 文档解析 & AI
+# 3. 文档解析 & AI 接口
 # ==========================================
-def get_exam_syllabus(rank):
-    if rank == 99999: return "未收录/超纲"
-    if rank <= 1500: return "小学/初中"
-    if rank <= 3500: return "中考核心"
-    if rank <= 5500: return "高考核心"
-    if rank <= 7500: return "CET-4 (四级)"
-    if rank <= 9500: return "CET-6 (六级)"
-    if rank <= 13000: return "考研/雅思"
-    if rank <= 20000: return "托福/GRE"
-    return "极难词汇"
-
 def extract_text_from_file(uploaded_file):
     """支持 txt, pdf, docx, epub 多种格式解析"""
     ext = uploaded_file.name.split('.')[-1].lower()
+    uploaded_file.seek(0) # 确保从头读取，修复读取为空的问题
     try:
         if ext == 'txt':
             return uploaded_file.getvalue().decode("utf-8", errors="ignore")
@@ -125,14 +116,16 @@ def extract_text_from_file(uploaded_file):
             doc = docx.Document(uploaded_file)
             return " ".join([p.text for p in doc.paragraphs])
         elif ext == 'epub':
-            # EPUB 本质是 ZIP 包，提取里面的 html/xhtml 进行纯文本清洗
             text_blocks = []
             with zipfile.ZipFile(uploaded_file) as z:
                 for filename in z.namelist():
-                    if filename.endswith(('.html', '.xhtml', '.htm')):
-                        content = z.read(filename)
-                        soup = BeautifulSoup(content, 'html.parser')
-                        text_blocks.append(soup.get_text(separator=' ', strip=True))
+                    # 提取 EPUB 内的所有网页文本文件
+                    if filename.endswith(('.html', '.xhtml', '.htm', '.xml')):
+                        try:
+                            content = z.read(filename)
+                            soup = BeautifulSoup(content, 'html.parser')
+                            text_blocks.append(soup.get_text(separator=' ', strip=True))
+                        except: pass
             return " ".join(text_blocks)
     except Exception as e:
         st.error(f"文件解析失败: {e}")
@@ -142,10 +135,9 @@ def extract_text_from_file(uploaded_file):
 def call_deepseek_api(prompt_template, words):
     """从 Streamlit Server 安全调用 API，彻底隔离前端"""
     try:
-        # 直接从后端环境变量读取，用户在前端绝对抓取不到这个 Key
         api_key = st.secrets["DEEPSEEK_API_KEY"]
     except KeyError:
-        return "⚠️ 站长配置错误：未在 Streamlit 后台配置 DEEPSEEK_API_KEY 环境变量。"
+        return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
     
     if not words: return "⚠️ 错误：没有需要生成的单词。"
     
@@ -167,7 +159,7 @@ def call_deepseek_api(prompt_template, words):
         return f"🚨 API 调用失败: {str(e)}"
 
 # ==========================================
-# 4. 分析引擎
+# 4. 分析引擎 (纯净版，无大纲映射)
 # ==========================================
 def analyze_words(unique_word_list):
     unique_items = [] 
@@ -175,31 +167,30 @@ def analyze_words(unique_word_list):
     for item_lower in unique_word_list:
         if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
         if item_lower in JUNK_WORDS: continue
-        actual_rank = vocab_dict.get(item_lower, 99999)
         
-        syllabus = get_exam_syllabus(actual_rank if actual_rank != 99999 else 99999)
+        actual_rank = vocab_dict.get(item_lower, 99999)
         
         if item_lower in BUILTIN_TECHNICAL_TERMS:
             domain = BUILTIN_TECHNICAL_TERMS[item_lower]
             term_rank = actual_rank if actual_rank != 99999 else 15000
-            unique_items.append({"word": f"{item_lower} ({domain})", "rank": term_rank, "raw": item_lower, "syllabus": "专业术语"})
+            unique_items.append({"word": f"{item_lower} ({domain})", "rank": term_rank, "raw": item_lower})
             continue
         
         if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
             display = PROPER_NOUNS_DB.get(item_lower, item_lower.title())
-            unique_items.append({"word": display, "rank": actual_rank, "raw": item_lower, "syllabus": "专有名词"})
+            unique_items.append({"word": display, "rank": actual_rank, "raw": item_lower})
             continue
             
         if actual_rank != 99999:
-            unique_items.append({"word": item_lower, "rank": actual_rank, "raw": item_lower, "syllabus": syllabus})
+            unique_items.append({"word": item_lower, "rank": actual_rank, "raw": item_lower})
             
     return pd.DataFrame(unique_items)
 
 # ==========================================
 # 5. UI 与流水线
 # ==========================================
-st.title("🚀 Vocab Master Pro - 全能智能教研引擎")
-st.markdown("💡 支持粘贴长文或上传 `TXT / PDF / DOCX / EPUB`，自动大纲映射，并**内置免费 AI 接口**一键生成 Anki 记忆卡片。")
+st.title("🚀 Vocab Master Pro - 全能教研引擎")
+st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB` 原著电子书，并**内置免费 AI** 一键生成 Anki 记忆卡片。")
 
 if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
@@ -217,10 +208,13 @@ with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 
 with c5: 
     st.write("") 
     st.write("") 
-    show_visual = st.checkbox("📊 显示可视化反馈", value=True)
+    show_rank = st.checkbox("🔢 附加显示 Rank", value=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# --- 双通道多格式输入 (支持 EPUB) ---
+# 增加明确的考试大纲词汇量注释
+st.markdown("<p class='exam-note'>💡 <b>词汇量参考：</b>中考 ≈ 3500 &nbsp;|&nbsp; 高考 ≈ 5500 &nbsp;|&nbsp; 四级(CET4) ≈ 7500 &nbsp;|&nbsp; 六级(CET6) ≈ 9500 &nbsp;|&nbsp; 考研/雅思 ≈ 12000 &nbsp;|&nbsp; 托福/GRE ≈ 15000+</p>", unsafe_allow_html=True)
+
+# --- 双通道多格式输入 ---
 col_input1, col_input2 = st.columns([3, 2])
 with col_input1:
     raw_text = st.text_area("📥 粘贴文本 (支持10万字以内)", height=150, key="raw_input_text")
@@ -234,106 +228,107 @@ with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_
 
 st.divider()
 
-combined_text = raw_text
-if uploaded_file is not None:
-    combined_text += "\n" + extract_text_from_file(uploaded_file)
-
-if btn_process and combined_text.strip() and vocab_dict:
-    start_time = time.time()
-    
-    with st.spinner("🧠 正在提取、去重、还原并映射考试大纲..."):
-        raw_words = re.findall(r"[a-zA-Z']+", combined_text)
-        lemmatized_words = [get_lemma(w) for w in raw_words]
-        full_lemmatized_text = " ".join(lemmatized_words)
+if btn_process:
+    combined_text = raw_text
+    if uploaded_file is not None:
+        combined_text += "\n" + extract_text_from_file(uploaded_file)
         
-        unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
-        df = analyze_words(unique_lemmas)
+    if not combined_text.strip():
+        st.warning("⚠️ 未提取到任何有效文本！如果你上传了 EPUB/PDF，可能它是纯图片扫描版，或者文件为空。")
+    elif vocab_dict:
+        start_time = time.time()
         
-        process_time = time.time() - start_time
-        
-        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-        col_m1.metric(label="📝 解析总字数", value=f"{len(raw_words):,}")
-        col_m2.metric(label="✂️ 去重词根数", value=f"{len(unique_lemmas):,}")
-        col_m3.metric(label="🎯 纳入分级词汇", value=f"{len(df):,}")
-        col_m4.metric(label="⚡ 极速解析耗时", value=f"{process_time:.2f} 秒")
-        
-        if not df.empty:
-            if show_visual:
-                st.subheader("📊 词汇分布大纲雷达图")
-                chart_data = df['syllabus'].value_counts()
-                st.bar_chart(chart_data, color="#ff4b4b")
-                st.divider()
+        with st.spinner("🧠 正在提取、去重、并进行全量词频匹配..."):
+            raw_words = re.findall(r"[a-zA-Z']+", combined_text)
+            lemmatized_words = [get_lemma(w) for w in raw_words]
+            full_lemmatized_text = " ".join(lemmatized_words)
             
-            def categorize(row):
-                r = row['rank']
-                if r <= current_level: return "known"
-                elif r <= target_level: return "target"
-                else: return "beyond"
+            unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
+            df = analyze_words(unique_lemmas)
             
-            df['final_cat'] = df.apply(categorize, axis=1)
-            df = df.sort_values(by='rank')
-            top_df = df[df['rank'] >= min_rank_threshold].sort_values(by='rank', ascending=True).head(top_n)
+            process_time = time.time() - start_time
             
-            t_top, t_target, t_beyond, t_known, t_raw = st.tabs([
-                f"🔥 Top {len(top_df)}", f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
-                f"🔴 超纲 ({len(df[df['final_cat']=='beyond'])})", f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
-                "📝 原文防卡死下载"
-            ])
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric(label="📝 解析总字数", value=f"{len(raw_words):,}")
+            col_m2.metric(label="✂️ 去重词根数", value=f"{len(unique_lemmas):,}")
+            col_m3.metric(label="🎯 纳入分级词汇", value=f"{len(df):,}")
+            col_m4.metric(label="⚡ 极速解析耗时", value=f"{process_time:.2f} 秒")
             
-            # --- AI 动态 Prompt 定义 ---
-            default_prompt = """请扮演一位专业的 Anki 制卡专家。请严格为以下单词生成 CSV 导入格式。
+            if not df.empty:
+                def categorize(row):
+                    r = row['rank']
+                    if r <= current_level: return "known"
+                    elif r <= target_level: return "target"
+                    else: return "beyond"
+                
+                df['final_cat'] = df.apply(categorize, axis=1)
+                df = df.sort_values(by='rank')
+                top_df = df[df['rank'] >= min_rank_threshold].sort_values(by='rank', ascending=True).head(top_n)
+                
+                t_top, t_target, t_beyond, t_known, t_raw = st.tabs([
+                    f"🔥 Top {len(top_df)}", f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
+                    f"🔴 超纲 ({len(df[df['final_cat']=='beyond'])})", f"🟢 已掌握 ({len(df[df['final_cat']=='known'])})",
+                    "📝 原文防卡死下载"
+                ])
+                
+                # --- AI 动态 Prompt 定义 ---
+                default_prompt = """请扮演一位专业的 Anki 制卡专家。请严格为以下单词生成 CSV 导入格式。
 核心原则：
 1. 极简速记：仅提供1个最核心、最符合现代语境的释义。
 2. 结构(每字段用英文逗号分隔，内容加双引号)："单词或短语", "英文释义<br><br><em>斜体例句</em><br><br>中文助记"
 请直接输出标准 CSV 代码块，不要包含任何多余解释。"""
 
-            def render_tab(tab_obj, data_df, label, expand_default=False, df_key=""):
-                with tab_obj:
-                    if not data_df.empty:
-                        pure_words = data_df['word'].tolist()
-                        
-                        display_lines = []
-                        for _, row in data_df.iterrows():
-                            rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
-                            display_lines.append(f"{row['word']} [Rank: {rank_str}] - 【{row['syllabus']}】")
-                        
-                        with st.expander("👁️ 查看带有大纲映射的单词列表", expanded=expand_default):
-                            st.code("\n".join(display_lines), language='text')
-                        
-                        # ==========================================
-                        # 🤖 原生内置 DeepSeek AI 引擎 (对用户完全无感)
-                        # ==========================================
-                        st.markdown(f"#### 🤖 AI 一键制卡引擎 ({label})")
-                        st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可直接生成记忆卡片！")
-                        
-                        custom_prompt = st.text_area("📝 自定义 AI Prompt (可动态修改)", value=default_prompt, height=130, key=f"prompt_{df_key}")
-                        
-                        if st.button("⚡ 召唤 DeepSeek 立即生成 CSV", key=f"btn_{df_key}", type="primary"):
-                            with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
-                                # 服务器后端调用，前端绝对安全
-                                ai_result = call_deepseek_api(custom_prompt, pure_words)
-                                
-                                st.success("🎉 生成完成！")
-                                st.code(ai_result, language="markdown")
-                                
-                                st.download_button(
-                                    label="📥 直接下载生成的 Anki 卡片 (.csv)",
-                                    data=ai_result,
-                                    file_name=f"anki_cards_{label}.csv",
-                                    mime="text/csv"
-                                )
-                    else: st.info("该区间暂无单词")
+                def render_tab(tab_obj, data_df, label, expand_default=False, df_key=""):
+                    with tab_obj:
+                        if not data_df.empty:
+                            pure_words = data_df['word'].tolist()
+                            
+                            display_lines = []
+                            for _, row in data_df.iterrows():
+                                if show_rank:
+                                    rank_str = str(int(row['rank'])) if row['rank'] != 99999 else "未收录"
+                                    display_lines.append(f"{row['word']} [Rank: {rank_str}]")
+                                else:
+                                    display_lines.append(row['word'])
+                            
+                            with st.expander("👁️ 查看单词列表", expanded=expand_default):
+                                st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制单词</p>", unsafe_allow_html=True)
+                                st.code("\n".join(display_lines), language='text')
+                            
+                            # ==========================================
+                            # 🤖 原生内置 DeepSeek AI 引擎 (对用户完全无感)
+                            # ==========================================
+                            st.markdown(f"#### 🤖 AI 一键制卡引擎 ({label})")
+                            st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可直接生成记忆卡片！")
+                            
+                            custom_prompt = st.text_area("📝 自定义 AI Prompt (可动态修改)", value=default_prompt, height=130, key=f"prompt_{df_key}")
+                            
+                            if st.button("⚡ 召唤 DeepSeek 立即生成 CSV", key=f"btn_{df_key}", type="primary"):
+                                with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
+                                    # 服务器后端调用，前端绝对安全
+                                    ai_result = call_deepseek_api(custom_prompt, pure_words)
+                                    
+                                    st.success("🎉 生成完成！")
+                                    st.code(ai_result, language="markdown")
+                                    
+                                    st.download_button(
+                                        label="📥 直接下载生成的 Anki 卡片 (.csv)",
+                                        data=ai_result,
+                                        file_name=f"anki_cards_{label}.csv",
+                                        mime="text/csv"
+                                    )
+                        else: st.info("该区间暂无单词")
 
-            render_tab(t_top, top_df, "Top精选", expand_default=True, df_key="top") 
-            render_tab(t_target, df[df['final_cat']=='target'], "重点", expand_default=False, df_key="target")
-            render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", expand_default=False, df_key="beyond")
-            render_tab(t_known, df[df['final_cat']=='known'], "熟词", expand_default=False, df_key="known")
-            
-            with t_raw:
-                st.info("💡 这是自动词形还原后的全文输出，已针对长文优化防卡死体验。")
-                st.download_button(label="💾 一键下载完整词形还原原文 (.txt)", data=full_lemmatized_text, file_name="lemmatized_text.txt", mime="text/plain", type="primary")
-                if len(full_lemmatized_text) > 50000:
-                    st.warning("⚠️ 文本超长，仅展示前 50,000 字符。")
-                    st.code(full_lemmatized_text[:50000] + "\n\n... [请下载查看完整内容] ...", language='text')
-                else:
-                    st.code(full_lemmatized_text, language='text')
+                render_tab(t_top, top_df, "Top精选", expand_default=True, df_key="top") 
+                render_tab(t_target, df[df['final_cat']=='target'], "重点", expand_default=False, df_key="target")
+                render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", expand_default=False, df_key="beyond")
+                render_tab(t_known, df[df['final_cat']=='known'], "熟词", expand_default=False, df_key="known")
+                
+                with t_raw:
+                    st.info("💡 这是自动词形还原后的全文输出，已针对长文优化防卡死体验。")
+                    st.download_button(label="💾 一键下载完整词形还原原文 (.txt)", data=full_lemmatized_text, file_name="lemmatized_text.txt", mime="text/plain", type="primary")
+                    if len(full_lemmatized_text) > 50000:
+                        st.warning("⚠️ 文本超长，仅展示前 50,000 字符。")
+                        st.code(full_lemmatized_text[:50000] + "\n\n... [请下载查看完整内容] ...", language='text')
+                    else:
+                        st.code(full_lemmatized_text, language='text')
