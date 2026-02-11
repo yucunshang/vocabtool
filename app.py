@@ -2,15 +2,17 @@ import streamlit as st
 import pandas as pd
 import re
 import os
-import lemminflect
-import nltk
 import json
 import time
 import requests
 import zipfile
 import concurrent.futures
+import lemminflect
+import nltk
 
-# 尝试导入多格式文档处理库
+# ==========================================
+# 0. 尝试导入多格式文档处理库
+# ==========================================
 try:
     import PyPDF2
     import docx
@@ -18,7 +20,7 @@ except ImportError:
     st.error("⚠️ 缺少文件处理依赖。请在终端运行: pip install PyPDF2 python-docx")
 
 # ==========================================
-# 1. 基础配置
+# 1. 基础 UI 配置与 State 初始化
 # ==========================================
 st.set_page_config(layout="wide", page_title="Vocab Master Pro", page_icon="🚀")
 
@@ -34,48 +36,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# 统一初始化 Session State (提升健壮性)
+if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
+if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
+if "is_processed" not in st.session_state: st.session_state.is_processed = False
+if "base_df" not in st.session_state: st.session_state.base_df = pd.DataFrame()
+if "stats" not in st.session_state: st.session_state.stats = {}
+
 # ==========================================
-# 2. 数据与 NLP 初始化 (含人名过滤矩阵)
+# 2. 全局核心配置字典 (集中管理，提升拓展性)
 # ==========================================
-@st.cache_data
-def load_knowledge_base():
-    try:
-        if not os.path.exists('data'):
-            return {}, {}, {}, set()
-            
-        with open('data/terms.json', 'r', encoding='utf-8') as f: terms = {k.lower(): v for k, v in json.load(f).items()}
-        with open('data/proper.json', 'r', encoding='utf-8') as f: proper = {k.lower(): v for k, v in json.load(f).items()}
-        with open('data/patch.json', 'r', encoding='utf-8') as f: patch = json.load(f)
-        with open('data/ambiguous.json', 'r', encoding='utf-8') as f: ambiguous = set(json.load(f))
-        return terms, proper, patch, ambiguous
-    except Exception as e:
-        print(f"Knowledge base load error: {e}")
-        return {}, {}, {}, set()
-
-BUILTIN_TECHNICAL_TERMS, PROPER_NOUNS_DB, BUILTIN_PATCH_VOCAB, AMBIGUOUS_WORDS = load_knowledge_base()
-
-@st.cache_resource
-def setup_nltk():
-    root_dir = os.path.dirname(os.path.abspath(__file__))
-    nltk_data_dir = os.path.join(root_dir, 'nltk_data')
-    os.makedirs(nltk_data_dir, exist_ok=True)
-    nltk.data.path.append(nltk_data_dir)
-    # 新增 names 模块下载，用于人名识别
-    for pkg in ['averaged_perceptron_tagger', 'punkt', 'names']:
-        try: nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
-        except: pass
-setup_nltk()
-
-@st.cache_data
-def load_names_db():
-    try:
-        from nltk.corpus import names
-        return set([n.lower() for n in names.words()])
-    except:
-        return set()
-NLTK_NAMES_DB = load_names_db()
-
-# 人名白名单：这些词既是人名，也是必须要学的核心英语词汇，绝对不能被过滤！
+# 既是人名又是核心单词的“免死金牌”白名单
 SAFE_NAMES_DB = {
     'will', 'mark', 'rose', 'lily', 'bill', 'pat', 'joy', 'hope', 'penny', 'faith', 
     'grace', 'amber', 'crystal', 'dawn', 'eve', 'holly', 'ivy', 'robin', 'summer', 
@@ -93,12 +64,73 @@ SAFE_NAMES_DB = {
     'wright', 'scott', 'price', 'long', 'major', 'rich', 'dick', 'christian', 'kelly', 'parker'
 }
 
+# 强行覆盖的词汇等级矩阵 (地名/节日/月份/大厂/数字)
+GLOBAL_ENTITY_RANKS = {
+    "africa": 1000, "asia": 1000, "europe": 800, "america": 500, "australia": 1500, "antarctica": 4000,
+    "china": 400, "usa": 200, "uk": 200, "britain": 800, "england": 800, "france": 800, "germany": 900, "japan": 900, "russia": 900, "india": 1000, "italy": 1000, "canada": 1000, "spain": 1200, "mexico": 1200, "brazil": 1500, "korea": 1500, "egypt": 2000, "greece": 2000, "ireland": 2000, "scotland": 2000, "wales": 2500, "sweden": 2500, "switzerland": 2500, "norway": 3000, "denmark": 3000, "finland": 3000, "poland": 2500, "netherlands": 2500, "portugal": 3000, "vietnam": 3000, "thailand": 3000, "singapore": 3000, "malaysia": 3000, "indonesia": 3000, "philippines": 3000, "turkey": 1500, "israel": 1500, "iran": 2000, "iraq": 2000,
+    "american": 300, "british": 500, "english": 300, "french": 600, "german": 700, "chinese": 800, "japanese": 800, "russian": 900, "indian": 900, "italian": 1000, "spanish": 1000, "canadian": 1200, "korean": 1500, "arabic": 2000, "latin": 2000, "greek": 2000,
+    "london": 800, "paris": 1000, "tokyo": 1500, "rome": 1500, "berlin": 2000, "moscow": 2000, "beijing": 2500, "shanghai": 2500, "washington": 500, "york": 500, "chicago": 1500, "boston": 1500, "sydney": 2000,
+    "christmas": 800, "easter": 2000, "halloween": 2500, "thanksgiving": 1500, "valentine": 3000, "hanukkah": 5000, "ramadan": 5000, "diwali": 6000, "carnival": 4000, "festival": 1500, "holiday": 1000,
+    "jewish": 1500, "muslim": 1500, "christian": 1500, "catholic": 1500, "protestant": 2500, "hindu": 3000, "buddhist": 3000, "islam": 2000, "buddhism": 3500, "christianity": 2000,
+    "google": 1000, "apple": 1000, "microsoft": 1500, "facebook": 1500, "twitter": 2000, "amazon": 1500,
+    "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
+    "january": 400, "february": 400, "march": 400, "april": 400, "may": 100, "june": 400, "july": 400, "august": 1500, "september": 400, "october": 400, "november": 400, "december": 400
+}
+
+# 基础数字词写入全局矩阵
+for _nw in ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth", "twentieth", "thirtieth", "fortieth", "fiftieth", "sixtieth", "seventieth", "eightieth", "ninetieth", "hundredth", "thousandth"]:
+    GLOBAL_ENTITY_RANKS[_nw] = 1000
+
+# ==========================================
+# 3. 数据与 NLP 初始化 (带容错机制)
+# ==========================================
+@st.cache_data
+def load_knowledge_base():
+    try:
+        if not os.path.exists('data'):
+            return {}, {}, {}, set()
+        with open('data/terms.json', 'r', encoding='utf-8') as f: terms = {k.lower(): v for k, v in json.load(f).items()}
+        with open('data/proper.json', 'r', encoding='utf-8') as f: proper = {k.lower(): v for k, v in json.load(f).items()}
+        with open('data/patch.json', 'r', encoding='utf-8') as f: patch = json.load(f)
+        with open('data/ambiguous.json', 'r', encoding='utf-8') as f: ambiguous = set(json.load(f))
+        return terms, proper, patch, ambiguous
+    except Exception as e:
+        print(f"Knowledge base load error: {e}")
+        return {}, {}, {}, set()
+
+BUILTIN_TECHNICAL_TERMS, PROPER_NOUNS_DB, BUILTIN_PATCH_VOCAB, AMBIGUOUS_WORDS = load_knowledge_base()
+
+@st.cache_resource
+def setup_nltk():
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    nltk_data_dir = os.path.join(root_dir, 'nltk_data')
+    os.makedirs(nltk_data_dir, exist_ok=True)
+    nltk.data.path.append(nltk_data_dir)
+    # 防御性下载，即使失败也不抛出异常
+    for pkg in ['averaged_perceptron_tagger', 'punkt', 'names']:
+        try: nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
+        except Exception: pass
+setup_nltk()
+
+@st.cache_data
+def load_names_db():
+    try:
+        from nltk.corpus import names
+        return set([n.lower() for n in names.words()])
+    except Exception:
+        # 如果 nltk 缺失或加载失败，返回空集以保证主体程序继续运行
+        return set()
+NLTK_NAMES_DB = load_names_db()
+
 def get_lemma(w):
-    lemmas_dict = lemminflect.getAllLemmas(w)
-    if not lemmas_dict: return w.lower()
-    for pos in ['ADJ', 'ADV', 'VERB', 'NOUN']:
-        if pos in lemmas_dict: return lemmas_dict[pos][0]
-    return list(lemmas_dict.values())[0][0]
+    try:
+        lemmas_dict = lemminflect.getAllLemmas(w)
+        if not lemmas_dict: return w.lower()
+        for pos in ['ADJ', 'ADV', 'VERB', 'NOUN']:
+            if pos in lemmas_dict: return lemmas_dict[pos][0]
+        return list(lemmas_dict.values())[0][0]
+    except:
+        return w.lower()
 
 @st.cache_data
 def load_vocab():
@@ -115,63 +147,18 @@ def load_vocab():
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce').fillna(99999)
             df = df.sort_values(r_col, ascending=True).drop_duplicates(subset=[w_col], keep='first')
             vocab = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
-        except: pass
+        except Exception as e: 
+            print(f"Vocab CSV load error: {e}")
     
+    # 按照优先级合并词库: 基础 CSV < 补丁数据 < 强制常量映射
     for word, rank in BUILTIN_PATCH_VOCAB.items(): vocab[word] = rank
-    
-    # === 强力拓展：专业名词、地名、国家、节日及数字权重矩阵 ===
-    URGENT_OVERRIDES = {
-        # 大洲
-        "africa": 1000, "asia": 1000, "europe": 800, "america": 500, "australia": 1500, "antarctica": 4000,
-        # 主流国家
-        "china": 400, "usa": 200, "uk": 200, "britain": 800, "england": 800, "france": 800, 
-        "germany": 900, "japan": 900, "russia": 900, "india": 1000, "italy": 1000, "canada": 1000, 
-        "spain": 1200, "mexico": 1200, "brazil": 1500, "korea": 1500, "egypt": 2000, "greece": 2000, 
-        "ireland": 2000, "scotland": 2000, "wales": 2500, "sweden": 2500, "switzerland": 2500, 
-        "norway": 3000, "denmark": 3000, "finland": 3000, "poland": 2500, "netherlands": 2500, 
-        "portugal": 3000, "vietnam": 3000, "thailand": 3000, "singapore": 3000, "malaysia": 3000, 
-        "indonesia": 3000, "philippines": 3000, "turkey": 1500, "israel": 1500, "iran": 2000, "iraq": 2000,
-        # 国籍与语言
-        "american": 300, "british": 500, "english": 300, "french": 600, "german": 700, "chinese": 800, 
-        "japanese": 800, "russian": 900, "indian": 900, "italian": 1000, "spanish": 1000, "canadian": 1200, 
-        "korean": 1500, "arabic": 2000, "latin": 2000, "greek": 2000,
-        # 著名城市
-        "london": 800, "paris": 1000, "tokyo": 1500, "rome": 1500, "berlin": 2000, "moscow": 2000, 
-        "beijing": 2500, "shanghai": 2500, "washington": 500, "york": 500, "chicago": 1500, 
-        "boston": 1500, "sydney": 2000,
-        # 节日与假期
-        "christmas": 800, "easter": 2000, "halloween": 2500, "thanksgiving": 1500, "valentine": 3000, 
-        "hanukkah": 5000, "ramadan": 5000, "diwali": 6000, "carnival": 4000, "festival": 1500, "holiday": 1000,
-        # 宗教派系
-        "jewish": 1500, "muslim": 1500, "christian": 1500, "catholic": 1500, "protestant": 2500, 
-        "hindu": 3000, "buddhist": 3000, "islam": 2000, "buddhism": 3500, "christianity": 2000,
-        # 互联网/科技大厂
-        "google": 1000, "apple": 1000, "microsoft": 1500, "facebook": 1500, "twitter": 2000, "amazon": 1500,
-        # 周与月份
-        "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
-        "january": 400, "february": 400, "march": 400, "april": 400, "may": 100, "june": 400, "july": 400, 
-        "august": 1500, "september": 400, "october": 400, "november": 400, "december": 400
-    }
-    
-    # 常见基数词与序数词降级名单 (一律设为 1000，方便过滤)
-    number_words = [
-        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-        "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
-        "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion",
-        "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
-        "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth", "twentieth",
-        "thirtieth", "fortieth", "fiftieth", "sixtieth", "seventieth", "eightieth", "ninetieth", "hundredth", "thousandth"
-    ]
-    for nw in number_words:
-        URGENT_OVERRIDES[nw] = 1000
-
-    for word, rank in URGENT_OVERRIDES.items(): vocab[word] = rank
+    for word, rank in GLOBAL_ENTITY_RANKS.items(): vocab[word] = rank
     return vocab
 
 vocab_dict = load_vocab()
 
 # ==========================================
-# 3. 文档解析 & 动态 AI 提示词引擎
+# 4. 文档解析 & AI 提示词引擎
 # ==========================================
 def extract_text_from_file(uploaded_file):
     ext = uploaded_file.name.split('.')[-1].lower()
@@ -197,7 +184,7 @@ def extract_text_from_file(uploaded_file):
                         except: pass
             return " ".join(text_blocks)
     except Exception as e:
-        st.error(f"文件解析失败: {e}")
+        st.error(f"⚠️ 文件解析失败: {e}")
         return ""
     return ""
 
@@ -258,10 +245,10 @@ Process the following list of words immediately and output ONLY the final code b
     return prompt
 
 # ==========================================
-# 4. 多核并发 API 引擎 (核心极速区)
+# 5. 多核并发 API 引擎 (健壮性升级版)
 # ==========================================
 def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
-    url = "https://api.deepseek.com/chat/completions".strip()
+    url = "[https://api.deepseek.com/chat/completions](https://api.deepseek.com/chat/completions)".strip()
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     system_enforcement = "\n\n【系统绝对强制指令】现在我已经发送了单词列表，请立即且直接输出最终的数据代码，绝对不准回复“好的”、“没问题”等任何客套话，绝对不准使用 ```csv 等 Markdown 语法包裹代码！"
     full_prompt = f"{prompt_template}{system_enforcement}\n\n待处理单词列表：\n{', '.join(batch_words)}"
@@ -273,11 +260,11 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
         "max_tokens": 4096
     }
     
-    try:
-        for attempt in range(3):
-            resp = requests.post(url, json=payload, headers=headers, timeout=90)
+    for attempt in range(4): # 增加重试次数增强网络稳定性
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=120)
             if resp.status_code == 429: 
-                time.sleep(2 * (attempt + 1))
+                time.sleep(3 * (attempt + 1)) # 指数退避，防止被封IP
                 continue
             if resp.status_code == 402: return "❌ ERROR_402_NO_BALANCE"
             elif resp.status_code == 401: return "❌ ERROR_401_INVALID_KEY"
@@ -285,16 +272,17 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
             
             result = resp.json()['choices'][0]['message']['content'].strip()
             
-            if result.startswith("```"):
-                lines = result.split('\n')
-                if lines[0].startswith("```"): lines = lines[1:]
-                if lines and lines[-1].startswith("```"): lines = lines[:-1]
-                result = '\n'.join(lines).strip()
-            return result
+            # 使用 Regex 正则强力清洗 Markdown 标签 (极高稳定性保障)
+            result = re.sub(r"^```(?:csv|txt|text)?\n", "", result, flags=re.IGNORECASE)
+            result = re.sub(r"\n```$", "", result)
+            return result.strip()
             
-        return f"\n🚨 批次超时或被限流，此批次 ({len(batch_words)}词) 生成失败。"
-    except Exception as e:
-        return f"\n🚨 批次请求发生异常: {str(e)}"
+        except Exception as e:
+            if attempt == 3:
+                return f"\n🚨 批次请求异常: {str(e)}"
+            time.sleep(2)
+            
+    return f"\n🚨 批次被限流，此批次 ({len(batch_words)}词) 生成失败。"
 
 def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text):
     try: api_key = st.secrets["DEEPSEEK_API_KEY"]
@@ -311,7 +299,6 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
     chunks = [words[i:i + CHUNK_SIZE] for i in range(0, len(words), CHUNK_SIZE)]
     total_words = len(words)
     processed_count = 0
-    
     results_ordered = [None] * len(chunks)
     
     status_text.markdown("🚀 **并发任务已发射！** 正在全速生成首批卡片（首次返回约需 8~12 秒，请稍候）...")
@@ -340,19 +327,20 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
     return "\n".join(filter(None, results_ordered))
 
 # ==========================================
-# 5. 分析引擎 (加入人名拦截逻辑)
+# 6. 分析引擎 (内置无感知人名过滤拦截器)
 # ==========================================
-def analyze_words(unique_word_list, do_filter_names=True):
+def analyze_words(unique_word_list):
     unique_items = [] 
-    JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're'}
+    JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're', 'don', 'doesn', 'didn', 'won', 'isn', 'aren', 'ain'}
+    
     for item_lower in unique_word_list:
         if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
         if item_lower in JUNK_WORDS: continue
         
-        # 智能人名拦截：如果在英文名字典中，且不在豁免白名单中，则直接抛弃！
-        if do_filter_names:
-            if item_lower in NLTK_NAMES_DB and item_lower not in SAFE_NAMES_DB:
-                continue
+        # 🛡️ 核心隐形拦截：强制人名过滤，不给 UI 暴露开关
+        # 如果这个词在 NLTK 人名库里，但不在我们的保命白名单里，直接丢弃
+        if item_lower in NLTK_NAMES_DB and item_lower not in SAFE_NAMES_DB:
+            continue
 
         actual_rank = vocab_dict.get(item_lower, 99999)
         
@@ -361,30 +349,28 @@ def analyze_words(unique_word_list, do_filter_names=True):
             term_rank = actual_rank if actual_rank != 99999 else 15000
             unique_items.append({"word": f"{item_lower} ({domain})", "rank": term_rank, "raw": item_lower})
             continue
+            
         if item_lower in PROPER_NOUNS_DB or item_lower in AMBIGUOUS_WORDS:
             display = PROPER_NOUNS_DB.get(item_lower, item_lower.title())
             unique_items.append({"word": display, "rank": actual_rank, "raw": item_lower})
             continue
+            
         if actual_rank != 99999:
             unique_items.append({"word": item_lower, "rank": actual_rank, "raw": item_lower})
             
     return pd.DataFrame(unique_items)
 
 # ==========================================
-# 6. UI 与流水线状态管理
+# 7. UI 视图层
 # ==========================================
-st.title("🚀 Vocab Master Pro - Stable")
+st.title("🚀 Vocab Master Pro - Stable Release")
 st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB` 文件，并**内置免费 AI** 一键生成 Anki 记忆卡片。")
-
-if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = ""
-if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
-if "is_processed" not in st.session_state: st.session_state.is_processed = False
 
 def clear_all_inputs():
     st.session_state.raw_input_text = ""
     st.session_state.uploader_key += 1 
     st.session_state.is_processed = False
-    if 'base_df' in st.session_state: del st.session_state.base_df
+    st.session_state.base_df = pd.DataFrame()
 
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -393,8 +379,9 @@ with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 20000, 
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 100, 10)                 
 with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 10000, 500) 
 with c5: 
-    # === 新增：人名过滤器开关 ===
-    ui_filter_names = st.checkbox("🧑 自动过滤人名", value=True)
+    # 已移除“过滤人名”开关，仅保留 Rank 开关，进行美观占位
+    st.write("") 
+    st.write("") 
     show_rank = st.checkbox("🔢 附加显示 Rank", value=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -412,7 +399,7 @@ with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_
 st.divider()
 
 # ==========================================
-# 7. 后台硬核计算
+# 8. 流水线执行
 # ==========================================
 if btn_process:
     with st.spinner("🧠 正在急速读取文件并进行智能解析（性能优化版）..."):
@@ -429,8 +416,8 @@ if btn_process:
             lemmatized_unique = [get_lemma(w).lower() for w in unique_raw_words]
             unique_lemmas = list(set(lemmatized_unique)) 
             
-            # 将 UI 的人名过滤选项传入计算函数
-            st.session_state.base_df = analyze_words(unique_lemmas, do_filter_names=ui_filter_names)
+            # 核心业务调用，内部已隐形挂载人名拦截器
+            st.session_state.base_df = analyze_words(unique_lemmas)
             
             st.session_state.stats = {
                 "raw_count": len(raw_words),
@@ -441,7 +428,7 @@ if btn_process:
             st.session_state.is_processed = True
 
 # ==========================================
-# 8. 动态界面渲染
+# 9. 动态结果渲染
 # ==========================================
 if st.session_state.get("is_processed", False):
     
