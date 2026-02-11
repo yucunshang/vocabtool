@@ -35,7 +35,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. 数据与 NLP 初始化
+# 2. 数据与 NLP 初始化 (含人名过滤矩阵)
 # ==========================================
 @st.cache_data
 def load_knowledge_base():
@@ -60,10 +60,38 @@ def setup_nltk():
     nltk_data_dir = os.path.join(root_dir, 'nltk_data')
     os.makedirs(nltk_data_dir, exist_ok=True)
     nltk.data.path.append(nltk_data_dir)
-    for pkg in ['averaged_perceptron_tagger', 'punkt']:
+    # 新增 names 模块下载，用于人名识别
+    for pkg in ['averaged_perceptron_tagger', 'punkt', 'names']:
         try: nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
         except: pass
 setup_nltk()
+
+@st.cache_data
+def load_names_db():
+    try:
+        from nltk.corpus import names
+        return set([n.lower() for n in names.words()])
+    except:
+        return set()
+NLTK_NAMES_DB = load_names_db()
+
+# 人名白名单：这些词既是人名，也是必须要学的核心英语词汇，绝对不能被过滤！
+SAFE_NAMES_DB = {
+    'will', 'mark', 'rose', 'lily', 'bill', 'pat', 'joy', 'hope', 'penny', 'faith', 
+    'grace', 'amber', 'crystal', 'dawn', 'eve', 'holly', 'ivy', 'robin', 'summer', 
+    'autumn', 'winter', 'brook', 'stone', 'cliff', 'ash', 'art', 'frank', 'grant', 
+    'miles', 'ward', 'dean', 'earl', 'duke', 'king', 'prince', 'baker', 'smith', 
+    'foster', 'clark', 'cook', 'bell', 'hill', 'wood', 'ray', 'guy', 'max', 
+    'page', 'rusty', 'cash', 'chance', 'clay', 'fox', 'lane', 'reed', 'roman', 'tanner', 
+    'paris', 'london', 'chase', 'hunter', 'drake', 'drew', 'buck', 'buddy', 'chuck', 
+    'colt', 'daisy', 'dash', 'destiny', 'diamond', 'dusty', 'echo', 'ember', 'fern', 
+    'flint', 'flora', 'gale', 'gene', 'harmony', 'hazel', 'heather', 'iris', 'jade', 
+    'jasmine', 'jewel', 'justice', 'laurel', 'marina', 'melody', 'olive', 'opal', 
+    'pierce', 'piper', 'poppy', 'rex', 'ruby', 'sage', 'savannah', 'scarlett', 'scout', 
+    'sienna', 'sierra', 'skip', 'sky', 'starr', 'trinity', 'victor', 'violet', 'wade', 
+    'willow', 'woody', 'wren', 'brown', 'white', 'black', 'green', 'young', 'hall', 
+    'wright', 'scott', 'price', 'long', 'major', 'rich', 'dick', 'christian', 'kelly', 'parker'
+}
 
 def get_lemma(w):
     lemmas_dict = lemminflect.getAllLemmas(w)
@@ -91,14 +119,41 @@ def load_vocab():
     
     for word, rank in BUILTIN_PATCH_VOCAB.items(): vocab[word] = rank
     
+    # === 强力拓展：专业名词、地名、国家、节日及数字权重矩阵 ===
     URGENT_OVERRIDES = {
-        "china": 400, "turkey": 1500, "march": 500, "may": 100, "august": 1500, "polish": 2500,
+        # 大洲
+        "africa": 1000, "asia": 1000, "europe": 800, "america": 500, "australia": 1500, "antarctica": 4000,
+        # 主流国家
+        "china": 400, "usa": 200, "uk": 200, "britain": 800, "england": 800, "france": 800, 
+        "germany": 900, "japan": 900, "russia": 900, "india": 1000, "italy": 1000, "canada": 1000, 
+        "spain": 1200, "mexico": 1200, "brazil": 1500, "korea": 1500, "egypt": 2000, "greece": 2000, 
+        "ireland": 2000, "scotland": 2000, "wales": 2500, "sweden": 2500, "switzerland": 2500, 
+        "norway": 3000, "denmark": 3000, "finland": 3000, "poland": 2500, "netherlands": 2500, 
+        "portugal": 3000, "vietnam": 3000, "thailand": 3000, "singapore": 3000, "malaysia": 3000, 
+        "indonesia": 3000, "philippines": 3000, "turkey": 1500, "israel": 1500, "iran": 2000, "iraq": 2000,
+        # 国籍与语言
+        "american": 300, "british": 500, "english": 300, "french": 600, "german": 700, "chinese": 800, 
+        "japanese": 800, "russian": 900, "indian": 900, "italian": 1000, "spanish": 1000, "canadian": 1200, 
+        "korean": 1500, "arabic": 2000, "latin": 2000, "greek": 2000,
+        # 著名城市
+        "london": 800, "paris": 1000, "tokyo": 1500, "rome": 1500, "berlin": 2000, "moscow": 2000, 
+        "beijing": 2500, "shanghai": 2500, "washington": 500, "york": 500, "chicago": 1500, 
+        "boston": 1500, "sydney": 2000,
+        # 节日与假期
+        "christmas": 800, "easter": 2000, "halloween": 2500, "thanksgiving": 1500, "valentine": 3000, 
+        "hanukkah": 5000, "ramadan": 5000, "diwali": 6000, "carnival": 4000, "festival": 1500, "holiday": 1000,
+        # 宗教派系
+        "jewish": 1500, "muslim": 1500, "christian": 1500, "catholic": 1500, "protestant": 2500, 
+        "hindu": 3000, "buddhist": 3000, "islam": 2000, "buddhism": 3500, "christianity": 2000,
+        # 互联网/科技大厂
+        "google": 1000, "apple": 1000, "microsoft": 1500, "facebook": 1500, "twitter": 2000, "amazon": 1500,
+        # 周与月份
         "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
-        "january": 400, "february": 400, "april": 400, "june": 400, "july": 400, "september": 400, "october": 400, "november": 400, "december": 400,
-        "usa": 200, "uk": 200, "google": 1000, "apple": 1000, "microsoft": 1500
+        "january": 400, "february": 400, "march": 400, "april": 400, "may": 100, "june": 400, "july": 400, 
+        "august": 1500, "september": 400, "october": 400, "november": 400, "december": 400
     }
     
-    # 追加：常见基数词与序数词降级名单
+    # 常见基数词与序数词降级名单 (一律设为 1000，方便过滤)
     number_words = [
         "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
         "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
@@ -147,9 +202,6 @@ def extract_text_from_file(uploaded_file):
     return ""
 
 def get_dynamic_prompt_template(export_format, front_style, add_pos, def_lang, ex_count, add_ety, split_polysemy):
-    """
-    动态生成 Anki 极速制卡 Prompt (带严格语义与例句数量约束模式)
-    """
     front_desc = "A natural phrase or collocation using the specific meaning." if front_style == "phrase" else "The target word itself."
     if add_pos:
         front_desc += " MUST append the precise part of speech tag at the end, e.g., ' (v)', ' (n)', ' (adj)'."
@@ -163,7 +215,6 @@ def get_dynamic_prompt_template(export_format, front_style, add_pos, def_lang, e
     }
     def_desc = def_map.get(def_lang, "English definition")
 
-    # 强化例句数量逻辑，增加针对 AI 的强制指令 (ex_rule)
     if ex_count == 0:
         ex_desc = ""
         ex_rule = "Generate ZERO example sentences. Do NOT include any examples."
@@ -289,14 +340,20 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
     return "\n".join(filter(None, results_ordered))
 
 # ==========================================
-# 5. 分析引擎
+# 5. 分析引擎 (加入人名拦截逻辑)
 # ==========================================
-def analyze_words(unique_word_list):
+def analyze_words(unique_word_list, do_filter_names=True):
     unique_items = [] 
     JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're'}
     for item_lower in unique_word_list:
         if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
         if item_lower in JUNK_WORDS: continue
+        
+        # 智能人名拦截：如果在英文名字典中，且不在豁免白名单中，则直接抛弃！
+        if do_filter_names:
+            if item_lower in NLTK_NAMES_DB and item_lower not in SAFE_NAMES_DB:
+                continue
+
         actual_rank = vocab_dict.get(item_lower, 99999)
         
         if item_lower in BUILTIN_TECHNICAL_TERMS:
@@ -329,7 +386,6 @@ def clear_all_inputs():
     st.session_state.is_processed = False
     if 'base_df' in st.session_state: del st.session_state.base_df
 
-# === 更新：调整数值选择器的上限 max_value 至 20000 ===
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
 c1, c2, c3, c4, c5 = st.columns(5)
 with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 20000, 9000, 500)     
@@ -337,8 +393,8 @@ with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 20000, 
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 100, 10)                 
 with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 10000, 500) 
 with c5: 
-    st.write("") 
-    st.write("") 
+    # === 新增：人名过滤器开关 ===
+    ui_filter_names = st.checkbox("🧑 自动过滤人名", value=True)
     show_rank = st.checkbox("🔢 附加显示 Rank", value=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -373,7 +429,8 @@ if btn_process:
             lemmatized_unique = [get_lemma(w).lower() for w in unique_raw_words]
             unique_lemmas = list(set(lemmatized_unique)) 
             
-            st.session_state.base_df = analyze_words(unique_lemmas)
+            # 将 UI 的人名过滤选项传入计算函数
+            st.session_state.base_df = analyze_words(unique_lemmas, do_filter_names=ui_filter_names)
             
             st.session_state.stats = {
                 "raw_count": len(raw_words),
