@@ -5,6 +5,7 @@ import os
 import lemminflect
 import nltk
 import json
+import time  # 新增：用于精确测速
 
 # ==========================================
 # 1. 基础配置
@@ -241,18 +242,16 @@ def analyze_words(unique_word_list):
 st.title("🚀 Vocab Master Pro - 全能长文解析引擎")
 st.markdown("💡 **一站式工作流**：支持粘贴几十万字的超长文本，**更支持直接上传 TXT 原著文件**，突破浏览器性能极限！系统将一键完成【词形还原】、【全量分级】并提取【Top N 精选】。")
 
-# --- 初始化 Session State（用于彻底清空输入框和上传组件） ---
 if "raw_input_text" not in st.session_state:
     st.session_state.raw_input_text = ""
 if "uploader_key" not in st.session_state:
-    st.session_state.uploader_key = 0 # 用作 file_uploader 的 key，改变它即可强制重置组件
+    st.session_state.uploader_key = 0 
 
 def clear_all_inputs():
-    """回调函数：彻底清空文本框和文件上传器"""
     st.session_state.raw_input_text = ""
-    st.session_state.uploader_key += 1 # 每次加1，重新渲染一个空白的上传组件
+    st.session_state.uploader_key += 1 
 
-# --- 参数配置区 (直观展示，不折叠) ---
+# --- 参数配置区 ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
 c1, c2, c3, c4, c5 = st.columns(5)
 with c1: current_level = st.number_input("🎯 当前水平 (起)", 0, 30000, 9000, 500, help="低于此词频的视为已掌握")
@@ -265,16 +264,15 @@ with c5:
     show_rank = st.checkbox("🔢 附加显示 Rank", value=False)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# --- 双通道输入区：文本框 + 文件上传 ---
+# --- 双通道输入区 ---
 col_input1, col_input2 = st.columns([3, 2])
 with col_input1:
     raw_text = st.text_area("📥 在此粘贴英文原文 (支持10万字以内)...", height=200, key="raw_input_text")
 with col_input2:
     st.info("💡 **突破极限**：超10万字的英文原著/论文，请勿粘贴，直接在此上传 👇")
-    # 绑定动态 key，方便一键清空
     uploaded_file = st.file_uploader("📂 上传 .txt 纯文本文件", type=["txt"], key=f"uploader_{st.session_state.uploader_key}")
 
-# --- 按钮区（新增一键清空双通道） ---
+# --- 按钮区 ---
 col_btn1, col_btn2 = st.columns([5, 1])
 with col_btn1:
     btn_process = st.button("🚀 一键智能解析 (处理长文)", type="primary", use_container_width=True)
@@ -283,43 +281,47 @@ with col_btn2:
 
 st.divider()
 
-# --- 提取并融合文本 ---
-# 无论用户是只粘贴了、只上传了，还是又粘贴又上传，我们都把文本合在一起处理
 combined_text = raw_text
 if uploaded_file is not None:
-    # 读取并解码上传的 TXT 文件
     file_content = uploaded_file.getvalue().decode("utf-8", errors="ignore")
     combined_text += "\n" + file_content
 
 # --- 统一流水线处理逻辑 ---
 if btn_process and combined_text.strip() and vocab_dict:
+    # ⏱️ 记录开始时间
+    start_time = time.time()
+    
     with st.spinner("🧠 正在进行亿级词形还原与全量词频匹配（文件越大所需时间越长，请耐心等待）..."):
         
-        # 1. 提取总词数 (Total Words)
+        # 1. 提取总词数
         raw_words = re.findall(r"[a-zA-Z']+", combined_text)
         total_word_count = len(raw_words)
         
-        # 2. 智能还原 (Lemmatization)
+        # 2. 智能还原
         lemmatized_words = [get_lemma(w) for w in raw_words]
         full_lemmatized_text = " ".join(lemmatized_words)
         
-        # 3. 去重提取唯一词根 (Unique Lemmas)
+        # 3. 去重
         unique_lemmas = list(set([w.lower() for w in lemmatized_words]))
         unique_word_count = len(unique_lemmas)
         
-        # 4. 词频定级与过滤无效字符
+        # 4. 分级
         df = analyze_words(unique_lemmas)
         valid_word_count = len(df)
         
-        # === 全景字数统计看板 ===
-        col_m1, col_m2, col_m3 = st.columns(3)
+        # ⏱️ 记录结束时间并计算耗时
+        end_time = time.time()
+        process_time = end_time - start_time
+        
+        # === 核心修改：新增第四列数据看板，展示闪电极速耗时 ===
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         col_m1.metric(label="📝 解析总字数", value=f"{total_word_count:,}")
         col_m2.metric(label="✂️ 去重词根数", value=f"{unique_word_count:,}")
         col_m3.metric(label="🎯 纳入分级词汇", value=f"{valid_word_count:,}")
+        col_m4.metric(label="⚡ 极速解析耗时", value=f"{process_time:.2f} 秒")
         st.write("") # 留白
         
         if not df.empty:
-            # --- 核心分类器 ---
             def categorize(row):
                 r = row['rank']
                 if r <= current_level: return "known"
@@ -329,11 +331,9 @@ if btn_process and combined_text.strip() and vocab_dict:
             df['final_cat'] = df.apply(categorize, axis=1)
             df = df.sort_values(by='rank')
             
-            # --- Top N 提取 ---
             valid_candidates = df[df['rank'] >= min_rank_threshold].copy()
             top_df = valid_candidates.sort_values(by='rank', ascending=True).head(top_n)
             
-            # --- 渲染输出 Tab 面板 ---
             t_top, t_target, t_beyond, t_known, t_raw = st.tabs([
                 f"🔥 Top {len(top_df)} 核心精选",
                 f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
@@ -342,7 +342,6 @@ if btn_process and combined_text.strip() and vocab_dict:
                 "📝 词形还原全文输出"
             ])
             
-            # 渲染通用函数
             def render_tab(tab_obj, data_df, label, def_mode, expand_default=False):
                 with tab_obj:
                     if not data_df.empty:
@@ -375,13 +374,11 @@ if btn_process and combined_text.strip() and vocab_dict:
                             st.code(p_txt, language='markdown')
                     else: st.info("该区间暂无符合条件的单词")
 
-            # 渲染各板块
             render_tab(t_top, top_df, "核心单义", def_mode="single", expand_default=True) 
             render_tab(t_target, df[df['final_cat']=='target'], "重点", def_mode="single", expand_default=False)
             render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", def_mode="single", expand_default=False)
             render_tab(t_known, df[df['final_cat']=='known'], "熟词拆分", def_mode="split", expand_default=False)
             
-            # 渲染还原原文板块
             with t_raw:
                 st.info("💡 这是自动词形还原（Lemmatized）后的全文输出，可直接复制用于其他 NLP 分析。")
                 st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制全文</p>", unsafe_allow_html=True)
