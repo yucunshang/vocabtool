@@ -364,7 +364,6 @@ def analyze_words(unique_word_list):
 # 7. UI 视图层
 # ==========================================
 st.title("🚀 Vocab Master Pro - Stable Release")
-# --- 新增注记：说明词频基于 COCA 20000 核心词库 ---
 st.markdown("💡 支持粘贴长文或直接上传 `TXT / PDF / DOCX / EPUB` 文件，并**内置免费 AI** 一键生成 Anki 记忆卡片。 *(词频分级数据基于 COCA 20000 权威核心词库)*")
 
 def clear_all_inputs():
@@ -378,7 +377,6 @@ c1, c2, c3, c4, c5 = st.columns(5)
 with c1: current_level = st.number_input("🎯 当前词汇量 (起)", 0, 20000, 9000, 500)     
 with c2: target_level = st.number_input("🎯 目标词汇量 (止)", 0, 20000, 15000, 500)    
 with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 100, 10)                 
-# --- 更新默认阈值：忽略前 6000 词 ---
 with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 6000, 500) 
 with c5: 
     st.write("") 
@@ -386,16 +384,16 @@ with c5:
     show_rank = st.checkbox("🔢 附加显示 Rank", value=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
+# --- UI 调整：文本框与上传文件并排，取消提示语 ---
 col_input1, col_input2 = st.columns([3, 2])
 with col_input1:
     raw_text = st.text_area("📥 粘贴文本 (支持10万字以内)", height=150, key="raw_input_text")
 with col_input2:
-    st.info("💡 **多格式解析**：直接拖入电子书/论文原著 👇")
     uploaded_file = st.file_uploader("📂 上传文档", type=["txt", "pdf", "docx", "epub"], key=f"uploader_{st.session_state.uploader_key}")
 
-col_btn1, col_btn2 = st.columns([5, 1])
-with col_btn1: btn_process = st.button("🚀 极速智能解析", type="primary", use_container_width=True)
-with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_container_width=True)
+# --- UI 调整：清空按钮和开始按钮全宽垂直排列 ---
+st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_container_width=True)
+btn_process = st.button("🚀 极速智能解析", type="primary", use_container_width=True)
 
 st.divider()
 
@@ -452,7 +450,6 @@ if st.session_state.get("is_processed", False):
         df['final_cat'] = df.apply(categorize, axis=1)
         df = df.sort_values(by='rank')
         
-        # --- 更新逻辑：Top N 必须排除未收录词汇 (rank != 99999) ---
         top_df = df[(df['rank'] >= min_rank_threshold) & (df['rank'] < 99999)].sort_values(by='rank', ascending=True).head(top_n)
         
         t_top, t_target, t_beyond, t_known = st.tabs([
@@ -523,7 +520,6 @@ if st.session_state.get("is_processed", False):
                             key=f"prompt_{df_key}_{export_format}"
                         )
                         
-                        # --- 新增：AI 生成内容免责声明 ---
                         st.caption("⚠️ **免责声明**：AI 生成的内容（释义、例句等）可能存在偶发的不准确或幻觉，请结合实际语境使用，建议导入前稍作复核。")
                         
                         if st.button("⚡ 召唤 DeepSeek 极速生成卡片", key=f"btn_{df_key}", type="primary"):
