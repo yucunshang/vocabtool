@@ -177,10 +177,9 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
     }
     
     try:
-        # 加入重试机制，防止并发过高被 DeepSeek 拦截 (HTTP 429)
         for attempt in range(3):
             resp = requests.post(url, json=payload, headers=headers, timeout=90)
-            if resp.status_code == 429: # 触发并发限流
+            if resp.status_code == 429: 
                 time.sleep(2 * (attempt + 1))
                 continue
             if resp.status_code == 402: return "❌ ERROR_402_NO_BALANCE"
@@ -189,7 +188,6 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
             
             result = resp.json()['choices'][0]['message']['content'].strip()
             
-            # 清理代码块包装
             if result.startswith("```"):
                 lines = result.split('\n')
                 if lines[0].startswith("```"): lines = lines[1:]
@@ -202,20 +200,20 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
         return f"\n🚨 批次请求发生异常: {str(e)}"
 
 def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text):
-    """多线程并发控制器 (极速反馈版)"""
+    """多线程并发控制器 (极速反馈 + 跑分解锁版)"""
     try: api_key = st.secrets["DEEPSEEK_API_KEY"]
     except KeyError: return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
     
     if not words: return "⚠️ 错误：没有需要生成的单词。"
     
-    # 【安全防爆门】最大生成上限 200 个词
-    MAX_WORDS = 200 
+    # 🔓 跑分墙解禁：为了测试超越 Gemini，单次上限提升到 300 词！
+    MAX_WORDS = 300 
     if len(words) > MAX_WORDS:
-        st.warning(f"⚠️ 为保证并发稳定且防截断，本次截取前 **{MAX_WORDS}** 个单词。处理完后可调整“忽略前N词”继续生成。")
+        st.warning(f"⚠️ 为保证并发稳定，本次仅截取前 **{MAX_WORDS}** 个单词。")
         words = words[:MAX_WORDS]
 
-    # 🔥 切块优化：每批 20 词，让首批返回时间缩短一半，UI 反馈极速响应
-    CHUNK_SIZE = 20  
+    # 黄金切割：30词一批。250词刚好分9批，5个线程两波即可打完！
+    CHUNK_SIZE = 30  
     chunks = [words[i:i + CHUNK_SIZE] for i in range(0, len(words), CHUNK_SIZE)]
     total_words = len(words)
     processed_count = 0
@@ -224,7 +222,6 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
     
     status_text.markdown("🚀 **并发任务已发射！** 正在全速生成首批卡片（首次返回约需 8~12 秒，请稍候）...")
     
-    # 🔥 并发数提升：最多开启 5 个并发线程
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_to_index = {
             executor.submit(_fetch_deepseek_chunk, chunk, prompt_template, api_key): i 
@@ -411,15 +408,21 @@ if st.session_state.get("is_processed", False):
                             
                             progress_bar = st.progress(0)
                             status_text = st.empty()
-                            # 优化了连接提示，消除了用户的“初始化等待”焦虑
                             status_text.markdown("**⚡ 正在连接 DeepSeek 云端算力集群...**") 
                             
+                            # ⏳ 开始精准计时
+                            ai_start_time = time.time()
+                            
                             ai_result = call_deepseek_api_chunked(custom_prompt, pure_words, progress_bar, status_text)
+                            
+                            # ⏳ 结束精准计时
+                            ai_duration = time.time() - ai_start_time
                             
                             if "❌" in ai_result and len(ai_result) < 100:
                                 st.error(ai_result)
                             else:
-                                status_text.markdown("### 🎉 编纂全部完成！")
+                                # 🏅 终极跑分墙展示
+                                status_text.markdown(f"### 🎉 编纂全部完成！(总耗时: **{ai_duration:.2f}** 秒)")
                                 
                                 mime_type = "text/csv" if export_format == "CSV" else "text/plain"
                                 st.download_button(
