@@ -10,7 +10,6 @@ import requests
 import zipfile
 import concurrent.futures
 
-# 尝试导入多格式文档处理库
 try:
     import PyPDF2
     import docx
@@ -160,12 +159,11 @@ def get_base_prompt_template(export_format="TXT"):
 如果您确认以上指令无误，请发送您的单词列表，我将立即开始。"""
 
 # ==========================================
-# 4. 多核并发 API 引擎 (错峰发车避坑版)
+# 4. 可控多核并发 API 引擎 (极客跑分版)
 # ==========================================
 def _fetch_deepseek_chunk(batch_words, prompt_template, api_key, delay=0):
-    """内部工作线程：加入了 delay 错峰发射，完美避开并发限流"""
     if delay > 0:
-        time.sleep(delay)  # 等待指定秒数后发射，制造时间差
+        time.sleep(delay)
         
     url = "https://api.deepseek.com/chat/completions".strip()
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
@@ -180,11 +178,10 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key, delay=0):
     }
     
     try:
-        for attempt in range(3):
-            resp = requests.post(url, json=payload, headers=headers, timeout=90)
+        for attempt in range(4): # 增加一次重试机会
+            resp = requests.post(url, json=payload, headers=headers, timeout=120) # 放宽单次超时容忍度
             if resp.status_code == 429: 
-                # 如果还是不幸被限频，退避时间加大
-                time.sleep(3 * (attempt + 1))
+                time.sleep(4 * (attempt + 1)) # 被限流就硬等
                 continue
             if resp.status_code == 402: return "❌ ERROR_402_NO_BALANCE"
             elif resp.status_code == 401: return "❌ ERROR_401_INVALID_KEY"
@@ -199,38 +196,31 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key, delay=0):
                 result = '\n'.join(lines).strip()
             return result
             
-        return f"\n🚨 批次超时或被限流，此批次 ({len(batch_words)}词) 生成失败。"
+        return f"\n🚨 批次超时或被严重限流，此批次 ({len(batch_words)}词) 生成失败。"
     except Exception as e:
         return f"\n🚨 批次请求发生异常: {str(e)}"
 
-def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text):
-    """多线程并发控制器"""
+def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text, p_chunk_size, p_max_workers, p_delay):
     try: api_key = st.secrets["DEEPSEEK_API_KEY"]
     except KeyError: return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
-    
     if not words: return "⚠️ 错误：没有需要生成的单词。"
     
-    MAX_WORDS = 300 
+    MAX_WORDS = 500 # 放开手脚，单次最大允许500词
     if len(words) > MAX_WORDS:
-        st.warning(f"⚠️ 为保证并发稳定，本次仅截取前 **{MAX_WORDS}** 个单词。")
+        st.warning(f"⚠️ 为保护您的内存，本次截取前 **{MAX_WORDS}** 个单词。")
         words = words[:MAX_WORDS]
 
-    # 🔥 核心提速优化：大巴车模式（50词一批）+ 控制并发量
-    CHUNK_SIZE = 50  
-    chunks = [words[i:i + CHUNK_SIZE] for i in range(0, len(words), CHUNK_SIZE)]
+    chunks = [words[i:i + p_chunk_size] for i in range(0, len(words), p_chunk_size)]
     total_words = len(words)
     processed_count = 0
-    
     results_ordered = [None] * len(chunks)
     
-    status_text.markdown("🚀 **错峰并发任务已发射！** 正在全速生成卡片（请稍候，避开 API 限流中）...")
+    status_text.markdown(f"🚀 **调优测试启动！** 正在以 `并发 {p_max_workers}` + `每批 {p_chunk_size} 词` 的规格猛烈请求...")
     
-    # max_workers=3 加上错峰 delay，是最完美的防 429 报错策略
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=p_max_workers) as executor:
         future_to_index = {}
         for i, chunk in enumerate(chunks):
-            # 🔥 核心防 429 绝招：错峰发射。每批请求比上一批晚 1.5 秒发出
-            delay = i * 1.5 
+            delay = i * p_delay 
             future = executor.submit(_fetch_deepseek_chunk, chunk, prompt_template, api_key, delay)
             future_to_index[future] = i
         
@@ -243,11 +233,10 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
             if "ERROR_401_INVALID_KEY" in res: return "❌ 错误：API Key 无效。"
             
             results_ordered[idx] = res 
-            
             processed_count += chunk_size
             current_progress = min(processed_count / total_words, 1.0)
             progress_bar.progress(current_progress)
-            status_text.markdown(f"**⚡ AI 错峰波浪式全速编纂中：** `{processed_count} / {total_words}` 词")
+            status_text.markdown(f"**⚡ AI 引擎咆哮中：** `{processed_count} / {total_words}` 词")
 
     return "\n".join(filter(None, results_ordered))
 
@@ -304,7 +293,6 @@ with c5:
     show_rank = st.checkbox("🔢 附加显示 Rank", value=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# --- 双通道多格式输入 ---
 col_input1, col_input2 = st.columns([3, 2])
 with col_input1:
     raw_text = st.text_area("📥 粘贴文本 (支持10万字以内)", height=150, key="raw_input_text")
@@ -318,9 +306,6 @@ with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_
 
 st.divider()
 
-# ==========================================
-# 7. 后台硬核计算
-# ==========================================
 if btn_process:
     with st.spinner("🧠 正在急速读取文件并进行智能解析（长篇巨著请稍候）..."):
         start_time = time.time()
@@ -347,11 +332,7 @@ if btn_process:
             }
             st.session_state.is_processed = True
 
-# ==========================================
-# 8. 动态界面渲染
-# ==========================================
 if st.session_state.get("is_processed", False):
-    
     stats = st.session_state.stats
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
     col_m1.metric(label="📝 解析总字数", value=f"{stats['raw_count']:,}")
@@ -401,22 +382,37 @@ if st.session_state.get("is_processed", False):
                     ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 并发极速直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
                     
                     with ai_tab1:
-                        st.info("💡 站长已为您内置专属 AI 算力。采用 **智能错峰并发技术**，完美绕过 API 拥堵！")
+                        st.info("💡 采用智能多核并发引擎。如果速度不佳，请尝试展开下方极客面板调整并发参数！")
+                        
+                        # --- 核心新增：开放引擎调校台 ---
+                        with st.expander("⚙️ 极客模式：API 性能跑分调校台 (拯救 429 报错)", expanded=False):
+                            st.caption("提示：DeepSeek 对并发非常敏感。如果太慢，说明遭到了 API 限流，请减小并发或增大延迟。")
+                            col_p1, col_p2, col_p3 = st.columns(3)
+                            with col_p1:
+                                p_chunk = st.slider("📦 单批次词数 (Chunk)", 10, 100, 30, help="值越小越防长文截断，但请求总次数越多")
+                            with col_p2:
+                                p_workers = st.slider("🚀 最大并发数 (Workers)", 1, 10, 3, help="并发越高越快，但也越容易触发大面积限流 (变相减速)")
+                            with col_p3:
+                                p_delay = st.slider("⏱️ 错峰延迟 (Delay 秒)", 0.0, 5.0, 1.5, 0.5, help="避开同时请求的波浪式间隔。限流严重时请调大。")
                         
                         custom_prompt = st.text_area(
                             "📝 自定义 AI Prompt (可修改)", 
                             value=get_base_prompt_template(export_format), 
-                            height=500, 
+                            height=350, 
                             key=f"prompt_{df_key}_{export_format}"
                         )
                         
                         if st.button("⚡ 召唤 DeepSeek 极速生成卡片", key=f"btn_{df_key}", type="primary"):
                             progress_bar = st.progress(0)
                             status_text = st.empty()
-                            status_text.markdown("**⚡ 正在智能错峰连接 DeepSeek...**") 
+                            status_text.markdown("**⚡ 正在组装高并发请求阵列...**") 
                             
                             ai_start_time = time.time()
-                            ai_result = call_deepseek_api_chunked(custom_prompt, pure_words, progress_bar, status_text)
+                            # 将用户在滑块里选好的参数，喂给并发引擎
+                            ai_result = call_deepseek_api_chunked(
+                                custom_prompt, pure_words, progress_bar, status_text, 
+                                p_chunk, p_workers, p_delay
+                            )
                             ai_duration = time.time() - ai_start_time
                             
                             if "❌" in ai_result and len(ai_result) < 100:
