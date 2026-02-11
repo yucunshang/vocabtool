@@ -9,13 +9,12 @@ import time
 import requests
 import zipfile
 
-# 尝试导入多格式文档处理库
+# 尝试导入多格式文档处理库 (彻底抛弃 BeautifulSoup，采用提速百倍的正则引擎)
 try:
     import PyPDF2
     import docx
-    from bs4 import BeautifulSoup
 except ImportError:
-    st.error("⚠️ 缺少文件处理依赖。请在终端运行: pip install PyPDF2 python-docx beautifulsoup4")
+    st.error("⚠️ 缺少文件处理依赖。请在终端运行: pip install PyPDF2 python-docx")
 
 # ==========================================
 # 1. 基础配置
@@ -105,7 +104,7 @@ vocab_dict = load_vocab()
 def extract_text_from_file(uploaded_file):
     """支持 txt, pdf, docx, epub 多种格式解析"""
     ext = uploaded_file.name.split('.')[-1].lower()
-    uploaded_file.seek(0) # 确保从头读取，修复读取为空的问题
+    uploaded_file.seek(0)
     try:
         if ext == 'txt':
             return uploaded_file.getvalue().decode("utf-8", errors="ignore")
@@ -119,12 +118,12 @@ def extract_text_from_file(uploaded_file):
             text_blocks = []
             with zipfile.ZipFile(uploaded_file) as z:
                 for filename in z.namelist():
-                    # 提取 EPUB 内的所有网页文本文件
                     if filename.endswith(('.html', '.xhtml', '.htm', '.xml')):
                         try:
-                            content = z.read(filename)
-                            soup = BeautifulSoup(content, 'html.parser')
-                            text_blocks.append(soup.get_text(separator=' ', strip=True))
+                            content = z.read(filename).decode('utf-8', errors='ignore')
+                            # 核心优化：采用正则暴力剥离 HTML 标签，性能碾压 BeautifulSoup
+                            clean_text = re.sub(r'<[^>]+>', ' ', content)
+                            text_blocks.append(clean_text)
                         except: pass
             return " ".join(text_blocks)
     except Exception as e:
@@ -133,7 +132,7 @@ def extract_text_from_file(uploaded_file):
     return ""
 
 def call_deepseek_api(prompt_template, words):
-    """从 Streamlit Server 安全调用 API，彻底隔离前端"""
+    """从 Streamlit Server 安全调用 API"""
     try:
         api_key = st.secrets["DEEPSEEK_API_KEY"]
     except KeyError:
@@ -159,7 +158,7 @@ def call_deepseek_api(prompt_template, words):
         return f"🚨 API 调用失败: {str(e)}"
 
 # ==========================================
-# 4. 分析引擎 (纯净版，无大纲映射)
+# 4. 分析引擎
 # ==========================================
 def analyze_words(unique_word_list):
     unique_items = [] 
@@ -211,7 +210,6 @@ with c5:
     show_rank = st.checkbox("🔢 附加显示 Rank", value=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-# 增加明确的考试大纲词汇量注释
 st.markdown("<p class='exam-note'>💡 <b>词汇量参考：</b>中考 ≈ 3500 &nbsp;|&nbsp; 高考 ≈ 5500 &nbsp;|&nbsp; 四级(CET4) ≈ 7500 &nbsp;|&nbsp; 六级(CET6) ≈ 9500 &nbsp;|&nbsp; 考研/雅思 ≈ 12000 &nbsp;|&nbsp; 托福/GRE ≈ 15000+</p>", unsafe_allow_html=True)
 
 # --- 双通道多格式输入 ---
@@ -229,16 +227,17 @@ with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_
 st.divider()
 
 if btn_process:
-    combined_text = raw_text
-    if uploaded_file is not None:
-        combined_text += "\n" + extract_text_from_file(uploaded_file)
-        
-    if not combined_text.strip():
-        st.warning("⚠️ 未提取到任何有效文本！如果你上传了 EPUB/PDF，可能它是纯图片扫描版，或者文件为空。")
-    elif vocab_dict:
+    # 核心修复：把文件提取和耗时的工作，全部放到 spinner 转圈动画内部！
+    with st.spinner("🧠 正在急速读取文件并进行智能解析（长篇巨著请稍候）..."):
         start_time = time.time()
         
-        with st.spinner("🧠 正在提取、去重、并进行全量词频匹配..."):
+        combined_text = raw_text
+        if uploaded_file is not None:
+            combined_text += "\n" + extract_text_from_file(uploaded_file)
+            
+        if not combined_text.strip():
+            st.warning("⚠️ 未提取到任何有效文本！如果你上传了 EPUB/PDF，可能它是纯图片扫描版，或者文件为空。")
+        elif vocab_dict:
             raw_words = re.findall(r"[a-zA-Z']+", combined_text)
             lemmatized_words = [get_lemma(w) for w in raw_words]
             full_lemmatized_text = " ".join(lemmatized_words)
@@ -271,7 +270,6 @@ if btn_process:
                     "📝 原文防卡死下载"
                 ])
                 
-                # --- AI 动态 Prompt 定义 ---
                 default_prompt = """请扮演一位专业的 Anki 制卡专家。请严格为以下单词生成 CSV 导入格式。
 核心原则：
 1. 极简速记：仅提供1个最核心、最符合现代语境的释义。
@@ -295,9 +293,6 @@ if btn_process:
                                 st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制单词</p>", unsafe_allow_html=True)
                                 st.code("\n".join(display_lines), language='text')
                             
-                            # ==========================================
-                            # 🤖 原生内置 DeepSeek AI 引擎 (对用户完全无感)
-                            # ==========================================
                             st.markdown(f"#### 🤖 AI 一键制卡引擎 ({label})")
                             st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可直接生成记忆卡片！")
                             
@@ -305,18 +300,10 @@ if btn_process:
                             
                             if st.button("⚡ 召唤 DeepSeek 立即生成 CSV", key=f"btn_{df_key}", type="primary"):
                                 with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
-                                    # 服务器后端调用，前端绝对安全
                                     ai_result = call_deepseek_api(custom_prompt, pure_words)
-                                    
                                     st.success("🎉 生成完成！")
                                     st.code(ai_result, language="markdown")
-                                    
-                                    st.download_button(
-                                        label="📥 直接下载生成的 Anki 卡片 (.csv)",
-                                        data=ai_result,
-                                        file_name=f"anki_cards_{label}.csv",
-                                        mime="text/csv"
-                                    )
+                                    st.download_button(label="📥 直接下载生成的 Anki 卡片 (.csv)", data=ai_result, file_name=f"anki_cards_{label}.csv", mime="text/csv")
                         else: st.info("该区间暂无单词")
 
                 render_tab(t_top, top_df, "Top精选", expand_default=True, df_key="top") 
