@@ -133,7 +133,7 @@ def get_base_prompt_template(export_format="TXT"):
     return f"""这是为您整理的最新、最完整的 Anki 制卡核心指令标准。我将严格遵守此准则为您处理所有单词列表：
 
 1. 核心原则：原子性 (Atomicity)
-含义拆分：若一个单词有多个不同含义（名词 vs 动词，字面义 vs 引申义），必须拆分为多条独立数据。
+含义拆分：若一个单词有多个常用含义（名词 vs 动词，字面义 vs 引申义等），必须拆分为多条独立数据。
 严禁堆砌：每张卡片只承载一个特定语境下的含义，不准将多个释义挤在一起。
 2. 卡片正面 (Column 1: Front)
 内容：提供自然的短语或搭配 (Phrase/Collocation)，而非单个孤立单词。
@@ -145,7 +145,7 @@ def get_base_prompt_template(export_format="TXT"):
 例句：使用 <em> 标签包裹，使例句呈现斜体。
 【词根词缀】：用中文进行词源、前缀、词根或后缀的拆解与记忆辅助。
 换行要求：三部分之间使用 <br><br> 分隔，确保界面清晰。
-结构示例：英文释义<br><br><em>斜体例句</em><br><br>【词根词缀】中文解析
+结构示例：英文释义<br><br><em>斜体例句</em><br><br>【词根\词源、词缀】中文解析
 4. 输出格式标准 ({export_format} 格式)
 文件规范：纯文本代码块。
 分隔符：使用逗号 (Comma) 分隔字段。
@@ -155,7 +155,7 @@ def get_base_prompt_template(export_format="TXT"):
 缩写展开：对缩写（如 WFH, aka）在背面提供全称及解释。
 💡 最终输出示例（{export_format} 内容）：
 "run a business","to manage or operate a company<br><br><em>He quit his job to run a business selling handmade crafts.</em><br><br>【词源】源自古英语 rinnan（跑/流动），引申为“使机器运转”或“使业务流转”"
-"go for a run","an act of running for exercise<br><br><em>I go for a run every morning before work.</em><br><br>【词源】同上，此处为名词用法，指“奔跑”这一动作"
+"go for a run","an act of running for exercise<br><br><em>I go for a run every morning before work.</em><br><br>【词源】源自古英语 rinnan（跑/流动），此处为名词用法，指“奔跑”这一动作"
 导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。
 如果您确认以上指令无误，请发送您的单词列表，我将立即开始。"""
 
@@ -207,7 +207,7 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
     if not words: return "⚠️ 错误：没有需要生成的单词。"
     
     # 🔓 跑分墙解禁：为了测试超越 Gemini，单次上限提升到 300 词！
-    MAX_WORDS = 300 
+    MAX_WORDS = 250
     if len(words) > MAX_WORDS:
         st.warning(f"⚠️ 为保证并发稳定，本次仅截取前 **{MAX_WORDS}** 个单词。")
         words = words[:MAX_WORDS]
