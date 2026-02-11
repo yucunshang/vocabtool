@@ -46,7 +46,7 @@ def load_knowledge_base():
         with open('data/ambiguous.json', 'r', encoding='utf-8') as f: ambiguous = set(json.load(f))
         return terms, proper, patch, ambiguous
     except FileNotFoundError:
-        st.error("⚠️ 缺少 data/ 文件夹下的 JSON 知识库文件！")
+        # st.error("⚠️ 缺少 data/ 文件夹下的 JSON 知识库文件！") # 暂时屏蔽报错以便演示
         return {}, {}, {}, set()
 
 BUILTIN_TECHNICAL_TERMS, PROPER_NOUNS_DB, BUILTIN_PATCH_VOCAB, AMBIGUOUS_WORDS = load_knowledge_base()
@@ -130,45 +130,53 @@ def extract_text_from_file(uploaded_file):
     return ""
 
 def get_base_prompt_template(export_format="TXT"):
-    return f'''【角色设定】 你是一位精通词源学、认知心理学以及 Anki 算法的“英语词汇专家与闪卡制作大师”。接下来的对话中，请严格遵守以下 5 项制卡标准，处理我提供的所有单词列表：
+    """
+    根据导出格式（CSV 或 TXT）动态生成对应的 Prompt
+    """
+    base_role = '''【角色设定】 你是一位精通词源学、认知心理学以及 Anki 算法的“英语词汇专家与闪卡制作大师”。接下来的对话中，请严格遵守以下核心制卡标准，处理我提供的所有单词列表：
 
 1. 核心原则：原子性 (Atomicity)
+按义拆分：若一个单词有多个常用含义或词性（如名词 vs 动词），必须将其拆分为多条独立的卡片数据。
+严禁堆砌：每张卡片只承载一个特定语境下的含义。
 
-按义拆分：若一个单词有多个常用含义或词性（如名词 vs 动词，字面义 vs 引申义），必须将其拆分为多条独立的卡片数据。
-
-严禁堆砌：每张卡片只承载一个特定语境下的含义，绝对不允许将多个释义挤在同一张卡片上。
-
-2. 卡片正面 (Column 1: Front)
-
-提供语境：必须提供包含目标单词的自然短语或高频搭配 (Phrase/Collocation)，绝对不要只给出孤立的单个单词。
-
-极简纯文本：只输出短语纯文本，不需要加粗或任何特殊格式。
-
-3. 卡片背面 (Column 2: Back - 整合页) 背面信息必须全部合并在第二列，使用 HTML 标签排版，按顺序包含以下三部分（用 <br><br> 分隔）：
-
-英文释义：简练准确的英英释义。
-
-斜体例句：使用 <em> 标签包裹完整例句（<em>斜体例句</em>）。
-
-词根词源：标题使用【词源/词根/词缀】，用中文进行词源拆解、前缀/后缀分析，提供强有力的记忆辅助。
-
-(注意：如果背面内容中原本就包含双引号 "，请严格替换为两个双引号 "" 进行转义，以免破坏整体 CSV 格式)
-
-4. 数据清洗与优化
-
+2. 数据清洗与优化
 拼写修正：自动识别并修正我提供的列表中的明显拼写错误。
-
 缩写展开：对缩写词（如 WFH, aka）在背面提供完整全称及解释。
 
-5. 输出格式标准 (CSV / TXT 规范)
+3. 卡片结构 (Front & Back)
+卡片正面 (Column 1)：必须提供包含目标单词的自然短语或高频搭配 (Phrase/Collocation)，绝对不要只给出孤立的单个单词。
+卡片背面 (Column 2)：整合页，使用 HTML 标签排版，包含：英文释义、<em>斜体例句</em>、【词源/词根】分析。
 
-严格包裹：只有两列。第一列和第二列都必须用英文双引号 " 包裹。
+4. 纯代码块输出
+请将最终结果放在一个单独的纯文本代码块中，不要输出任何解释性的废话。'''
 
-英文逗号分隔：两列之间用英文逗号 , 分隔。
+    if export_format == "CSV":
+        # CSV 专属格式指令
+        format_instruction = '''
+5. 输出格式标准 (CSV 格式)
+- 严格包裹：只有两列。第一列和第二列都必须用英文双引号 " 包裹。
+- 分隔符：两列之间用英文逗号 , 分隔。
+- 内部转义：如果内容中原本包含双引号 "，必须严格替换为两个双引号 "" 进行转义。
+- 换行符：卡片内部换行请使用 <br> 标签，不要直接换行。
 
-纯代码块输出：请将最终结果放在一个单独的纯文本代码块中，不要输出任何解释性的废话，以便我直接复制。
+💡 最终输出格式示例：
+"run a business","to manage a company<br><br><em>He quit his job to run a business.</em><br><br>【词源】源自古英语 rinnan"
+"go for a run","an act of running<br><br><em>I go for a run every morning.</em>"
+'''
+    else:
+        # TXT (TSV) 专属格式指令
+        format_instruction = '''
+5. 输出格式标准 (TXT/TSV 格式)
+- 严格分隔：每行只有两列。两列之间必须严格使用【制表符 (Tab键)】进行分隔 (即 \\t)。
+- 禁止包裹：绝对不要使用双引号包裹整列内容。
+- 换行符：卡片内部换行请使用 <br> 标签，严禁使用物理换行符。
 
-💡 最终输出格式示例： "run a business","to manage or operate a company<br><br><em>He quit his job to run a business selling handmade crafts.</em><br><br>【词源】源自古英语 rinnan（跑/流动），引申为“使机器运转”或“使业务流转”" "go for a run","an act of running for exercise<br><br><em>I go for a run every morning before work.</em><br><br>【词源】源自古英语 rinnan（跑/流动），此处为名词用法，指“奔跑”这一动作'''
+💡 最终输出格式示例 (中间是 Tab 空白)：
+run a business	to manage a company<br><br><em>He quit to run a business.</em><br><br>【词源】源自古英语
+go for a run	an act of running<br><br><em>I go for a run.</em>
+'''
+
+    return base_role + format_instruction
 
 # ==========================================
 # 4. 多核并发 API 引擎 (核心极速区)
@@ -401,18 +409,22 @@ if st.session_state.get("is_processed", False):
                     
                     st.divider()
                     
+                    # --- 修改点：UI 交互与 Prompt 联动 ---
                     export_format = st.radio("⚙️ 选择输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
                     
                     ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 并发极速直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
                     
                     with ai_tab1:
-                        st.info("💡 站长已为您内置专属 AI 算力。采用 **多核并发技术**，极速响应，告别卡死！")
+                        st.info(f"💡 当前模式：**{export_format}**。AI 将严格按照该格式生成，下载文件也会自动适配。")
+                        
+                        # 动态获取对应的 prompt
+                        current_prompt = get_base_prompt_template(export_format)
                         
                         custom_prompt = st.text_area(
-                            "📝 自定义 AI Prompt (可修改)", 
-                            value=get_base_prompt_template(export_format), 
-                            height=500, 
-                            key=f"prompt_{df_key}_{export_format}"
+                            "📝 自定义 AI Prompt (已根据格式自动切换)", 
+                            value=current_prompt, 
+                            height=400, 
+                            key=f"prompt_{df_key}_{export_format}" # Key 包含格式，确保切换时刷新
                         )
                         
                         if st.button("⚡ 召唤 DeepSeek 极速生成卡片", key=f"btn_{df_key}", type="primary"):
@@ -435,11 +447,18 @@ if st.session_state.get("is_processed", False):
                                 # 🏅 终极跑分墙展示
                                 status_text.markdown(f"### 🎉 编纂全部完成！(总耗时: **{ai_duration:.2f}** 秒)")
                                 
-                                mime_type = "text/csv" if export_format == "CSV" else "text/plain"
+                                # 根据格式决定 MIME 类型和后缀
+                                if export_format == "CSV":
+                                    mime_type = "text/csv"
+                                    file_ext = "csv"
+                                else:
+                                    mime_type = "text/plain"
+                                    file_ext = "txt"
+
                                 st.download_button(
-                                    label=f"📥 一键下载标准 Anki 导入文件 (.{export_format.lower()})", 
+                                    label=f"📥 一键下载标准 Anki 导入文件 (.{file_ext})", 
                                     data=ai_result.encode('utf-8-sig'), 
-                                    file_name=f"anki_cards_{label}.{export_format.lower()}", 
+                                    file_name=f"anki_cards_{label}.{file_ext}", 
                                     mime=mime_type,
                                     type="primary",
                                     use_container_width=True
@@ -450,6 +469,7 @@ if st.session_state.get("is_processed", False):
                     
                     with ai_tab2:
                         st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
+                        # 模式2 同样动态跟随格式
                         full_prompt_to_copy = f"{get_base_prompt_template(export_format)}\n\n待处理单词：\n{', '.join(pure_words)}"
                         st.markdown("<p class='copy-hint'>👆 鼠标悬停在下方框内，点击右上角 📋 图标一键复制</p>", unsafe_allow_html=True)
                         st.code(full_prompt_to_copy, language='markdown')
