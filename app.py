@@ -158,45 +158,73 @@ def get_base_prompt_template(export_format="TXT"):
 导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。
 如果您确认以上指令无误，请发送您的单词列表，我将立即开始。"""
 
-def call_deepseek_api(prompt_template, words):
+# --- 核心大改：支持分块生成与进度反馈的 API 引擎 ---
+def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text):
     try: api_key = st.secrets["DEEPSEEK_API_KEY"]
     except KeyError: return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
+    
     if not words: return "⚠️ 错误：没有需要生成的单词。"
+    
+    # 【安全防爆门】设置单次最大生成上限为 150 个词
+    MAX_WORDS = 150
+    if len(words) > MAX_WORDS:
+        st.warning(f"⚠️ 为保证数据完整且不被强行截断，本次仅截取前 **{MAX_WORDS}** 个单词。处理完后您可增加“忽略前N词”来生成后续单词。")
+        words = words[:MAX_WORDS]
+
+    CHUNK_SIZE = 40  # 黄金分块尺寸：每 40 个词请求一次，绝不触发截断
+    all_results = []
+    total_words = len(words)
+    processed_count = 0
     
     url = "https://api.deepseek.com/chat/completions".strip()
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-    
-    # 核心拦截：强行阻止 AI 的废话，确保输出纯数据，并且不改变界面上用户看到的 Prompt
     system_enforcement = "\n\n【系统绝对强制指令】现在我已经发送了单词列表，请立即且直接输出最终的数据代码，绝对不准回复“好的”、“没问题”等任何客套话，绝对不准使用 ```csv 等 Markdown 语法包裹代码！"
-    full_prompt = f"{prompt_template}{system_enforcement}\n\n待处理单词列表：\n{', '.join(words)}"
     
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": full_prompt}],
-        "temperature": 0.3
-    }
-    
-    try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=60)
-        if resp.status_code == 402: return "❌ 错误：DeepSeek 账户余额不足，请充值。"
-        elif resp.status_code == 401: return "❌ 错误：API Key 无效。"
-        resp.raise_for_status()
+    # 开始切分循环请求
+    for i in range(0, total_words, CHUNK_SIZE):
+        batch_words = words[i:i+CHUNK_SIZE]
+        full_prompt = f"{prompt_template}{system_enforcement}\n\n待处理单词列表：\n{', '.join(batch_words)}"
         
-        result = resp.json()['choices'][0]['message']['content']
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": full_prompt}],
+            "temperature": 0.3,
+            "max_tokens": 4096 # 保证单批次额度绝对充足
+        }
         
-        # 二次保险清理
-        result = result.strip()
-        if result.startswith("```"):
-            lines = result.split('\n')
-            if lines[0].startswith("```"): lines = lines[1:]
-            if lines and lines[-1].startswith("```"): lines = lines[:-1]
-            result = '\n'.join(lines).strip()
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=90)
+            if resp.status_code == 402: return "❌ 错误：DeepSeek 账户余额不足，请充值。"
+            elif resp.status_code == 401: return "❌ 错误：API Key 无效。"
+            elif resp.status_code == 429: # 遇到限频，等2秒再试
+                time.sleep(2)
+                resp = requests.post(url, json=payload, headers=headers, timeout=90)
+            resp.raise_for_status()
             
-        return result
-    except requests.exceptions.Timeout:
-        return "⏳ 请求超时：请稍后重试。"
-    except Exception as e:
-        return f"🚨 API 调用失败: {str(e)}"
+            result = resp.json()['choices'][0]['message']['content']
+            
+            # 清理代码块包装
+            result = result.strip()
+            if result.startswith("```"):
+                lines = result.split('\n')
+                if lines[0].startswith("```"): lines = lines[1:]
+                if lines and lines[-1].startswith("```"): lines = lines[:-1]
+                result = '\n'.join(lines).strip()
+                
+            all_results.append(result)
+            processed_count += len(batch_words)
+            
+            # 实时更新 UI 动画进度条
+            current_progress = min(processed_count / total_words, 1.0)
+            progress_bar.progress(current_progress)
+            status_text.markdown(f"**🧠 AI 编纂进度：** `{processed_count} / {total_words}` 词")
+            
+        except Exception as e:
+            error_msg = f"\n\n🚨 在处理第 {processed_count} 个单词时发生网络波动错误。以上为您成功保留的数据片段。"
+            all_results.append(error_msg)
+            break
+
+    return "\n".join(all_results)
 
 # ==========================================
 # 4. 分析引擎
@@ -343,15 +371,12 @@ if st.session_state.get("is_processed", False):
                     
                     st.divider()
                     
-                    # === 格式切换区（点击后立刻刷新下面的文本框） ===
                     export_format = st.radio("⚙️ 选择输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
                     
                     ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 一键直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
                     
                     with ai_tab1:
                         st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可一键编纂制卡数据！")
-                        
-                        # 终极修复：加入 format 到 key，确保格式变化时文本框立刻更新
                         custom_prompt = st.text_area(
                             "📝 自定义 AI Prompt (可修改)", 
                             value=get_base_prompt_template(export_format), 
@@ -360,26 +385,30 @@ if st.session_state.get("is_processed", False):
                         )
                         
                         if st.button("⚡ 召唤 DeepSeek 立即生成卡片", key=f"btn_{df_key}", type="primary"):
-                            with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
-                                ai_result = call_deepseek_api(custom_prompt, pure_words)
+                            # 创建进度条组件占位符
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            status_text.markdown("**🧠 正在初始化通讯节点...**")
+                            
+                            ai_result = call_deepseek_api_chunked(custom_prompt, pure_words, progress_bar, status_text)
+                            
+                            if "❌" in ai_result and len(ai_result) < 100:
+                                st.error(ai_result)
+                            else:
+                                status_text.markdown("### 🎉 编纂全部完成！")
                                 
-                                if "❌" in ai_result or "🚨" in ai_result or "⏳" in ai_result:
-                                    st.error(ai_result)
-                                else:
-                                    st.success("🎉 生成完成！请务必通过下方按钮下载，直接导入 Anki。")
-                                    
-                                    mime_type = "text/csv" if export_format == "CSV" else "text/plain"
-                                    st.download_button(
-                                        label=f"📥 一键下载标准 Anki 导入文件 (.{export_format.lower()})", 
-                                        data=ai_result.encode('utf-8-sig'), 
-                                        file_name=f"anki_cards_{label}.{export_format.lower()}", 
-                                        mime=mime_type,
-                                        type="primary",
-                                        use_container_width=True
-                                    )
-                                    
-                                    st.markdown("##### 📝 预览框 (仅供查看，请勿从此处复制粘贴)")
-                                    st.code(ai_result, language="text")
+                                mime_type = "text/csv" if export_format == "CSV" else "text/plain"
+                                st.download_button(
+                                    label=f"📥 一键下载标准 Anki 导入文件 (.{export_format.lower()})", 
+                                    data=ai_result.encode('utf-8-sig'), 
+                                    file_name=f"anki_cards_{label}.{export_format.lower()}", 
+                                    mime=mime_type,
+                                    type="primary",
+                                    use_container_width=True
+                                )
+                                
+                                st.markdown("##### 📝 预览框 (仅供查看，请勿从此处复制粘贴)")
+                                st.code(ai_result, language="text")
                     
                     with ai_tab2:
                         st.info("💡 如果您想使用 ChatGPT/Claude 等自己的 AI 工具，请点击右上角一键复制下方完整指令：")
