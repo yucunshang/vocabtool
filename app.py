@@ -27,6 +27,15 @@ st.markdown("""
         font-size: 28px !important;
         color: var(--primary-color) !important;
     }
+    
+    /* 参数面板底色框 */
+    .param-box {
+        background-color: var(--secondary-background-color);
+        padding: 15px 20px 5px 20px;
+        border-radius: 10px;
+        border: 1px solid var(--border-color-light);
+        margin-bottom: 20px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -223,17 +232,18 @@ def analyze_words(unique_word_list):
 st.title("🚀 Vocab Master Pro - 全能长文解析引擎")
 st.markdown("💡 **一站式工作流**：支持粘贴整本书、长篇外刊或论文（**数十万字超长文本输入**）。系统会自动进行【词形还原】、【全量分级】并提取【Top N 精选】，极速生成双端输出。")
 
-# --- 参数配置区 (新增折叠栏) ---
-with st.expander("⚙️ 难度与筛选参数设置 (点击展开/折叠)", expanded=False):
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1: current_level = st.number_input("🎯 当前水平 (起)", 0, 30000, 9000, 500, help="低于此词频的视为已掌握")
-    with c2: target_level = st.number_input("🎯 目标水平 (止)", 0, 30000, 15000, 500, help="高于此词频的视为超纲")
-    with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10, help="从剩余生词中挑选的最核心数量")
-    with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3000, 500, help="精选时忽略太简单的基础词")
-    with c5: 
-        st.write("") 
-        st.write("") 
-        show_rank = st.checkbox("🔢 附加显示 Rank", value=False)
+# --- 参数配置区 (直观展示，不折叠) ---
+st.markdown("<div class='param-box'>", unsafe_allow_html=True)
+c1, c2, c3, c4, c5 = st.columns(5)
+with c1: current_level = st.number_input("🎯 当前水平 (起)", 0, 30000, 9000, 500, help="低于此词频的视为已掌握")
+with c2: target_level = st.number_input("🎯 目标水平 (止)", 0, 30000, 15000, 500, help="高于此词频的视为超纲")
+with c3: top_n = st.number_input("🔥 精选 Top N", 10, 500, 50, 10, help="从剩余生词中挑选的最核心数量")
+with c4: min_rank_threshold = st.number_input("📉 忽略前 N 词", 0, 20000, 3000, 500, help="精选时忽略太简单的基础词")
+with c5: 
+    st.write("") 
+    st.write("") 
+    show_rank = st.checkbox("🔢 附加显示 Rank", value=False)
+st.markdown("</div>", unsafe_allow_html=True)
 
 # --- 超长文本输入区 ---
 raw_text = st.text_area("📥 在此粘贴你的超长英文原文...", height=250, placeholder="Once upon a time, there was a...")
@@ -261,7 +271,7 @@ if btn_process and raw_text and vocab_dict:
         df = analyze_words(unique_lemmas)
         valid_word_count = len(df)
         
-        # === 新增：全景字数统计看板 ===
+        # === 全景字数统计看板 ===
         col_m1, col_m2, col_m3 = st.columns(3)
         col_m1.metric(label="📝 原文总字数", value=f"{total_word_count:,}")
         col_m2.metric(label="✂️ 去重词根数", value=f"{unique_word_count:,}")
@@ -292,8 +302,8 @@ if btn_process and raw_text and vocab_dict:
                 "📝 词形还原全文输出"
             ])
             
-            # 渲染通用函数
-            def render_tab(tab_obj, data_df, label, def_mode, is_expander=False):
+            # 渲染通用函数 (所有列表全部应用折叠栏)
+            def render_tab(tab_obj, data_df, label, def_mode, expand_default=False):
                 with tab_obj:
                     if not data_df.empty:
                         pure_words = data_df['word'].tolist()
@@ -306,10 +316,8 @@ if btn_process and raw_text and vocab_dict:
                             else:
                                 display_lines.append(row['word'])
                         
-                        if is_expander:
-                            with st.expander("👁️ 查看完整列表", expanded=False):
-                                st.code("\n".join(display_lines), language='text')
-                        else:
+                        # 统一加折叠栏
+                        with st.expander("👁️ 查看完整单词列表", expanded=expand_default):
                             st.code("\n".join(display_lines), language='text')
                         
                         st.markdown(f"**🤖 AI 指令 ({label})**")
@@ -323,11 +331,12 @@ if btn_process and raw_text and vocab_dict:
                         with t_txt: st.code(p_txt, language='markdown')
                     else: st.info("该区间暂无符合条件的单词")
 
-            # 渲染各板块 (重点、超纲、已掌握均使用折叠栏，Top N 不折叠)
-            render_tab(t_top, top_df, "核心单义", def_mode="single", is_expander=False) 
-            render_tab(t_target, df[df['final_cat']=='target'], "重点", def_mode="single", is_expander=True)
-            render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", def_mode="single", is_expander=True)
-            render_tab(t_known, df[df['final_cat']=='known'], "熟词拆分", def_mode="split", is_expander=True)
+            # 渲染各板块
+            # 🔥 Top N 默认展开折叠栏，方便第一眼看到；其他默认收起
+            render_tab(t_top, top_df, "核心单义", def_mode="single", expand_default=True) 
+            render_tab(t_target, df[df['final_cat']=='target'], "重点", def_mode="single", expand_default=False)
+            render_tab(t_beyond, df[df['final_cat']=='beyond'], "超纲", def_mode="single", expand_default=False)
+            render_tab(t_known, df[df['final_cat']=='known'], "熟词拆分", def_mode="split", expand_default=False)
             
             # 渲染还原原文板块
             with t_raw:
