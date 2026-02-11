@@ -130,7 +130,7 @@ def extract_text_from_file(uploaded_file):
     return ""
 
 def get_base_prompt_template(export_format="TXT"):
-    return f"""这是为您整理的最新、最完整的 Anki 制卡核心指令标准。我将严格遵守此准则为您处理所有单词列表：
+    return f"""【角色设定】 你是一位精通词源学、认知心理学以及 Anki 算法的“英语词汇专家与闪卡制作大师”。接下来的对话中，请严格遵守以下 5 项制卡标准，处理我提供的所有单词列表：：
 
 1. 核心原则：原子性 (Atomicity)
 含义拆分：若一个单词有多个常用含义（名词 vs 动词，字面义 vs 引申义等），必须拆分为多条独立数据。
@@ -156,8 +156,7 @@ def get_base_prompt_template(export_format="TXT"):
 💡 最终输出示例（{export_format} 内容）：
 "run a business","to manage or operate a company<br><br><em>He quit his job to run a business selling handmade crafts.</em><br><br>【词源】源自古英语 rinnan（跑/流动），引申为“使机器运转”或“使业务流转”"
 "go for a run","an act of running for exercise<br><br><em>I go for a run every morning before work.</em><br><br>【词源】源自古英语 rinnan（跑/流动），此处为名词用法，指“奔跑”这一动作"
-导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。
-如果您确认以上指令无误，请发送您的单词列表，我将立即开始。"""
+导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。"""
 
 # ==========================================
 # 4. 多核并发 API 引擎 (核心极速区)
