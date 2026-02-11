@@ -129,7 +129,6 @@ def extract_text_from_file(uploaded_file):
     return ""
 
 def get_base_prompt_template(export_format="TXT"):
-    """一字不差地还原用户指定的制卡核心指令标准"""
     return f"""这是为您整理的最新、最完整的 Anki 制卡核心指令标准。我将严格遵守此准则为您处理所有单词列表：
 
 1. 核心原则：原子性 (Atomicity)
@@ -166,7 +165,10 @@ def call_deepseek_api(prompt_template, words):
     
     url = "https://api.deepseek.com/chat/completions".strip()
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-    full_prompt = f"{prompt_template}\n\n待处理单词：\n{', '.join(words)}"
+    
+    # 核心拦截：强行阻止 AI 的废话，确保输出纯数据，并且不改变界面上用户看到的 Prompt
+    system_enforcement = "\n\n【系统绝对强制指令】现在我已经发送了单词列表，请立即且直接输出最终的数据代码，绝对不准回复“好的”、“没问题”等任何客套话，绝对不准使用 ```csv 等 Markdown 语法包裹代码！"
+    full_prompt = f"{prompt_template}{system_enforcement}\n\n待处理单词列表：\n{', '.join(words)}"
     
     payload = {
         "model": "deepseek-chat",
@@ -176,15 +178,13 @@ def call_deepseek_api(prompt_template, words):
     
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=60)
-        
         if resp.status_code == 402: return "❌ 错误：DeepSeek 账户余额不足，请充值。"
         elif resp.status_code == 401: return "❌ 错误：API Key 无效。"
-        
         resp.raise_for_status()
         
         result = resp.json()['choices'][0]['message']['content']
         
-        # 终极数据清洗：暴力剥离 AI 残留的 Markdown 标记，不影响用户纯净的 Prompt
+        # 二次保险清理
         result = result.strip()
         if result.startswith("```"):
             lines = result.split('\n')
@@ -343,14 +343,21 @@ if st.session_state.get("is_processed", False):
                     
                     st.divider()
                     
+                    # === 格式切换区（点击后立刻刷新下面的文本框） ===
                     export_format = st.radio("⚙️ 选择输出格式:", ["TXT", "CSV"], horizontal=True, key=f"fmt_{df_key}")
                     
                     ai_tab1, ai_tab2 = st.tabs(["🤖 模式 1：内置 AI 一键直出", "📋 模式 2：复制 Prompt 给第三方 AI"])
                     
                     with ai_tab1:
                         st.info("💡 站长已为您内置专属 AI 算力，点击下方按钮即可一键编纂制卡数据！")
-                        # 高度调大，适配你原版一字不差的详细指令
-                        custom_prompt = st.text_area("📝 自定义 AI Prompt (可修改)", value=get_base_prompt_template(export_format), height=500, key=f"prompt_{df_key}")
+                        
+                        # 终极修复：加入 format 到 key，确保格式变化时文本框立刻更新
+                        custom_prompt = st.text_area(
+                            "📝 自定义 AI Prompt (可修改)", 
+                            value=get_base_prompt_template(export_format), 
+                            height=500, 
+                            key=f"prompt_{df_key}_{export_format}"
+                        )
                         
                         if st.button("⚡ 召唤 DeepSeek 立即生成卡片", key=f"btn_{df_key}", type="primary"):
                             with st.spinner("AI 正在云端光速编纂卡片，请稍候..."):
