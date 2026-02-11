@@ -8,14 +8,23 @@ import json
 import time
 import requests
 import zipfile
-import concurrent.futures  # 多核并发引擎
+import concurrent.futures
 
-# 尝试导入多格式文档处理库
+# ==========================================
+# 0. 依赖降级处理 (体验升级)
+# ==========================================
+HAS_PYPDF2 = False
+HAS_DOCX = False
 try:
     import PyPDF2
-    import docx
+    HAS_PYPDF2 = True
 except ImportError:
-    st.error("⚠️ 缺少文件处理依赖。请在终端运行: pip install PyPDF2 python-docx")
+    pass
+try:
+    import docx
+    HAS_DOCX = True
+except ImportError:
+    pass
 
 # ==========================================
 # 1. 基础配置
@@ -34,15 +43,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+if not (HAS_PYPDF2 and HAS_DOCX):
+    st.warning("⚠️ 部分文件处理依赖未安装，暂不支持解析 PDF 和 DOCX。如需完整体验，请在终端运行: `pip install PyPDF2 python-docx`")
+
 # ==========================================
 # 2. 数据与 NLP 初始化
 # ==========================================
 @st.cache_data
 def load_knowledge_base():
     try:
-        # 确保 data 目录存在，如果不存在则提示
         if not os.path.exists('data'):
-            # 这里可以做容错，如果没有文件返回空字典，防止报错崩溃
             return {}, {}, {}, set()
             
         with open('data/terms.json', 'r', encoding='utf-8') as f: terms = {k.lower(): v for k, v in json.load(f).items()}
@@ -51,7 +61,6 @@ def load_knowledge_base():
         with open('data/ambiguous.json', 'r', encoding='utf-8') as f: ambiguous = set(json.load(f))
         return terms, proper, patch, ambiguous
     except Exception as e:
-        # 生产环境静默失败或仅打印日志，避免弹窗吓到用户
         print(f"Knowledge base load error: {e}")
         return {}, {}, {}, set()
 
@@ -93,7 +102,6 @@ def load_vocab():
         except: pass
     
     for word, rank in BUILTIN_PATCH_VOCAB.items(): vocab[word] = rank
-    # 常用词强制覆盖 rank
     URGENT_OVERRIDES = {
         "china": 400, "turkey": 1500, "march": 500, "may": 100, "august": 1500, "polish": 2500,
         "monday": 300, "tuesday": 300, "wednesday": 300, "thursday": 300, "friday": 300, "saturday": 300, "sunday": 300,
@@ -115,9 +123,11 @@ def extract_text_from_file(uploaded_file):
         if ext == 'txt':
             return uploaded_file.getvalue().decode("utf-8", errors="ignore")
         elif ext == 'pdf':
+            if not HAS_PYPDF2: return ""
             reader = PyPDF2.PdfReader(uploaded_file)
             return " ".join([page.extract_text() for page in reader.pages if page.extract_text()])
         elif ext == 'docx':
+            if not HAS_DOCX: return ""
             doc = docx.Document(uploaded_file)
             return " ".join([p.text for p in doc.paragraphs])
         elif ext == 'epub':
@@ -166,10 +176,9 @@ def get_base_prompt_template(export_format="TXT"):
 导入提醒： 在 Anki 导入文件时，请务必勾选 "Allow HTML in fields" (允许在字段中使用 HTML)。"""
 
 # ==========================================
-# 4. 多核并发 API 引擎 (核心极速区)
+# 4. 多核并发 API 引擎 (鲁棒性增强)
 # ==========================================
 def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
-    """内部工作线程：负责单一批次的极速请求"""
     url = "https://api.deepseek.com/chat/completions".strip()
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     system_enforcement = "\n\n【系统绝对强制指令】现在我已经发送了单词列表，请立即且直接输出最终的数据代码，绝对不准回复“好的”、“没问题”等任何客套话，绝对不准使用 ```csv 等 Markdown 语法包裹代码！"
@@ -192,7 +201,12 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
             elif resp.status_code == 401: return "❌ ERROR_401_INVALID_KEY"
             resp.raise_for_status()
             
-            result = resp.json()['choices'][0]['message']['content'].strip()
+            # API 异常格式拦截
+            try:
+                resp_data = resp.json()
+                result = resp_data['choices'][0]['message']['content'].strip()
+            except (KeyError, ValueError, IndexError) as e:
+                return f"\n🚨 API 返回格式异常或解析失败: {str(e)[:100]}"
             
             if result.startswith("```"):
                 lines = result.split('\n')
@@ -202,11 +216,12 @@ def _fetch_deepseek_chunk(batch_words, prompt_template, api_key):
             return result
             
         return f"\n🚨 批次超时或被限流，此批次 ({len(batch_words)}词) 生成失败。"
+    except requests.exceptions.RequestException as e:
+        return f"\n🚨 批次请求网络异常: {str(e)}"
     except Exception as e:
-        return f"\n🚨 批次请求发生异常: {str(e)}"
+        return f"\n🚨 批次请求发生未知异常: {str(e)}"
 
 def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text):
-    """多线程并发控制器"""
     try: api_key = st.secrets["DEEPSEEK_API_KEY"]
     except KeyError: return "⚠️ 站长配置错误：未在 Streamlit 后台 Secrets 中配置 DEEPSEEK_API_KEY。"
     
@@ -224,7 +239,7 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
     
     results_ordered = [None] * len(chunks)
     
-    status_text.markdown("🚀 **并发任务已发射！** 正在全速生成首批卡片（首次返回约需 8~12 秒，请稍候）...")
+    status_text.markdown("🚀 **并发任务已发射！** 正在全速连接算力集群...")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         future_to_index = {
@@ -254,10 +269,7 @@ def call_deepseek_api_chunked(prompt_template, words, progress_bar, status_text)
 # ==========================================
 def analyze_words(unique_word_list):
     unique_items = [] 
-    JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're'}
     for item_lower in unique_word_list:
-        if len(item_lower) < 2 and item_lower not in ['a', 'i']: continue
-        if item_lower in JUNK_WORDS: continue
         actual_rank = vocab_dict.get(item_lower, 99999)
         
         if item_lower in BUILTIN_TECHNICAL_TERMS:
@@ -284,12 +296,13 @@ if "raw_input_text" not in st.session_state: st.session_state.raw_input_text = "
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0 
 if "is_processed" not in st.session_state: st.session_state.is_processed = False
 
+# 修复：一键清空增加 st.rerun() 强制刷新 UI
 def clear_all_inputs():
     st.session_state.raw_input_text = ""
     st.session_state.uploader_key += 1 
     st.session_state.is_processed = False
-    # 清除旧的分析结果
     if 'base_df' in st.session_state: del st.session_state.base_df
+    st.rerun()
 
 # --- 参数配置区 ---
 st.markdown("<div class='param-box'>", unsafe_allow_html=True)
@@ -319,7 +332,7 @@ with col_btn2: st.button("🗑️ 一键清空", on_click=clear_all_inputs, use_
 st.divider()
 
 # ==========================================
-# 7. 后台硬核计算
+# 7. 后台硬核计算 (性能优化前置过滤)
 # ==========================================
 if btn_process:
     with st.spinner("🧠 正在急速读取文件并进行智能解析（性能优化版）..."):
@@ -331,20 +344,17 @@ if btn_process:
             st.warning("⚠️ 未提取到任何有效文本！")
             st.session_state.is_processed = False
         elif vocab_dict:
-            # 1. 提取单词
             raw_words = re.findall(r"[a-zA-Z']+", combined_text)
+            unique_raw_words = list(set(raw_words))
             
-            # 2. 词形还原 (优化：仅提取不拼接全文，大幅节省内存)
-            # 使用 set 先去重再还原效率不一定高，因为 context 丢失，但这里 get_lemma 是单词处理，
-            # 我们可以先对 raw_words 做 set 减少 get_lemma 调用次数 (如果单词量极大)
-            # 不过为了保持频率统计的潜在准确性(虽然这里没用到频次)，直接处理列表也行。
-            # 既然是 stable 优化，我们只做去重后的 lemma
+            # 性能优化：在调用较慢的 lemminflect 前，先过滤掉杂项和单字母（除了 a, i）
+            JUNK_WORDS = {'s', 't', 'd', 'm', 'll', 've', 're', 'a', 'i'}
+            filtered_words = [w for w in unique_raw_words if len(w) > 1 or w.lower() in ['a', 'i']]
+            filtered_words = [w for w in filtered_words if w.lower() not in JUNK_WORDS]
             
-            unique_raw_words = list(set(raw_words)) # 先去重，减少 get_lemma 调用
-            lemmatized_unique = [get_lemma(w).lower() for w in unique_raw_words]
-            unique_lemmas = list(set(lemmatized_unique)) # 再次去重 (run -> run, running -> run)
+            lemmatized_unique = [get_lemma(w).lower() for w in filtered_words]
+            unique_lemmas = list(set(lemmatized_unique))
             
-            # 3. 核心分析
             st.session_state.base_df = analyze_words(unique_lemmas)
             
             st.session_state.stats = {
@@ -356,7 +366,7 @@ if btn_process:
             st.session_state.is_processed = True
 
 # ==========================================
-# 8. 动态界面渲染
+# 8. 动态界面渲染 (彻底解决状态丢失)
 # ==========================================
 if st.session_state.get("is_processed", False):
     
@@ -380,7 +390,6 @@ if st.session_state.get("is_processed", False):
         df = df.sort_values(by='rank')
         top_df = df[df['rank'] >= min_rank_threshold].sort_values(by='rank', ascending=True).head(top_n)
         
-        # 移除 "原文防卡死下载" Tab
         t_top, t_target, t_beyond, t_known = st.tabs([
             f"🔥 Top {len(top_df)}", 
             f"🟡 重点 ({len(df[df['final_cat']=='target'])})", 
@@ -420,34 +429,42 @@ if st.session_state.get("is_processed", False):
                             key=f"prompt_{df_key}_{export_format}"
                         )
                         
-                        if st.button("⚡ 召唤 DeepSeek 极速生成卡片", key=f"btn_{df_key}", type="primary"):
-                            
+                        # ----- 核心修复区：状态缓存机制 -----
+                        generate_btn_key = f"btn_{df_key}_{export_format}"
+                        result_state_key = f"ai_result_{df_key}_{export_format}"
+                        time_state_key = f"ai_time_{df_key}_{export_format}"
+
+                        if st.button("⚡ 召唤 DeepSeek 极速生成卡片", key=generate_btn_key, type="primary"):
                             progress_bar = st.progress(0)
                             status_text = st.empty()
-                            status_text.markdown("**⚡ 正在连接 DeepSeek 云端算力集群...**") 
                             
-                            # ⏳ 开始精准计时
                             ai_start_time = time.time()
-                            
                             ai_result = call_deepseek_api_chunked(custom_prompt, pure_words, progress_bar, status_text)
-                            
-                            # ⏳ 结束精准计时
                             ai_duration = time.time() - ai_start_time
+                            
+                            # 写入缓存，防止由于点击下载按钮导致的重载丢失数据
+                            st.session_state[result_state_key] = ai_result
+                            st.session_state[time_state_key] = ai_duration
+
+                        # 如果缓存中存在当前Tab及格式的数据，直接渲染下载区
+                        if result_state_key in st.session_state:
+                            ai_result = st.session_state[result_state_key]
+                            ai_duration = st.session_state.get(time_state_key, 0)
                             
                             if "❌" in ai_result and len(ai_result) < 100:
                                 st.error(ai_result)
                             else:
-                                # 🏅 终极跑分墙展示
-                                status_text.markdown(f"### 🎉 编纂全部完成！(总耗时: **{ai_duration:.2f}** 秒)")
+                                st.success(f"### 🎉 编纂全部完成！(总耗时: **{ai_duration:.2f}** 秒)")
                                 
                                 mime_type = "text/csv" if export_format == "CSV" else "text/plain"
                                 st.download_button(
                                     label=f"📥 一键下载标准 Anki 导入文件 (.{export_format.lower()})", 
-                                    data=ai_result.encode('utf-8-sig'), 
+                                    data=ai_result.encode('utf-8-sig'),  # 添加 BOM，防止 Excel/CSV 乱码
                                     file_name=f"anki_cards_{label}.{export_format.lower()}", 
                                     mime=mime_type,
                                     type="primary",
-                                    use_container_width=True
+                                    use_container_width=True,
+                                    key=f"download_{df_key}_{export_format}"
                                 )
                                 
                                 st.markdown("##### 📝 预览框")
