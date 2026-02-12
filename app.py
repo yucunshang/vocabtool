@@ -658,9 +658,8 @@ with tab_anki:
         # 核心改动：只有点击这个按钮才开始解析
         start_gen = st.button("🚀 开始生成", type="primary", use_container_width=True)
     with c_btn2:
-        if st.button("🗑️ 清空重置", type="secondary"):
-            reset_anki_state()
-            st.rerun()
+        # 【关键修复】使用 on_click 回调来清除状态，避免 "StreamlitAPIException"
+        st.button("🗑️ 清空重置", type="secondary", on_click=reset_anki_state)
 
     # --- 3. 逻辑处理 ---
     # 如果点击了生成按钮，或者缓存里已经有数据（处理下载按钮刷新问题）
