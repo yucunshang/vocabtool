@@ -3,7 +3,7 @@ import pandas as pd
 import re
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import lemminflect
 import nltk
 import genanki
@@ -81,6 +81,12 @@ def get_lemma(word):
 def clear_all_state():
     """一键清空的回调函数"""
     st.session_state.clear()
+
+def get_beijing_time_str():
+    """获取北京时间字符串 (UTC+8)"""
+    utc_now = datetime.now(timezone.utc)
+    beijing_now = utc_now + timedelta(hours=8)
+    return beijing_now.strftime('%m%d_%H%M')
 
 # ==========================================
 # 2. 文本提取与分析
@@ -171,9 +177,9 @@ def generate_anki_package(cards_data, deck_name):
 
 def get_ai_prompt(words):
     """
-    Prompt 强力优化版：
-    1. 增加 Negative Constraints (禁止Markdown表格)。
-    2. 强调 Raw Text 格式，防止解析错误。
+    Prompt 优化版：
+    1. 强制要求 Etymology (词源)，不允许留空。
+    2. 禁止 Markdown 表格。
     """
     w_list = ", ".join(words)
     return f"""
@@ -184,9 +190,8 @@ Act as a Dictionary API. Convert the following words into strictly formatted dat
 **CRITICAL FORMATTING RULES (Must Follow):**
 1. **NO Markdown Tables:** Do NOT use tables. Do NOT use `|` at the start or end of lines. Do NOT use `---` separator lines.
 2. **Separator:** Use `|` ONLY to separate fields.
-3. **No Header:** Do NOT output a header row (e.g., "Word | IPA...").
-4. **Plain Text:** Output ONLY the data lines. No intro/outro text.
-5. **Content Safety:** If a field is empty, leave it empty (do not write "N/A").
+3. **No Header:** Do NOT output a header row. Output ONLY data lines.
+4. **Etymology is MANDATORY:** You MUST provide the root/suffix breakdown. Do not leave it empty.
 
 **Output Structure per line:**
 `Word | IPA | Definition (Concise, <12 words) | Examples (2 sentences separated by <br>) | Etymology (Root+Suffix)`
@@ -296,10 +301,10 @@ with tab_extract:
 with tab_anki:
     st.markdown("### 📦 制作 Anki 牌组")
     
-    # 自动生成唯一文件名（带时间戳），防止重名
-    default_name = f"Vocab_{datetime.now().strftime('%m%d_%H%M')}"
+    # 获取北京时间 (UTC+8) 的时间戳
+    bj_time_str = get_beijing_time_str()
+    default_name = f"Vocab_{bj_time_str}"
     
-    # 使用 session_state 绑定输入框，防止下载后内容消失
     if 'anki_input_text' not in st.session_state:
         st.session_state['anki_input_text'] = ""
 
@@ -307,12 +312,13 @@ with tab_anki:
         "在此粘贴 AI 的回复内容 (下载后不会消失，可继续添加)", 
         height=300, 
         placeholder="word1 | /ipa/ | meaning... \nword2 | ...",
-        key="anki_input_text" # 绑定 state
+        key="anki_input_text"
     )
     
-    deck_name = st.text_input("牌组名称 (自动添加时间戳，无需手动修改)", default_name)
+    # 显示北京时间
+    deck_name = st.text_input("牌组名称 (已自动设为北京时间)", default_name)
     
-    # 解析逻辑 (不依赖按钮，实时显示解析结果)
+    # 解析逻辑
     cards = []
     skipped = 0
     if ai_resp.strip():
@@ -320,7 +326,7 @@ with tab_anki:
             line = line.strip()
             if not line: continue
             
-            # 严格过滤：跳过Markdown表格行、表头
+            # 严格过滤
             if line.startswith("|") or line.endswith("|") or "---" in line: continue
             if "Word" in line and "IPA" in line: continue
             
@@ -340,18 +346,16 @@ with tab_anki:
             else:
                 skipped += 1
 
-    # 显示状态
+    # 显示状态与下载
     if cards:
-        st.success(f"✅ 已识别 {len(cards)} 张卡片 (等待下载)")
+        st.success(f"✅ 已识别 {len(cards)} 张卡片 (包含词源)")
         if skipped > 0:
-            st.caption(f"⚠️ 过滤了 {skipped} 行无效数据 (表头或格式错误)")
+            st.caption(f"⚠️ 过滤了 {skipped} 行无效数据")
             
-        # 生成逻辑放到按钮内部
         final_filename = f"{deck_name}.apkg"
         f_path = generate_anki_package(cards, deck_name)
         
         with open(f_path, "rb") as f:
-            # 下载按钮
             st.download_button(
                 label=f"📥 下载 {final_filename}",
                 data=f,
