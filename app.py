@@ -7,33 +7,32 @@ import nltk
 import time
 
 # ==========================================
-# 0. 基础配置 (回归 Centered 布局)
+# 0. 基础配置
 # ==========================================
 st.set_page_config(
     page_title="Vocab Master", 
     page_icon="⚡️", 
-    layout="centered", # 手机端最佳布局
+    layout="centered", 
     initial_sidebar_state="collapsed"
 )
 
 st.markdown("""
 <style>
-    /* 界面紧凑优化 */
     .block-container { padding-top: 1rem; padding-bottom: 5rem; }
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     [data-testid="stSidebarCollapsedControl"] {display: none;}
     
-    /* 按钮大尺寸，适合手指 */
+    /* 大按钮 */
     .stButton>button {
         width: 100%; border-radius: 10px; height: 3.2em; font-weight: bold; font-size: 16px !important;
         margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    /* 表格样式 */
-    [data-testid="stDataFrameResizable"] { border: 1px solid #ddd; border-radius: 8px; }
+    /* 文本框优化 */
+    .stTextArea textarea { font-size: 15px !important; border-radius: 10px; font-family: monospace; }
     
-    /* 设置栏样式 */
-    [data-testid="stExpander"] { border-radius: 10px; border: 1px solid #ddd; margin-bottom: 15px; }
+    /* 折叠栏样式 */
+    [data-testid="stExpander"] { border-radius: 10px; border: 1px solid #e0e0e0; margin-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -69,11 +68,14 @@ def load_data():
             df[w_col] = df[w_col].astype(str).str.lower().str.strip()
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
             df = df.dropna(subset=[r_col])
-            # 默认按 Rank 升序
-            df = df.sort_values(r_col)
             
-            vocab_dict = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
-            return vocab_dict, df, r_col, w_col
+            # 【关键修复】先按排名排序，然后去重保留第一个（即保留Rank最小的那个）
+            # 这解决了 "say" 被识别为 11771 而不是 19 的问题
+            df = df.sort_values(r_col, ascending=True)
+            df_unique = df.drop_duplicates(subset=[w_col], keep='first')
+            
+            vocab_dict = pd.Series(df_unique[r_col].values, index=df_unique[w_col]).to_dict()
+            return vocab_dict, df_unique, r_col, w_col
         except Exception as e:
             st.error(f"数据加载出错: {e}")
             return {}, None, None, None
@@ -105,6 +107,7 @@ def analyze_text(text, current_lvl, target_lvl):
     return df
 
 def generate_prompt(word_list, settings):
+    # 这里的 word_list 已经是纯单词列表，不包含 rank
     word_str = ", ".join(word_list)
     fmt = settings.get("format", "CSV")
     ex_count = settings.get("example_count", 1)
@@ -149,15 +152,14 @@ st.title("⚡️ Vocab Master")
 if FULL_DF is None:
     st.error("⚠️ 缺少词频文件")
 else:
-    # --- 顶栏设置 (折叠) ---
-    with st.expander("⚙️ 全局设置 (Prompt Settings)", expanded=False):
+    # --- 顶栏设置 ---
+    with st.expander("⚙️ Prompt 设置 (Settings)", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
             set_format = st.selectbox("格式", ["CSV", "TXT"], index=0)
             set_lang = st.selectbox("语言", ["Chinese", "English"], index=0)
         with c2:
             set_ex_count = st.number_input("例句数", 1, 3, 1)
-            # 无需 case 选择，已在 Prompt 写死为 Phrase
             
     settings = {"format": set_format, "lang": set_lang, "example_count": set_ex_count}
 
@@ -171,7 +173,7 @@ else:
     if mode == "📖 文本提取":
         st.caption("分析文章，筛选重点词")
         
-        # 1. 输入区
+        # 1. 输入
         c_a, c_b = st.columns(2)
         with c_a: curr_lvl = st.number_input("当前水平", 4000, step=500)
         with c_b: targ_lvl = st.number_input("目标水平", 8000, step=500)
@@ -192,7 +194,7 @@ else:
                         user_text = " ".join([p.extract_text() for p in r.pages])
                 except: st.error("读取失败")
 
-        # 2. 分析按钮 (回归主界面)
+        # 2. 分析按钮
         if user_text and st.button("🔍 开始分析", type="primary"):
             with st.spinner("分析中..."):
                 t0 = time.time()
@@ -200,40 +202,39 @@ else:
                 st.session_state['analysis_df'] = df_res
                 st.session_state['analysis_time'] = time.time() - t0
         
-        # 3. 结果展示区
+        # 3. 结果展示
         if 'analysis_df' in st.session_state:
             df = st.session_state['analysis_df']
             
-            # 筛选与排序
-            df_target = df[df['Category'] == 'Target'].sort_values(by="Rank", ascending=False) # 重点词：难 -> 易
+            # 排序：重点词按 Rank 降序(难->易)，其他按升序
+            df_target = df[df['Category'] == 'Target'].sort_values(by="Rank", ascending=False)
             df_mastered = df[df['Category'] == 'Mastered'].sort_values(by="Rank")
             df_beyond = df[df['Category'] == 'Beyond'].sort_values(by="Rank")
             
             st.success(f"共 {len(df)} 词 (耗时 {st.session_state['analysis_time']:.2f}s)")
             
+            # 使用 Tabs 分类
             t1, t2, t3 = st.tabs([
                 f"🎯 重点 ({len(df_target)})", 
                 f"✅ 已掌握 ({len(df_mastered)})", 
                 f"🚀 超纲 ({len(df_beyond)})"
             ])
             
-            # --- 重点词 (可编辑) ---
+            # --- 重点词 Tab (可编辑文本框) ---
             with t1:
-                st.caption("👇 可直接修改单词，或在末尾添加。勾选并按 Del 删除。")
-                edited_df = st.data_editor(
-                    df_target[["Word", "Rank"]],
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    key="editor_target",
-                    column_config={"Rank": st.column_config.NumberColumn("Rank")}
-                )
+                # 默认生成的文本：用逗号分隔
+                default_target_str = ", ".join(df_target["Word"].tolist())
                 
-                final_words = [str(w).strip() for w in edited_df["Word"].tolist() if str(w).strip()]
+                # 🟢 需求2：可折叠、可编辑的文本列表 (不再是表格)
+                with st.expander("📝 编辑单词列表 (Target Words)", expanded=True):
+                    st.caption("👇 您可以在此直接增删改单词，然后点击下方生成按钮。")
+                    edited_target_str = st.text_area("Target List", value=default_target_str, height=200, key="ta_target")
+                
+                # 处理文本框内容
+                final_words = [w.strip() for w in edited_target_str.split(',') if w.strip()]
                 
                 if final_words:
-                    st.divider()
-                    
-                    # 🟢 分批逻辑：200个一组
+                    # 🟢 分批逻辑 (200个一组)
                     BATCH_SIZE = 200
                     total = len(final_words)
                     
@@ -259,9 +260,17 @@ else:
                             prompt = generate_prompt(final_words, settings)
                             st.code(prompt, language="markdown")
 
-            # --- 其他 (只读) ---
-            with t2: st.code(", ".join(df_mastered["Word"]), language="text")
-            with t3: st.code(", ".join(df_beyond["Word"]), language="text")
+            # --- 已掌握 Tab ---
+            with t2:
+                default_mastered_str = ", ".join(df_mastered["Word"].tolist())
+                with st.expander("👀 查看列表", expanded=False):
+                    st.text_area("Mastered List", value=default_mastered_str, height=150)
+            
+            # --- 超纲 Tab ---
+            with t3:
+                default_beyond_str = ", ".join(df_beyond["Word"].tolist())
+                with st.expander("👀 查看列表", expanded=False):
+                    st.text_area("Beyond List", value=default_beyond_str, height=150)
 
     # ------------------------------------------------
     # 模式 B: 刷词
@@ -273,12 +282,15 @@ else:
         
         if st.button("提取"):
             res = FULL_DF[FULL_DF[RANK_COL] >= s_r].sort_values(RANK_COL).head(cnt)
-            st.session_state['range_df'] = res[[WORD_COL, RANK_COL]]
+            # 生成默认字符串
+            w_str = ", ".join(res[WORD_COL].tolist())
+            st.session_state['range_str'] = w_str
             
-        if 'range_df' in st.session_state:
-            st.caption("👇 可编辑列表")
-            ed_df = st.data_editor(st.session_state['range_df'], num_rows="dynamic", use_container_width=True)
-            words = [str(w).strip() for w in ed_df[WORD_COL] if str(w).strip()]
+        if 'range_str' in st.session_state:
+            with st.expander("📝 编辑列表", expanded=True):
+                edited_range_str = st.text_area("List", value=st.session_state['range_str'], height=150)
+            
+            words = [w.strip() for w in edited_range_str.split(',') if w.strip()]
             
             if st.button("🚀 生成 Prompt", type="primary"):
                 prompt = generate_prompt(words, settings)
