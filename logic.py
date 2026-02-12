@@ -1,244 +1,270 @@
-# logic.py
-import re
-import os
+import streamlit as st
+import spacy
+import pandas as pd
 import json
+import re
 import random
-import utils
-from utils import VOCAB_DICT, load_nlp_resources, get_file_parsers, get_genanki
-from styles import ANKI_CSS
+import tempfile
+import os
+import genanki
+
+# 文件处理库
+import pypdf
+import docx
+import ebooklib
+from ebooklib import epub
+from bs4 import BeautifulSoup
+
+# 引入样式和字典
+from utils import VOCAB_DICT
+import styles
 
 # ==========================================
-# 核心逻辑 (V29: 融合算法)
+# 1. NLP 模型加载
+# ==========================================
+@st.cache_resource
+def load_nlp():
+    """加载 Spacy 模型"""
+    try:
+        return spacy.load("en_core_web_sm", disable=["ner", "parser"])
+    except OSError:
+        from spacy.cli import download
+        download("en_core_web_sm")
+        return spacy.load("en_core_web_sm", disable=["ner", "parser"])
+
+nlp = load_nlp()
+
+# ==========================================
+# 2. 文件内容提取
 # ==========================================
 def extract_text_from_file(uploaded_file):
-    pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
-    text = ""
+    if not uploaded_file:
+        return ""
+        
     file_type = uploaded_file.name.split('.')[-1].lower()
-    
+    text = ""
+
     try:
-        if file_type == 'txt':
-            bytes_data = uploaded_file.getvalue()
-            for encoding in ['utf-8', 'gb18030', 'latin-1']:
-                try:
-                    text = bytes_data.decode(encoding)
-                    break
-                except: continue
-        elif file_type == 'pdf':
-            reader = pypdf.PdfReader(uploaded_file)
-            text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-        elif file_type == 'docx':
-            doc = docx.Document(uploaded_file)
-            text = "\n".join([p.text for p in doc.paragraphs])
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_type}") as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_path = tmp_file.name
+
+        if file_type == 'pdf':
+            reader = pypdf.PdfReader(tmp_path)
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted: text += extracted + "\n"
+        
+        elif file_type in ['docx', 'doc']:
+            doc = docx.Document(tmp_path)
+            for para in doc.paragraphs:
+                text += para.text + "\n"
+        
         elif file_type == 'epub':
-            genanki, tempfile = get_genanki()
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.epub') as tmp:
-                tmp.write(uploaded_file.getvalue())
-                tmp_path = tmp.name
             book = epub.read_epub(tmp_path)
             for item in book.get_items():
                 if item.get_type() == ebooklib.ITEM_DOCUMENT:
                     soup = BeautifulSoup(item.get_content(), 'html.parser')
-                    text += soup.get_text(separator=' ', strip=True) + " "
-            os.remove(tmp_path)
+                    text += soup.get_text() + "\n"
+        
+        elif file_type == 'txt':
+            text = uploaded_file.getvalue().decode("utf-8", errors="ignore")
+
     except Exception as e:
-        return f"Error: {e}"
+        st.error(f"解析文件出错: {e}")
+        return ""
+    finally:
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
     return text
 
-def is_valid_word(word):
-    """
-    垃圾词清洗
-    """
-    if len(word) < 2: return False
-    if len(word) > 25: return False 
-    # 连续3个相同字符 -> 认为是垃圾词
-    if re.search(r'(.)\1{2,}', word): return False
-    # 没有元音 -> 认为是缩写或乱码 (排除 hmm, brrr, zszs)
-    if not re.search(r'[aeiouy]', word): return False
-    return True
-
-def analyze_logic(text, current_lvl, target_lvl, include_unknown):
-    """
-    V29 核心算法：混合增强匹配
-    同时检查 [单词原形] 和 [Lemma 还原词]，只要任意一个在词频表且符合 Rank 范围，即命中。
-    """
-    nltk, lemminflect = load_nlp_resources()
+# ==========================================
+# 3. 核心分析逻辑
+# ==========================================
+def analyze_logic(raw_text, min_rank, max_rank, include_unknown):
+    doc = nlp(raw_text)
     
-    def get_lemma_local(word):
-        try: return lemminflect.getLemma(word, upos='VERB')[0]
-        except: return word
-
-    # 1. 宽松分词 (保留 internal hyphens)
-    raw_tokens = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", text)
-    total_words = len(raw_tokens)
+    candidates = [
+        token.lemma_.lower() for token in doc 
+        if token.is_alpha and not token.is_stop and len(token.text) > 1
+    ]
     
-    # 2. 清洗 + 小写 + 初步去重
-    clean_tokens = set([t.lower() for t in raw_tokens if is_valid_word(t.lower())])
+    raw_count = len(doc)
+    unique_candidates = list(set(candidates))
+    filtered_list = []
     
-    final_candidates = [] # 存储 (display_word, rank)
-    seen_lemmas = set()   # 用于去重逻辑，防止 go 和 went 同时出现
-    
-    for w in clean_tokens:
-        # A. 计算 Lemma
-        lemma = get_lemma_local(w)
-        
-        # B. 获取 Rank (优先查 Lemma，查不到查原词)
-        # 很多词频表里只有 go，没有 went。但也有少数情况原词有排名。
-        rank_lemma = VOCAB_DICT.get(lemma, 99999)
-        rank_orig = VOCAB_DICT.get(w, 99999)
-        
-        # 取最靠前的有效排名 (非99999的最小值)
-        if rank_lemma != 99999 and rank_orig != 99999:
-            best_rank = min(rank_lemma, rank_orig)
-        elif rank_lemma != 99999:
-            best_rank = rank_lemma
+    for word in unique_candidates:
+        rank = VOCAB_DICT.get(word, None)
+        if rank is not None:
+            if rank >= min_rank and rank <= max_rank:
+                filtered_list.append((word, rank))
         else:
-            best_rank = rank_orig
-            
-        # C. 判定是否符合范围
-        is_in_range = (best_rank >= current_lvl and best_rank <= target_lvl)
-        is_unknown_included = (best_rank == 99999 and include_unknown)
-        
-        if is_in_range or is_unknown_included:
-            # D. 去重核心逻辑
-            # 我们希望输出的是 Lemma (例如输出 go 而不是 went)，这样对背单词更友好
-            # 但如果 Lemma 是未知词，而原词是已知词(极少见)，则保留原词
-            
-            word_to_keep = lemma if rank_lemma != 99999 else w
-            
-            # 使用 lemma 作为去重键值 (Key)
-            # 这样 went(go) 和 go(go) 会被视为同一个，只保留一个
-            if lemma not in seen_lemmas:
-                final_candidates.append((word_to_keep, best_rank))
-                seen_lemmas.add(lemma)
+            if include_unknown:
+                filtered_list.append((word, 999999))
     
-    # E. 排序：Rank 小的在前 (高频 -> 低频)，未知词(99999)放最后
-    final_candidates.sort(key=lambda x: x[1])
-    
-    return final_candidates, total_words
-
-# logic.py (仅替换 parse_anki_data 函数，其他不变)
-
-def parse_anki_data(json_input):
-    """
-    解析 AI 返回的 JSON，支持：
-    1. 标准 JSON 数组 [...]
-    2. JSON Lines (每行一个对象)
-    3. 自动跳过错误行
-    """
-    results = []
-    
-    # 1. 尝试作为整体 JSON 数组解析
-    try:
-        # 尝试提取 [...] 部分
-        match = re.search(r'\[.*\]', json_input, re.DOTALL)
-        if match:
-            clean_json = match.group(0)
-            return json.loads(clean_json)
-    except:
-        pass # 如果整体解析失败，进入逐行解析模式
-
-    # 2. 逐行解析模式 (针对 AI 生成的非标准格式或一行一个 JSON 的情况)
-    lines = json_input.strip().split('\n')
-    
-    for line in lines:
-        line = line.strip()
-        # 去掉行尾可能的逗号
-        if line.endswith(','): 
-            line = line[:-1]
-            
-        if not line: continue
-        
-        try:
-            obj = json.loads(line)
-            # 简单验证是否包含必要字段
-            if isinstance(obj, dict) and 'w' in obj:
-                # 兼容不同 AI 可能返回的字段名差异
-                standard_obj = {
-                    'front_phrase': obj.get('front_phrase', obj.get('w')), # 兼容简写 w
-                    'word': obj.get('word', obj.get('w')),
-                    'meaning': obj.get('meaning', obj.get('m')),           # 兼容简写 m
-                    'example_sentence': obj.get('example_sentence', obj.get('e')), # 兼容简写 e
-                    'etymology': obj.get('etymology', obj.get('r'))        # 兼容简写 r
-                }
-                results.append(standard_obj)
-        except json.JSONDecodeError:
-            # 这里可以打印日志，或者直接跳过错误行
-            print(f"Skipping invalid line: {line[:20]}...")
-            continue
-            
-    return results
+    filtered_list.sort(key=lambda x: x[1])
+    return filtered_list, raw_count
 
 # ==========================================
-# Anki 生成
+# 4. 生成 AI Prompt
 # ==========================================
-def generate_anki_package(cards_data, deck_name):
-    genanki, tempfile = get_genanki()
+def get_ai_prompt(word_list, front_mode, def_mode, ex_count, need_ety):
+    words_str = ", ".join(word_list)
     
-    model_id = random.randrange(1 << 30, 1 << 31)
-    model = genanki.Model(
-        model_id, f'VocabFlow JSON Model {model_id}',
-        fields=[{'name': 'FrontPhrase'}, {'name': 'Meaning'}, {'name': 'Examples'}, {'name': 'Etymology'}],
-        templates=[{
-            'name': 'Phrase Card',
-            'qfmt': '<div class="phrase">{{FrontPhrase}}</div>', 
-            'afmt': '''
-            {{FrontSide}}<hr>
-            <div class="definition">{{Meaning}}</div>
-            <div class="examples">{{Examples}}</div>
-            {{#Etymology}}
-            <div class="footer-info"><div class="etymology">🌱 <b>词源:</b> {{Etymology}}</div></div>
-            {{/Etymology}}
-            ''',
-        }], css=ANKI_CSS
-    )
-    deck = genanki.Deck(random.randrange(1 << 30, 1 << 31), deck_name)
-    for c in cards_data:
-        deck.add_note(genanki.Note(model=model, fields=[str(c['front_phrase']), str(c['meaning']), str(c['examples']).replace('\n','<br>'), str(c['etymology'])]))
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.apkg') as tmp:
-        genanki.Package(deck).write_to_file(tmp.name)
-        return tmp.name
-
-# ==========================================
-# Prompt Logic
-# ==========================================
-def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
-    w_list = ", ".join(words)
+    phrase_instr = "Find a common short phrase/collocation using this word." if "Phrase" in front_mode else "Use the word itself."
+    lang_instr = "English (Simple definition)"
+    if def_mode == "中文": lang_instr = "Chinese only"
+    elif def_mode == "中英双语": lang_instr = "Bilingual (Chinese & English)"
     
-    if front_mode == "单词 (Word)":
-        w_instr = "Key `w`: The word itself (lowercase)."
-    else:
-        w_instr = "Key `w`: A short practical collocation/phrase (2-5 words)."
+    ety_instr = '"etymology": "Brief root/origin",' if need_ety else ""
+    
+    prompt = f"""
+I need to create Anki cards for the following English words. 
+Output STRICT JSON Array.
 
-    if def_mode == "中文":
-        m_instr = "Key `m`: Concise Chinese definition (max 10 chars)."
-    elif def_mode == "中英双语":
-        m_instr = "Key `m`: English Definition + Chinese Definition."
-    else:
-        m_instr = "Key `m`: English definition (concise)."
-
-    e_instr = f"Key `e`: {ex_count} example sentence(s). Use `<br>` to separate if multiple."
-
-    if need_ety:
-        r_instr = "Key `r`: Simplified Chinese Etymology (Root/Prefix)."
-    else:
-        r_instr = "Key `r`: Leave this empty string \"\"."
-
-    return f"""
-Task: Create Anki cards.
-Words: {w_list}
-
-**OUTPUT: NDJSON (One line per object).**
+**Word List:**
+{words_str}
 
 **Requirements:**
-1. {w_instr}
-2. {m_instr}
-3. {e_instr}
-4. {r_instr}
-
-**Keys:** `w` (Front), `m` (Meaning), `e` (Examples), `r` (Etymology)
-
-**Example:**
-{{"w": "...", "m": "...", "e": "...", "r": "..."}}
-
-**Start:**
+1. Fields per item (use exact keys):
+   - "front_phrase": {phrase_instr}
+   - "word": "The target word"
+   - "meaning": Definition in {lang_instr}.
+   - "example_sentence": {ex_count} sentence(s).
+   {ety_instr}
+   
+**JSON Example:**
+[
+  {{ "word": "abandon", "front_phrase": "abandon ship", "meaning": "放弃", "example_sentence": "He decided to abandon the plan." }}
+]
 """
+    return prompt.strip()
+
+# ==========================================
+# 5. Anki 生成逻辑 (已修复 KeyError)
+# ==========================================
+def parse_anki_data(json_input):
+    """
+    解析 JSON，具备极强的容错能力。
+    1. 自动处理 'w', 'm' 等简写键名。
+    2. 自动处理逐行 JSON (JSON Lines)。
+    3. 自动忽略错误行。
+    """
+    raw_items = []
+    
+    # --- 阶段 1: 尝试解析 JSON 结构 ---
+    try:
+        # 尝试匹配整个数组 [...]
+        match = re.search(r'\[.*\]', json_input, re.DOTALL)
+        if match:
+            raw_items = json.loads(match.group(0))
+        else:
+            # 如果不是数组，尝试按行解析
+            lines = json_input.strip().split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line: continue
+                if line.endswith(','): line = line[:-1] # 去掉行尾逗号
+                try:
+                    raw_items.append(json.loads(line))
+                except:
+                    continue
+    except:
+        return []
+
+    if not isinstance(raw_items, list):
+        # 如果解析出来不是列表（比如是单个对象），包一层
+        if isinstance(raw_items, dict):
+            raw_items = [raw_items]
+        else:
+            return []
+
+    # --- 阶段 2: 标准化键名 (Mapping) ---
+    # 无论 AI 返回什么怪异的 Key，这里统一转换成标准 Key
+    standardized_data = []
+    
+    for item in raw_items:
+        if not isinstance(item, dict): continue
+        
+        # 提取数据，优先找全称，找不到找缩写，再找不到给空字符串
+        # 1. 正面/短语
+        front = item.get('front_phrase') or item.get('w') or item.get('word') or "Unknown"
+        
+        # 2. 单词本身
+        word = item.get('word') or item.get('w') or front
+        
+        # 3. 释义
+        meaning = item.get('meaning') or item.get('m') or item.get('def') or ""
+        
+        # 4. 例句 (注意：你的 Traceback 里用的是 'examples'，AI 给的是 'e' 或 'example_sentence')
+        example = item.get('example_sentence') or item.get('examples') or item.get('e') or ""
+        
+        # 5. 词源
+        ety = item.get('etymology') or item.get('r') or item.get('root') or ""
+
+        # 构造标准字典
+        new_item = {
+            'front_phrase': str(front),
+            'word': str(word),
+            'meaning': str(meaning),
+            'examples': str(example), # 统一叫 examples
+            'etymology': str(ety)
+        }
+        standardized_data.append(new_item)
+            
+    return standardized_data
+
+def generate_anki_package(data, deck_name):
+    model_id = random.randrange(1 << 30, 1 << 31)
+    deck_id = random.randrange(1 << 30, 1 << 31)
+    
+    # 这里的 CSS 引用 styles.ANKI_CSS
+    my_model = genanki.Model(
+        model_id,
+        'Vocab Flow Ultra Model',
+        fields=[
+            {'name': 'FrontPhrase'},
+            {'name': 'Word'},
+            {'name': 'Meaning'},
+            {'name': 'Etymology'},
+            {'name': 'Example'},
+        ],
+        templates=[
+            {
+                'name': 'Card 1',
+                'qfmt': '<div class="phrase">{{FrontPhrase}}</div><div class="word">({{Word}})</div>',
+                'afmt': '''
+                {{FrontSide}}
+                <hr id=answer>
+                <div class="meaning">{{Meaning}}</div>
+                <div class="example">{{Example}}</div>
+                <div class="ety">{{Etymology}}</div>
+                ''',
+            },
+        ],
+        css=styles.ANKI_CSS
+    )
+
+    my_deck = genanki.Deck(deck_id, deck_name)
+
+    for c in data:
+        # 使用 .get() 方法，防止 KeyError
+        # 并把 \n 换行符转换为 HTML 的 <br>
+        ex_text = c.get('examples', '').replace('\n', '<br>')
+        
+        note = genanki.Note(
+            model=my_model,
+            fields=[
+                c.get('front_phrase', ''), 
+                c.get('word', ''),         
+                c.get('meaning', ''),      
+                c.get('etymology', ''),    
+                ex_text
+            ]
+        )
+        my_deck.add_note(note)
+
+    output_path = f"{deck_name}.apkg"
+    genanki.Package(my_deck).write_to_file(output_path)
+    return output_path
