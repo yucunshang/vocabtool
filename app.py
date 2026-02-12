@@ -32,7 +32,6 @@ st.markdown("""
     .stTextArea textarea { font-family: 'Consolas', monospace; font-size: 14px; }
     .stButton>button { border-radius: 8px; font-weight: 600; width: 100%; margin-top: 5px; }
     .stat-box { padding: 15px; background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; text-align: center; color: #166534; margin-bottom: 20px; }
-    /* 隐藏不需要的元素 */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
 </style>
@@ -87,7 +86,7 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. 核心解析逻辑
+# 2. 核心解析逻辑 (容错增强版)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     text = ""
@@ -131,10 +130,14 @@ def analyze_logic(text, current_lvl, target_lvl):
 
 def parse_anki_data(raw_text):
     """
-    V5 解析器 (No IPA):
-    结构: Phrase | Meaning | Examples | Etymology
+    V6 容错解析器：
+    1. 自动替换全角竖线 '｜' 为 '|'
+    2. 智能忽略 Markdown 表格边缘的空字符
+    3. 允许最少 3 列数据 (若缺词源则补空)
     """
     parsed_cards = []
+    # 1. 预处理：统一全角符号
+    raw_text = raw_text.replace('｜', '|')
     lines = raw_text.strip().split('\n')
     seen_phrases = set()
 
@@ -142,22 +145,24 @@ def parse_anki_data(raw_text):
         line = line.strip()
         if not line: continue
         
-        # 至少要有3个分隔符才能分出4列
-        if line.count('|') < 3:
-            continue
+        # 跳过表头和分隔线
+        if '---' in line or set(line).issubset({'|', '-', ' '}): continue
+        if 'Phrase' in line and 'Definition' in line: continue
 
-        clean_line = line.strip('|')
-        parts = [p.strip() for p in clean_line.split('|')]
+        # 2. 智能分割：过滤掉 split 产生的空字符串（解决 Markdown 表格首尾 | 的问题）
+        # 例: "| a | b | c |" -> split -> ['', 'a', 'b', 'c', ''] -> 过滤后 -> ['a', 'b', 'c']
+        parts = [p.strip() for p in line.split('|') if p.strip()]
         
-        # 确保有4部分 (Phrase, Meaning, Examples, Etymology)
-        if len(parts) >= 4:
+        # 3. 校验：至少要有 3 部分 (Phrase, Meaning, Examples)
+        # 如果有 4 部分，则最后一部分是 Etymology
+        if len(parts) >= 3:
             front_text = parts[0]
             
             # --- 清洗正面 ---
             front_text = front_text.rstrip('.,?!: ')
             front_text = front_text.replace('*', '')
             
-            # 过滤长句子 (>7单词)
+            # 过滤长句子 (>7 单词)
             if len(front_text.split()) > 7:
                 continue
 
@@ -171,12 +176,17 @@ def parse_anki_data(raw_text):
                 continue
             seen_phrases.add(front_text)
 
-            # 解析数据 (注意：IPA已移除，索引前移)
+            # 映射字段 (安全获取)
+            meaning = parts[1]
+            examples = parts[2]
+            # 尝试获取词源，如果没有则为空
+            etymology = parts[3] if len(parts) > 3 else "（暂无词源信息）"
+
             parsed_cards.append({
                 'front_phrase': front_text,
-                'meaning': parts[1],
-                'examples': parts[2],
-                'etymology': parts[3] # 以前是 parts[4]，现在是 parts[3]
+                'meaning': meaning,
+                'examples': examples,
+                'etymology': etymology
             })
             
     return parsed_cards
@@ -202,7 +212,6 @@ def generate_anki_package(cards_data, deck_name):
     
     .footer-info { margin-top: 20px; border-top: 1px dashed #ccc; padding-top: 10px; text-align: left; }
     
-    /* 词源样式增强 */
     .etymology { display: block; font-size: 16px; color: #555; background-color: #fffdf5; padding: 10px; border-radius: 6px; margin-bottom: 5px; line-height: 1.4; border: 1px solid #fef3c7; }
     .etymology b { color: #8b5cf6; } 
     .nightMode .etymology { background-color: #333; color: #aaa; border-color: #444; }
@@ -252,7 +261,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt 生成逻辑 (无 IPA, 4列版)
+# 4. Prompt 生成逻辑 (4列版)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
@@ -264,15 +273,15 @@ Words: {w_list}
 `Phrase | English Definition | Example Sentences | Chinese Etymology`
 
 **RULES:**
-1. **NO IPA.** Do not include pronunciation.
+1. **NO IPA.** 
 2. **Column 1 (Phrase):** 
    - Short collocation (2-5 words). 
    - **NO** sentences. **NO** periods. Lowercase preferred.
 3. **Column 3 (Examples):** 1-2 sentences. Use `<br>` to separate.
-4. **Column 4 (Etymology):** Simplified Chinese only. Root/Prefix/Suffix breakdown.
+4. **Column 4 (Etymology):** Simplified Chinese only.
 
 **Example:**
-a benevolent leader | characterized by goodwill | The benevolent man helped the poor.<br>She is benevolent. | 词根: bene (好) + vol (意愿) + ent (后缀)
+a benevolent leader | characterized by goodwill | The benevolent man helped the poor.<br>She is benevolent. | 词根: bene (好) + vol (意愿)
 
 **Start Output:**
 """
@@ -353,13 +362,13 @@ with tab_anki:
     bj_time_str = get_beijing_time_str()
     if 'anki_input_text' not in st.session_state: st.session_state['anki_input_text'] = ""
 
-    ai_resp = st.text_area("在此粘贴 AI 回复 (无IPA版)", height=200, key="anki_input_text")
+    ai_resp = st.text_area("在此粘贴 AI 回复 (无需关心格式细节)", height=200, key="anki_input_text")
     deck_name = st.text_input("牌组名称", f"Vocab_{bj_time_str}")
     
     if ai_resp.strip():
         parsed_data = parse_anki_data(ai_resp)
         if parsed_data:
-            st.markdown(f"#### 👁️ 预览 (保留 {len(parsed_data)} 条)")
+            st.markdown(f"#### 👁️ 预览 (成功解析 {len(parsed_data)} 条)")
             df_view = pd.DataFrame(parsed_data)
             df_view.rename(columns={'front_phrase': '正面 (短语)', 'meaning': '英文释义', 'examples': '例句', 'etymology': '中文词源'}, inplace=True)
             st.dataframe(df_view, use_container_width=True, hide_index=True)
@@ -368,4 +377,9 @@ with tab_anki:
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 格式无效。请确保粘贴内容包含3个 '|' 分隔符。")
+            st.warning("⚠️ 格式解析失败。")
+            st.markdown("""
+            **排查建议：**
+            1. 确认 AI 回复中是否包含 `|` 符号。
+            2. 如果 AI 生成了代码块，请只复制其中的内容，不要复制 ``` 等符号。
+            """)
