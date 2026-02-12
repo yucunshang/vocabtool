@@ -126,7 +126,7 @@ def analyze_logic(text, current_lvl, target_lvl):
         except: return word
 
     raw_tokens = re.findall(r"[a-z]+", text.lower())
-    total_words = len(raw_tokens) # 文档总字数
+    total_words = len(raw_tokens)
     unique_tokens = set(raw_tokens)
     target_words = []
     
@@ -138,7 +138,6 @@ def analyze_logic(text, current_lvl, target_lvl):
             target_words.append((lemma, rank))
             
     target_words.sort(key=lambda x: x[1])
-    # 返回：生词列表, 文档总字数
     return [x[0] for x in target_words], total_words
 
 def parse_anki_data(raw_text):
@@ -265,7 +264,7 @@ Words: {w_list}
 # ==========================================
 # 5. UI 主程序
 # ==========================================
-st.title("⚡️ Vocab Flow Ultra (V21)")
+st.title("⚡️ Vocab Flow Ultra (V22)")
 
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`")
@@ -295,18 +294,16 @@ with tab_guide:
     <strong>Step 2: 生成 Prompt (AI Generation)</strong><br>
     分析完成后：<br>
     1. 展开 <strong>⚙️ 自定义 Prompt 设置</strong>：选择你要背单词还是短语，释义要中文还是英文。<br>
-    2. 设置 <strong>AI 分组大小</strong>（建议 50-100）。<br>
-    3. <strong>复制 Prompt</strong>：
+    2. <strong>复制 Prompt</strong>：
        - 📱 <strong>手机/鸿蒙</strong>：使用下方的“文本框”长按全选复制。<br>
        - 💻 <strong>电脑</strong>：点击代码块右上角的 Copy 按钮。<br>
-    4. 发送给 ChatGPT / Claude / Gemini 等 AI 模型。
+    3. 发送给 ChatGPT / Claude / Gemini 等 AI 模型。
     </div>
 
     <div class="guide-step">
     <strong>Step 3: 制作 Anki 牌组 (Create Deck)</strong><br>
     在 <code>2️⃣ Anki 制作</code> 标签页：<br>
     1. 将 AI 回复的 JSON 内容<strong>粘贴</strong>到输入框中。<br>
-       - 💡 <em>支持多次追加：如果有 3 组单词，你可以把 AI 的 3 次回复依次粘贴在同一个框里。</em><br>
     2. 点击 <strong>📥 下载 .apkg</strong>。<br>
     3. 双击文件导入 Anki 即可背诵！
     </div>
@@ -324,8 +321,7 @@ with tab_extract:
         
         if st.button("🚀 开始分析", type="primary"):
             with st.status("正在处理...", expanded=True) as status:
-                start_time = time.time() # ⏱️ 开始计时
-                
+                start_time = time.time()
                 status.write("📂 读取文件...")
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
@@ -333,7 +329,6 @@ with tab_extract:
                     status.write(f"🔍 提取 {len(raw_text)} 字符，加载 NLP 库...")
                     final_words, raw_count = analyze_logic(raw_text, curr, targ)
                     
-                    # 存储到 session
                     st.session_state['gen_words'] = final_words
                     st.session_state['raw_count'] = raw_count
                     st.session_state['process_time'] = time.time() - start_time
@@ -357,7 +352,7 @@ with tab_extract:
                     w_col = next(c for c in FULL_DF.columns if 'word' in c)
                     subset = FULL_DF[FULL_DF[r_col] >= s_rank].sort_values(r_col).head(count)
                     st.session_state['gen_words'] = subset[w_col].tolist()
-                    st.session_state['raw_count'] = 0 # 随机模式无原文档
+                    st.session_state['raw_count'] = 0
                     st.session_state['process_time'] = time.time() - start_time
         else:
             c_min, c_max, c_cnt = st.columns([1,1,1])
@@ -380,22 +375,20 @@ with tab_extract:
     if 'gen_words' in st.session_state and st.session_state['gen_words']:
         words = st.session_state['gen_words']
         
-        # --- V21 新增：数据统计看板 ---
+        # --- 📊 数据看板 ---
         st.divider()
         st.markdown("### 📊 分析报告")
         k1, k2, k3 = st.columns(3)
-        
         raw_c = st.session_state.get('raw_count', 0)
         p_time = st.session_state.get('process_time', 0.1)
-        
         k1.metric("📄 文档总字数", f"{raw_c:,}")
         k2.metric("🎯 筛选生词", f"{len(words)}")
         k3.metric("⚡ 耗时", f"{p_time:.2f}s")
         
-        # --- V21 新增：全词汇一键复制 ---
-        st.markdown("### 📋 全部生词预览 (一键复制)")
+        # --- 📋 一键复制 (使用 st.code 实现) ---
+        st.markdown("### 📋 全部生词 (点击右上角复制)")
         all_words_str = ", ".join(words)
-        st.text_area("所有单词 (逗号分隔)", value=all_words_str, height=100)
+        st.code(all_words_str, language="text")
 
         # --- 设置面板 ---
         with st.expander("⚙️ **自定义 Prompt 设置 (点击展开)**", expanded=True):
@@ -414,9 +407,9 @@ with tab_extract:
             with st.expander(f"📌 第 {idx+1} 组 (共 {len(batch)} 词)", expanded=(idx==0)):
                 prompt_text = get_ai_prompt(batch, front_mode, def_mode, ex_count, need_ety)
                 
-                st.caption("📱 全选复制专用：")
+                st.caption("📱 手机端专用 (长按全选复制)：")
                 st.text_area(f"text_area_{idx}", value=prompt_text, height=100, label_visibility="collapsed")
-                st.caption("💻 电脑端：")
+                st.caption("💻 电脑端 (点击 Copy 图标)：")
                 st.code(prompt_text, language="text")
 
 with tab_anki:
