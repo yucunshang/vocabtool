@@ -18,7 +18,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 动态 Key 初始化 (用于一键清空)
+# 动态 Key 初始化
 if 'uploader_id' not in st.session_state:
     st.session_state['uploader_id'] = "1000"
 
@@ -43,10 +43,18 @@ st.markdown("""
         white-space: pre-wrap;
     }
     
-    /* 指南样式 */
+    /* 指南样式 (默认浅色) */
     .guide-step { background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #0056b3; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .guide-title { font-size: 18px; font-weight: bold; color: #0f172a; margin-bottom: 10px; display: block; }
     .guide-tip { font-size: 14px; color: #64748b; background: #eef2ff; padding: 8px; border-radius: 4px; margin-top: 8px; }
+
+    /* 指南样式 (夜间模式适配) */
+    @media (prefers-color-scheme: dark) {
+        .guide-step { background-color: #262730; border-left: 5px solid #4da6ff; box-shadow: none; border: 1px solid #3d3d3d; border-left: 5px solid #4da6ff; }
+        .guide-title { color: #e0e0e0; }
+        .guide-tip { background-color: #31333F; color: #b0b0b0; border: 1px solid #444; }
+        .scrollable-text { background-color: #262730; border: 1px solid #444; color: #ccc; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -126,7 +134,7 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. 核心逻辑 (优化版: 增加覆盖率统计)
+# 2. 核心逻辑 (优化版)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -188,18 +196,18 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     raw_tokens = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", text)
     total_raw_count = len(raw_tokens)
     
-    # 2. 统计词频 (使用有效词汇计算覆盖率)
+    # 2. 统计词频
     valid_tokens = [t.lower() for t in raw_tokens if is_valid_word(t.lower())]
     token_counts = Counter(valid_tokens)
     
-    stats_known_count = 0  # 熟词 (rank < current_lvl)
-    stats_target_count = 0 # 目标词 (current <= rank <= target)
-    stats_valid_total = sum(token_counts.values()) # 分母
+    stats_known_count = 0  
+    stats_target_count = 0 
+    stats_valid_total = sum(token_counts.values()) 
     
     final_candidates = [] 
     seen_lemmas = set()
     
-    # 3. 遍历去重后的词类型 (Type)，但利用 count 计算 Token 覆盖率
+    # 3. 遍历
     for w, count in token_counts.items():
         # A. 计算 Lemma
         lemma = get_lemma_local(w)
@@ -215,13 +223,13 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
         else:
             best_rank = rank_orig
             
-        # --- 统计逻辑 (基于原文出现次数) ---
+        # --- 统计逻辑 ---
         if best_rank < current_lvl:
             stats_known_count += count
         elif current_lvl <= best_rank <= target_lvl:
             stats_target_count += count
             
-        # --- 提取逻辑 (基于去重后的 Lemma) ---
+        # --- 提取逻辑 ---
         is_in_range = (best_rank >= current_lvl and best_rank <= target_lvl)
         is_unknown_included = (best_rank == 99999 and include_unknown)
         
@@ -320,11 +328,12 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 # ==========================================
-# 3. Anki 生成
+# 3. Anki 生成 (优化: 字体统一)
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
     genanki, tempfile = get_genanki()
     
+    # 优化 CSS: 例句和词源字体增大到 20px
     CSS = """
     .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .nightMode .card { background-color: #2e2e2e; color: #f0f0f0; }
@@ -333,10 +342,10 @@ def generate_anki_package(cards_data, deck_name):
     hr { border: 0; height: 1px; background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0)); margin-bottom: 15px; }
     .definition { font-weight: bold; color: #222; margin-bottom: 15px; font-size: 20px; text-align: left; }
     .nightMode .definition { color: #e0e0e0; }
-    .examples { background: #f7f9fa; padding: 12px; border-left: 4px solid #0056b3; border-radius: 4px; color: #444; font-style: italic; font-size: 18px; line-height: 1.5; margin-bottom: 15px; text-align: left; }
+    .examples { background: #f7f9fa; padding: 12px; border-left: 4px solid #0056b3; border-radius: 4px; color: #444; font-style: italic; font-size: 20px; line-height: 1.5; margin-bottom: 15px; text-align: left; }
     .nightMode .examples { background: #383838; color: #ccc; border-left-color: #66b0ff; }
     .footer-info { margin-top: 20px; border-top: 1px dashed #ccc; padding-top: 10px; text-align: left; }
-    .etymology { display: block; font-size: 16px; color: #555; background-color: #fffdf5; padding: 10px; border-radius: 6px; margin-bottom: 5px; line-height: 1.4; border: 1px solid #fef3c7; }
+    .etymology { display: block; font-size: 20px; color: #555; background-color: #fffdf5; padding: 10px; border-radius: 6px; margin-bottom: 5px; line-height: 1.4; border: 1px solid #fef3c7; }
     .nightMode .etymology { background-color: #333; color: #aaa; border-color: #444; }
     """
     model_id = random.randrange(1 << 30, 1 << 31)
@@ -374,7 +383,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt Logic
+# 4. Prompt Logic (优化: 语义原子性)
 # ==========================================
 def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     w_list = ", ".join(words)
@@ -382,19 +391,19 @@ def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     if front_mode == "单词 (Word)":
         w_instr = "Key `w`: The word itself (lowercase)."
     else:
-        w_instr = "Key `w`: A short practical collocation/phrase (2-5 words)."
+        w_instr = "Key `w`: A short practical collocation/phrase (2-5 words) that naturally contains the word."
 
     if def_mode == "中文":
-        m_instr = "Key `m`: Concise Chinese definition (max 10 chars)."
+        m_instr = "Key `m`: Concise Chinese definition of the **word** (max 10 chars). NOT the definition of the phrase."
     elif def_mode == "中英双语":
-        m_instr = "Key `m`: English Definition + Chinese Definition."
+        m_instr = "Key `m`: English Definition + Chinese Definition of the **word**."
     else:
-        m_instr = "Key `m`: English definition (concise)."
+        m_instr = "Key `m`: English definition of the **word** (concise)."
 
     e_instr = f"Key `e`: {ex_count} example sentence(s). Use `<br>` to separate if multiple."
 
     if need_ety:
-        r_instr = "Key `r`: Simplified Chinese Etymology (Root/Prefix)."
+        r_instr = "Key `r`: Simplified Chinese Etymology (Root/Prefix) corresponding to this specific meaning."
     else:
         r_instr = "Key `r`: Leave this empty string \"\"."
 
@@ -402,7 +411,12 @@ def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
 Task: Create Anki cards.
 Words: {w_list}
 
-**OUTPUT: NDJSON (One line per object).**
+**CRITICAL: SEMANTIC ATOMICITY**
+1. **Consistency**: The Word/Phrase (`w`), Meaning (`m`), Example (`e`), and Etymology (`r`) MUST all correspond to the **same specific context/meaning**.
+2. **No Mixing**: Do NOT mix definitions. (e.g., If `w` is "bracket" in a tax context, `m` must be "grade/category", `e` must be about taxes. Do NOT give the definition of "punctuation mark").
+3. **Definition Focus**: Even if `w` is a phrase (e.g. "give up"), `m` should explain the core meaning derived from it.
+
+**Output Format: NDJSON (One line per object).**
 
 **Requirements:**
 1. {w_instr}
@@ -412,8 +426,8 @@ Words: {w_list}
 
 **Keys:** `w` (Front), `m` (Meaning), `e` (Examples), `r` (Etymology)
 
-**Example:**
-{{"w": "...", "m": "...", "e": "...", "r": "..."}}
+**Example (Correct Consistency):**
+{{"w": "bracket", "m": "等级/档次", "e": "He is in the highest income tax bracket.", "r": "from braguette (codpiece)"}}
 
 **Start:**
 """
@@ -578,7 +592,6 @@ with tab_extract:
         
         k1.metric("📄 总字数", f"{raw_c:,}")
         
-        # 如果是 Random/Seq 模式，stats_info 可能为 None，做个判断
         if stats:
             k2.metric("📖 熟词覆盖率", f"{stats.get('coverage', 0):.1%}")
             k3.metric("🎯 重点词占比", f"{stats.get('target_density', 0):.1%}")
