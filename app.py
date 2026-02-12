@@ -131,127 +131,150 @@ def analyze_logic(text, current_lvl, target_lvl):
 
 def parse_anki_data(raw_text):
     """
-    V4 超级严格解析器：
-    1. 必须包含至少 3 个 '|' 符号，否则视为垃圾行丢弃。
-    2. 单词数 > 7 的正面内容会被判定为句子并丢弃。
+    V5 解析器 (No IPA):
+    结构: Phrase | Meaning | Examples | Etymology
     """
     parsed_cards = []
     lines = raw_text.strip().split('\n')
-    
     seen_phrases = set()
 
     for line in lines:
         line = line.strip()
         if not line: continue
         
-        # Rule 1: 严格过滤。如果一行没有3个以上的竖线，说明不是完整数据，直接丢弃。
-        # 这能解决 "AI 换行写例句" 导致的卡片数量翻倍问题。
+        # 至少要有3个分隔符才能分出4列
         if line.count('|') < 3:
             continue
 
         clean_line = line.strip('|')
         parts = [p.strip() for p in clean_line.split('|')]
         
-        # 确保至少有4部分 (Phrase, IPA, Meaning, Examples)
+        # 确保有4部分 (Phrase, Meaning, Examples, Etymology)
         if len(parts) >= 4:
             front_text = parts[0]
             
-            # --- 深度清洗正面 ---
-            front_text = front_text.rstrip('.,?!: ') # 去除标点
-            front_text = front_text.replace('*', '') # 去除 Markdown
+            # --- 清洗正面 ---
+            front_text = front_text.rstrip('.,?!: ')
+            front_text = front_text.replace('*', '')
             
-            # Rule 2: 单词数熔断。如果正面超过 7 个单词，大概率是句子。
-            word_count = len(front_text.split())
-            if word_count > 7:
-                continue # 丢弃长句子卡片
+            # 过滤长句子 (>7单词)
+            if len(front_text.split()) > 7:
+                continue
 
-            # Rule 3: 强制小写首字母 (除非是 I 或 专有名词的中间部分，这里简单粗暴处理首词)
-            # 这会在视觉上让它看起来不像句子
+            # 首字母小写处理
             if front_text:
                 first_word = front_text.split()[0]
                 if first_word != "I" and not first_word.isupper():
                     front_text = front_text[0].lower() + front_text[1:]
 
-            # 去重
             if front_text in seen_phrases:
                 continue
             seen_phrases.add(front_text)
 
-            etymology = parts[4] if len(parts) > 4 else ""
-
+            # 解析数据 (注意：IPA已移除，索引前移)
             parsed_cards.append({
                 'front_phrase': front_text,
-                'ipa': parts[1],
-                'meaning': parts[2],
-                'examples': parts[3],
-                'etymology': etymology
+                'meaning': parts[1],
+                'examples': parts[2],
+                'etymology': parts[3] # 以前是 parts[4]，现在是 parts[3]
             })
             
     return parsed_cards
 
 # ==========================================
-# 3. Anki 生成逻辑
+# 3. Anki 生成逻辑 (无 IPA 版)
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
     CSS = """
     .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .nightMode .card { background-color: #2e2e2e; color: #f0f0f0; }
+    
     .phrase { font-size: 28px; font-weight: 700; color: #0056b3; margin-bottom: 20px; line-height: 1.3; }
     .nightMode .phrase { color: #66b0ff; }
+    
     hr { border: 0; height: 1px; background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0)); margin-bottom: 15px; }
+    
     .definition { font-weight: bold; color: #222; margin-bottom: 15px; font-size: 20px; text-align: left; }
     .nightMode .definition { color: #e0e0e0; }
+    
     .examples { background: #f7f9fa; padding: 12px; border-left: 4px solid #0056b3; border-radius: 4px; color: #444; font-style: italic; font-size: 18px; line-height: 1.5; margin-bottom: 15px; text-align: left; }
     .nightMode .examples { background: #383838; color: #ccc; border-left-color: #66b0ff; }
+    
     .footer-info { margin-top: 20px; border-top: 1px dashed #ccc; padding-top: 10px; text-align: left; }
-    .etymology { display: block; font-size: 16px; color: #555; background-color: #fffdf5; padding: 8px 10px; border-radius: 4px; margin-bottom: 5px; line-height: 1.4; }
+    
+    /* 词源样式增强 */
+    .etymology { display: block; font-size: 16px; color: #555; background-color: #fffdf5; padding: 10px; border-radius: 6px; margin-bottom: 5px; line-height: 1.4; border: 1px solid #fef3c7; }
     .etymology b { color: #8b5cf6; } 
-    .ipa { color: #999; font-size: 14px; font-family: monospace; margin-top: 5px;}
-    .nightMode .etymology { background-color: #333; color: #aaa; }
+    .nightMode .etymology { background-color: #333; color: #aaa; border-color: #444; }
     .nightMode .etymology b { color: #a78bfa; }
     """
     
     model_id = random.randrange(1 << 30, 1 << 31)
     model = genanki.Model(
         model_id, 
-        f'VocabFlow Phrase Model {model_id}',
-        fields=[{'name': 'FrontPhrase'}, {'name': 'IPA'}, {'name': 'Meaning'}, {'name': 'Examples'}, {'name': 'Etymology'}],
+        f'VocabFlow NoIPA Model {model_id}',
+        fields=[
+            {'name': 'FrontPhrase'}, 
+            {'name': 'Meaning'}, 
+            {'name': 'Examples'}, 
+            {'name': 'Etymology'}
+        ],
         templates=[{
             'name': 'Phrase Card',
             'qfmt': '<div class="phrase">{{FrontPhrase}}</div>', 
-            'afmt': '''{{FrontSide}}<hr><div class="definition">{{Meaning}}</div><div class="examples">{{Examples}}</div><div class="footer-info"><div class="etymology">🌱 <b>词源:</b> {{Etymology}}</div><div class="ipa">IPA: {{IPA}}</div></div>''',
+            'afmt': '''
+            {{FrontSide}}
+            <hr>
+            <div class="definition">{{Meaning}}</div>
+            <div class="examples">{{Examples}}</div>
+            
+            <div class="footer-info">
+                <div class="etymology">🌱 <b>词源:</b> {{Etymology}}</div>
+            </div>
+            ''',
         }], css=CSS
     )
     
     deck = genanki.Deck(random.randrange(1 << 30, 1 << 31), deck_name)
     for c in cards_data:
-        deck.add_note(genanki.Note(model=model, fields=[str(c['front_phrase']), str(c['ipa']), str(c['meaning']), str(c['examples']).replace('\n','<br>'), str(c['etymology'])]))
+        deck.add_note(genanki.Note(
+            model=model, 
+            fields=[
+                str(c['front_phrase']), 
+                str(c['meaning']), 
+                str(c['examples']).replace('\n','<br>'), 
+                str(c['etymology'])
+            ]
+        ))
         
     with tempfile.NamedTemporaryFile(delete=False, suffix='.apkg') as tmp:
         genanki.Package(deck).write_to_file(tmp.name)
         return tmp.name
 
 # ==========================================
-# 4. Prompt 生成逻辑 (V4 极简严厉版)
+# 4. Prompt 生成逻辑 (无 IPA, 4列版)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
     return f"""
-Task: Create an Anki dataset for the following words.
+Task: Create Anki cards.
 Words: {w_list}
 
-**FORMAT RULES (STRICT):**
-1. Output format: `Phrase | IPA | English Definition | Example Sentences | Chinese Etymology`
-2. **COLUMN 1 (Phrase):**
-   - MUST be a short collocation (2-5 words).
-   - **LOWERCASE** only (unless proper noun).
-   - **NO PERIODS** (.) at the end.
-   - **NO SENTENCES.** Do not use "He/She/It". 
-   - Good: "a benevolent leader" | Bad: "He is a benevolent leader."
-3. **COLUMN 4 (Examples):** 1-2 sentences. Use `<br>` to separate them. Do NOT use newlines.
-4. **COLUMN 5 (Etymology):** Chinese only.
+**STRICT OUTPUT FORMAT (4 Columns):**
+`Phrase | English Definition | Example Sentences | Chinese Etymology`
 
-**Start Output immediately (No headers):**
+**RULES:**
+1. **NO IPA.** Do not include pronunciation.
+2. **Column 1 (Phrase):** 
+   - Short collocation (2-5 words). 
+   - **NO** sentences. **NO** periods. Lowercase preferred.
+3. **Column 3 (Examples):** 1-2 sentences. Use `<br>` to separate.
+4. **Column 4 (Etymology):** Simplified Chinese only. Root/Prefix/Suffix breakdown.
+
+**Example:**
+a benevolent leader | characterized by goodwill | The benevolent man helped the poor.<br>She is benevolent. | 词根: bene (好) + vol (意愿) + ent (后缀)
+
+**Start Output:**
 """
 
 # ==========================================
@@ -330,19 +353,19 @@ with tab_anki:
     bj_time_str = get_beijing_time_str()
     if 'anki_input_text' not in st.session_state: st.session_state['anki_input_text'] = ""
 
-    ai_resp = st.text_area("在此粘贴 AI 回复", height=200, key="anki_input_text")
+    ai_resp = st.text_area("在此粘贴 AI 回复 (无IPA版)", height=200, key="anki_input_text")
     deck_name = st.text_input("牌组名称", f"Vocab_{bj_time_str}")
     
     if ai_resp.strip():
         parsed_data = parse_anki_data(ai_resp)
         if parsed_data:
-            st.markdown(f"#### 👁️ 预览 (已过滤长难句，保留 {len(parsed_data)} 条)")
+            st.markdown(f"#### 👁️ 预览 (保留 {len(parsed_data)} 条)")
             df_view = pd.DataFrame(parsed_data)
-            df_view.rename(columns={'front_phrase': '正面 (短语)', 'ipa': 'IPA', 'meaning': '英文释义', 'examples': '例句', 'etymology': '中文词源'}, inplace=True)
+            df_view.rename(columns={'front_phrase': '正面 (短语)', 'meaning': '英文释义', 'examples': '例句', 'etymology': '中文词源'}, inplace=True)
             st.dataframe(df_view, use_container_width=True, hide_index=True)
             
             f_path = generate_anki_package(parsed_data, deck_name)
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 格式无效。请确保粘贴了包含 '|' 分隔符的 AI 回复。")
+            st.warning("⚠️ 格式无效。请确保粘贴内容包含3个 '|' 分隔符。")
