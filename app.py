@@ -66,7 +66,7 @@ def load_data():
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
             df = df.dropna(subset=[r_col])
             
-            # 【逻辑保持】先升序排，再去重保留第一个，确保常用义优先
+            # 排序去重，保留最常用义 (Rank 最小)
             df = df.sort_values(r_col, ascending=True)
             df_unique = df.drop_duplicates(subset=[w_col], keep='first')
             
@@ -104,15 +104,27 @@ def analyze_text(text, current_lvl, target_lvl):
 
 def generate_prompt(word_list, settings):
     word_str = ", ".join(word_list)
+    
+    # 解析设置
     fmt = settings.get("format", "CSV")
     ex_count = settings.get("example_count", 1)
-    lang = settings.get("lang", "Chinese")
     
-    # 【Prompt 保持最新格式】
-    # 1. 包含您的 latitude/detainee/moose 示例
-    # 2. 保持 <br> <br> 空行
-    # 3. 保持无斜体
-    
+    # 1. 正面风格逻辑
+    front_style = settings.get("front_style", "Phrase")
+    if "Phrase" in front_style:
+        front_instruction = "A natural, short English phrase or collocation containing the target word (e.g., 'shaky hands')."
+    else:
+        front_instruction = "The target word ONLY (e.g., 'shaky')."
+
+    # 2. 释义语言逻辑
+    def_lang_opt = settings.get("def_lang", "Chinese")
+    if "中文" in def_lang_opt:
+        def_instruction = "Concise Chinese definition."
+    elif "双语" in def_lang_opt:
+        def_instruction = "Concise English definition + Concise Chinese definition."
+    else:
+        def_instruction = "Concise English definition."
+
     prompt = f"""Role: High-Efficiency Anki Card Creator
 Task: Convert the provided word list into a strict {fmt} data block.
 
@@ -122,7 +134,7 @@ Task: Convert the provided word list into a strict {fmt} data block.
    Header: **Do NOT output a header row.**
 
 2. Column 1 (Front):
-   - Content: A natural, short English phrase/collocation.
+   - Content: {front_instruction}
    - Style: **ALL LOWERCASE**.
 
 3. Column 2 (Back):
@@ -131,18 +143,18 @@ Task: Convert the provided word list into a strict {fmt} data block.
    - Spacing Rules: 
      - Use double <br> tags ( <br> <br> ) to create empty lines between sections.
    - Example Style: Plain text (NO italics). **Start with UPPERCASE**.
-   - Definition: {lang} concise.
+   - Definition Language: {def_instruction}
 
 4. Etymology Style:
-   - Only explain roots/affixes in {lang}.
+   - **ALWAYS Chinese (中文)**.
+   - Only explain roots/affixes.
    - Format: 【源】Root (Meaning) + Affix (Meaning)
 
 5. Atomicity: Separate rows for distinct meanings.
 
 --- EXAMPLE OUTPUT ---
-"north latitude","the angular distance of a place north or south of the equator<br> <br> The island is located at 20 degrees north latitude.<br> <br> 【源】Lat. 'latus' (宽)"
-"political detainee","a person held in custody, especially for political reasons<br> <br> The detainees were held without trial.<br> <br> 【源】detain (拘留) + -ee (被...的人)"
-"wild moose","a large deer with palmate antlers found in North America<br> <br> We saw a moose by the lake.<br> <br> 【源】Algonquian 'moosu' (食树枝者)"
+"north latitude","the angular distance north of the equator<br> <br> The island is at 20 degrees north latitude.<br> <br> 【源】Lat. 'latus' (宽)"
+"political detainee","a person held in custody for political reasons<br> <br> The detainees were held without trial.<br> <br> 【源】detain (拘留) + -ee (被...的人)"
 
 --- WORD LIST ({len(word_list)} words) ---
 {word_str}
@@ -157,16 +169,33 @@ st.title("⚡️ Vocab Master")
 if FULL_DF is None:
     st.error("⚠️ 缺少词频文件")
 else:
-    # --- 顶栏设置 ---
-    with st.expander("⚙️ Prompt 设置", expanded=False):
+    # --- 顶栏设置 (全新) ---
+    with st.expander("⚙️ Prompt 设置 (Settings)", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
-            set_format = st.selectbox("格式", ["CSV", "TXT"], index=0)
-            set_lang = st.selectbox("语言", ["Chinese", "English"], index=0)
+            # 1. 正面单词/短语
+            set_front_style = st.selectbox(
+                "正面内容 (Front)", 
+                ["短语/搭配 (Phrase)", "单词 (Word)"], 
+                index=0
+            )
+            # 2. 释义语言
+            set_def_lang = st.selectbox(
+                "释义语言 (Definition)", 
+                ["中文 (Chinese)", "英文 (English)", "中英双语 (Bilingual)"], 
+                index=0
+            )
         with c2:
-            set_ex_count = st.number_input("例句数", 1, 3, 1)
+            # 3. 例句数量
+            set_ex_count = st.number_input("例句数量 (Examples)", 1, 3, 1)
+            set_format = st.selectbox("导出格式", ["CSV", "TXT"], index=0)
             
-    settings = {"format": set_format, "lang": set_lang, "example_count": set_ex_count}
+    settings = {
+        "format": set_format, 
+        "front_style": set_front_style,
+        "def_lang": set_def_lang,
+        "example_count": set_ex_count
+    }
 
     # --- 模式选择 ---
     mode = st.radio("模式", ["📖 文本提取", "🔢 词频刷词", "🛠️ 格式转换"], horizontal=True, label_visibility="collapsed")
@@ -280,7 +309,6 @@ else:
     # ------------------------------------------------
     elif mode == "🔢 词频刷词":
         c1, c2 = st.columns(2)
-        # 【修改】Start 步长 100，Count 步长 10
         with c1: s_r = st.number_input("起始排名 (Start)", value=8000, step=100)
         with c2: cnt = st.number_input("生成数量 (Count)", value=50, step=10)
         
@@ -310,6 +338,6 @@ else:
         txt = st.text_area("粘贴内容", height=200)
         
         if txt:
-            # 清洗 AI 可能带的代码块标记
+            # 清洗
             clean_txt = txt.replace("```csv", "").replace("```", "").strip()
             st.download_button("📥 下载 .csv", clean_txt.encode("utf-8"), "anki.csv", "text/csv", type="primary")
