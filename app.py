@@ -31,8 +31,9 @@ st.markdown("""
 <style>
     .stTextArea textarea { font-family: 'Consolas', monospace; font-size: 14px; }
     .stButton>button { border-radius: 8px; font-weight: 600; width: 100%; }
-    .stat-box { padding: 10px; background-color: #f0f2f6; border-radius: 8px; margin-bottom: 10px; text-align: center; }
-    .copy-hint { font-size: 0.8em; color: #888; margin-top: -10px; margin-bottom: 10px; text-align: right; }
+    .batch-container { border: 1px solid #e0e0e0; padding: 15px; border-radius: 8px; margin-bottom: 10px; background-color: #f9f9f9; }
+    .stat-box { padding: 10px; background-color: #e6fffa; border-radius: 8px; text-align: center; color: #006d5b; margin-bottom: 10px; }
+    .reset-btn { color: red; border-color: red; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -77,78 +78,62 @@ def get_lemma(word):
     try: return lemminflect.getLemma(word, upos='VERB')[0]
     except: return word
 
+def clear_all_state():
+    """一键清空的回调函数"""
+    st.session_state.clear()
+
 # ==========================================
-# 2. 多格式文件解析 (百万字优化版)
+# 2. 文本提取与分析
 # ==========================================
 def extract_text_from_file(uploaded_file):
-    """根据文件类型提取文本"""
+    """多格式文件解析"""
     text = ""
     file_type = uploaded_file.name.split('.')[-1].lower()
-    
     try:
         if file_type == 'txt':
             text = uploaded_file.getvalue().decode("utf-8", errors='ignore')
-            
         elif file_type == 'pdf':
             reader = pypdf.PdfReader(uploaded_file)
             text = " ".join([page.extract_text() for page in reader.pages if page.extract_text()])
-            
         elif file_type == 'docx':
             doc = docx.Document(uploaded_file)
             text = "\n".join([p.text for p in doc.paragraphs])
-            
         elif file_type == 'epub':
-            # 需要先保存为临时文件才能用 ebooklib 读取
             with tempfile.NamedTemporaryFile(delete=False, suffix='.epub') as tmp:
                 tmp.write(uploaded_file.getvalue())
                 tmp_path = tmp.name
-            
             book = epub.read_epub(tmp_path)
             for item in book.get_items():
                 if item.get_type() == ebooklib.ITEM_DOCUMENT:
                     soup = BeautifulSoup(item.get_content(), 'html.parser')
                     text += soup.get_text() + " "
             os.remove(tmp_path)
-            
     except Exception as e:
         return f"Error: {e}"
-        
     return text
 
-@st.cache_data
-def fast_analyze_text(text, current_lvl, target_lvl):
-    """
-    性能优化核心：
-    1. 使用正则 (re) 替代 NLTK 做分词，速度快 10 倍。
-    2. 使用 Set 去重后才做 Lemmatization，避免对 100 万个词重复运算。
-    """
-    # 1. 快速分词 (Regex)
+def analyze_logic(text, current_lvl, target_lvl):
+    """核心分析逻辑"""
     raw_tokens = re.findall(r"[a-z]+", text.lower())
-    
-    # 2. 统计总词数
     total_words = len(raw_tokens)
-    
-    # 3. 核心算法：仅对去重后的词进行词形还原和查表
     unique_tokens = set(raw_tokens)
-    target_words = []
     
+    target_words = []
     for w in unique_tokens:
-        if len(w) < 3: continue # 忽略过短单词
+        if len(w) < 3: continue 
         lemma = get_lemma(w)
         rank = VOCAB_DICT.get(lemma, 99999)
         
-        # 筛选逻辑
+        # 筛选: Current < Rank <= Target
         if rank > current_lvl and rank <= target_lvl:
             target_words.append((lemma, rank))
             
-    # 4. 排序
     target_words.sort(key=lambda x: x[1])
     final_list = [x[0] for x in target_words]
-    
     return final_list, total_words
 
 # ==========================================
-# 3. Anki 打包 & CSS (保持不变)
+# 3. Anki 生成逻辑
 # ==========================================
 def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
     CSS = """
@@ -203,112 +188,141 @@ benevolent | /bəˈnevələnt/ | kind and meaningful | He is benevolent.<br>A be
 """
 
 # ==========================================
-# 4. 主界面
+# 4. 主程序
 # ==========================================
 st.title("⚡️ Vocab Flow Ultra")
 
 if not VOCAB_DICT:
-    st.error("⚠️ 缺失 `coca_cleaned.csv`，无法进行频率筛选！")
+    st.error("⚠️ 缺失 `coca_cleaned.csv`")
 
-tab1, tab2, tab3 = st.tabs(["📂 文件分析", "🔢 词频生成", "🛠️ 制作 Anki"])
+# 侧边栏：一键重置
+with st.sidebar:
+    st.header("控制台")
+    if st.button("🗑️ 清空所有数据", type="secondary", on_click=clear_all_state):
+        pass # 回调已处理
 
-# --- Tab 1: 文件分析 (支持百万字) ---
-with tab1:
-    c1, c2 = st.columns(2)
-    curr = c1.number_input("忽略简单词 (Rank <)", 1000, 20000, 4000, step=500)
-    targ = c2.number_input("忽略生僻词 (Rank >)", 2000, 50000, 15000, step=500)
-    
-    # 支持多种格式上传
-    uploaded_file = st.file_uploader("上传文件 (支持 .txt, .pdf, .docx, .epub)", type=['txt', 'pdf', 'docx', 'epub'])
-    
-    if uploaded_file and st.button("🚀 开始极速分析"):
-        with st.spinner("正在解析文件..."):
-            # 1. 解析文本
-            raw_text = extract_text_from_file(uploaded_file)
-            
-            if len(raw_text) < 10:
-                st.error("无法读取文本，可能是扫描版PDF或加密文件。")
-            else:
-                # 2. 极速分析
-                t0 = time.time()
-                final_words, total_count = fast_analyze_text(raw_text, curr, targ)
-                t1 = time.time()
-                
-                st.markdown(f"""
-                <div class="stat-box">
-                    📊 原文约 <b>{total_count}</b> 词 | 耗时 <b>{t1-t0:.2f}s</b><br>
-                    🎯 筛选出 <b>{len(final_words)}</b> 个重点词 (Rank {curr}-{targ})
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.session_state['gen_words'] = final_words
+# Input Tabs
+tab_input, tab_anki = st.tabs(["1️⃣ 提取 & 生成", "2️⃣ 打包 Anki"])
 
-# --- Tab 2: 词频生成 (保留的功能) ---
-with tab2:
-    st.caption("直接根据词频排名生成单词表，无需上传文件。")
-    c_a, c_b = st.columns(2)
-    start_rank = c_a.number_input("起始排名 (Start Rank)", 1, 20000, 8000, step=100)
-    count_num = c_b.number_input("生成数量 (Count)", 10, 500, 50, step=10)
+with tab_input:
+    # 1. 来源选择
+    input_method = st.radio("选择来源", ["📄 粘贴文本", "📂 上传文件", "🔢 词频Rank生成"], horizontal=True, label_visibility="collapsed")
     
-    if st.button("🔢 生成列表", type="primary"):
-        if FULL_DF is not None:
-            # 这里的 FULL_DF 是在 load_data 里返回的原始 DataFrame
-            # 我们需要 FULL_DF 的 columns 分别是 word 和 rank
-            # 在 load_vocab_data 稍微调整一下让它返回 DF
-             
-            # 筛选逻辑
-            try:
-                # 找到 Rank 列名
-                r_col = next(c for c in FULL_DF.columns if 'rank' in c)
-                w_col = next(c for c in FULL_DF.columns if 'word' in c)
-                
-                subset = FULL_DF[FULL_DF[r_col] >= start_rank].sort_values(r_col).head(count_num)
-                gen_list = subset[w_col].tolist()
-                st.session_state['gen_words'] = gen_list
-                st.success(f"已生成 {len(gen_list)} 个单词 (Rank {start_rank} 起)")
-            except Exception as e:
-                st.error(f"生成失败: {e}")
+    final_words = []
+    
+    # --- A. 文本/文件逻辑 ---
+    if input_method in ["📄 粘贴文本", "📂 上传文件"]:
+        c1, c2 = st.columns(2)
+        curr = c1.number_input("Current Level (Ignore <)", 1000, 20000, 4000, step=500)
+        targ = c2.number_input("Target Level (Ignore >)", 2000, 50000, 15000, step=500)
+        
+        raw_text = ""
+        
+        if input_method == "📄 粘贴文本":
+            raw_text = st.text_area("在此粘贴文本", height=200)
+            if st.button("🔍 分析文本"):
+                if raw_text:
+                    final_words, total = analyze_logic(raw_text, curr, targ)
+                    st.session_state['gen_words'] = final_words
+                    st.session_state['total_count'] = total
         else:
-            st.error("无数据源")
+            up_file = st.file_uploader("支持 PDF/TXT/DOCX/EPUB", type=['txt','pdf','docx','epub'])
+            if up_file and st.button("🚀 分析文件"):
+                with st.spinner("解析中..."):
+                    raw_text = extract_text_from_file(up_file)
+                    if len(raw_text) > 10:
+                        final_words, total = analyze_logic(raw_text, curr, targ)
+                        st.session_state['gen_words'] = final_words
+                        st.session_state['total_count'] = total
+                    else:
+                        st.error("无法读取文件内容")
 
-# --- 结果展示与 Prompt 生成 (Tab 1 & 2 共用) ---
-if 'gen_words' in st.session_state and st.session_state['gen_words']:
-    st.divider()
-    st.markdown("### 📋 单词列表 & Prompt")
-    
-    words = st.session_state['gen_words']
-    words_str = ", ".join(words)
-    
-    # 1. 提供一键复制的 Code Block
-    st.markdown("<div class='copy-hint'>👇 点击代码块右上角即可一键复制单词表</div>", unsafe_allow_html=True)
-    st.code(words_str, language="text")
-    
-    # 2. 生成 AI Prompt
-    if st.button("🤖 生成 AI Prompt"):
-        prompt = get_ai_prompt(words)
-        st.code(prompt, language="markdown")
-        st.info("复制上方 Prompt 发送给 AI，然后将结果粘贴到 '制作 Anki' 页面。")
+    # --- B. 词频生成逻辑 ---
+    else:
+        c_a, c_b = st.columns(2)
+        s_rank = c_a.number_input("Start Rank", 1, 20000, 8000, step=100)
+        count = c_b.number_input("Count", 10, 500, 50, step=10)
+        if st.button("🔢 生成列表"):
+            if FULL_DF is not None:
+                try:
+                    r_col = next(c for c in FULL_DF.columns if 'rank' in c)
+                    w_col = next(c for c in FULL_DF.columns if 'word' in c)
+                    subset = FULL_DF[FULL_DF[r_col] >= s_rank].sort_values(r_col).head(count)
+                    st.session_state['gen_words'] = subset[w_col].tolist()
+                    st.session_state['total_count'] = count
+                except: st.error("数据源格式错误")
 
-# --- Tab 3: 制作 Anki ---
-with tab3:
-    st.markdown("### 🛠️ 制作 iOS 适配包 (.apkg)")
-    ai_resp = st.text_area("粘贴 AI 回复 (Word | IPA | Def | Ex | Etym)", height=200)
-    deck_name = st.text_input("牌组名", "My Deck")
+    # --- 结果展示 & 分批 Prompt ---
+    if 'gen_words' in st.session_state:
+        words = st.session_state['gen_words']
+        
+        st.divider()
+        st.markdown(f"""
+        <div class="stat-box">
+            📊 来源词数: {st.session_state.get('total_count', 0)} | 
+            🎯 筛选结果: <b>{len(words)}</b> 个单词
+        </div>
+        """, unsafe_allow_html=True)
+
+        if len(words) > 0:
+            # 分批设置
+            c_batch, c_info = st.columns([1, 3])
+            batch_size = c_batch.number_input("每组单词数 (Batch Size)", 10, 100, 30, step=10)
+            c_info.info(f"💡 单词较多时，AI 容易输出中断。建议每组 20-40 个。共需 {len(words)//batch_size + (1 if len(words)%batch_size else 0)} 次生成。")
+            
+            # 自动分批逻辑
+            batches = [words[i:i + batch_size] for i in range(0, len(words), batch_size)]
+            
+            st.markdown("### 🤖 AI Prompt 生成区 (分批)")
+            
+            for idx, batch in enumerate(batches):
+                with st.expander(f"第 {idx+1} 组 (单词 {idx*batch_size+1} - {idx*batch_size+len(batch)})", expanded=(idx==0)):
+                    st.write(f"包含: {', '.join(batch[:5])}...")
+                    
+                    # 生成该批次的 prompt
+                    prompt = get_ai_prompt(batch)
+                    st.code(prompt, language="markdown")
+                    st.caption("👆 点击右上角复制，发给 AI。完成后复制下一组。")
+
+with tab_anki:
+    st.markdown("### 📦 打包 Anki (.apkg)")
+    st.caption("在此处粘贴 AI 回复的所有内容。你可以把多次生成的回复粘贴在一起（换行分隔）。")
     
-    if st.button("📦 打包下载"):
-        if not ai_resp.strip(): st.error("内容为空")
+    ai_resp = st.text_area("粘贴内容 (支持多次粘贴)", height=300, placeholder="word1 | ...\nword2 | ...")
+    deck_name = st.text_input("牌组命名", "VocabFlow Deck")
+    
+    if st.button("🚀 生成 .apkg 文件", type="primary"):
+        if not ai_resp.strip():
+            st.error("内容为空")
         else:
             cards = []
+            skipped = 0
+            # 宽容解析：过滤空行和可能的表头
             for line in ai_resp.strip().split('\n'):
-                if "|" not in line or "Word |" in line: continue
-                p = [x.strip() for x in line.split('|')]
-                if len(p) >= 3:
-                    cards.append({'word':p[0], 'ipa':p[1] if len(p)>1 else '', 'meaning':p[2] if len(p)>2 else '', 'examples':p[3] if len(p)>3 else '', 'etymology':p[4] if len(p)>4 else ''})
+                line = line.strip()
+                if not line: continue
+                if "|" not in line: continue
+                if "Word | IPA" in line or "---" in line: continue 
+                
+                parts = [p.strip() for p in line.split('|')]
+                if len(parts) >= 3:
+                    cards.append({
+                        'word': parts[0],
+                        'ipa': parts[1] if len(parts) > 1 else '',
+                        'meaning': parts[2] if len(parts) > 2 else '',
+                        'examples': parts[3] if len(parts) > 3 else '',
+                        'etymology': parts[4] if len(parts) > 4 else ''
+                    })
+                else:
+                    skipped += 1
             
             if cards:
                 f_path = generate_anki_package(cards, deck_name)
                 with open(f_path, "rb") as f:
                     st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
+                
                 st.success(f"成功打包 {len(cards)} 张卡片！")
+                if skipped > 0:
+                    st.warning(f"跳过了 {skipped} 行格式不符的数据")
             else:
-                st.error("无有效数据，请检查分隔符 |")
+                st.error("未找到有效数据，请检查是否使用了 | 分隔符")
