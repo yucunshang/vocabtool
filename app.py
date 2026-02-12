@@ -54,17 +54,6 @@ st.markdown("""
         margin-bottom: 5px; 
         font-size: 16px;
     }
-    
-    /* 针对网络加载慢的提示框 */
-    .network-warning {
-        padding: 10px;
-        background-color: #fff3cd;
-        border: 1px solid #ffeeba;
-        color: #856404;
-        border-radius: 5px;
-        margin-bottom: 10px;
-        font-size: 14px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -76,8 +65,9 @@ if 'uploader_id' not in st.session_state:
 # 1. 核心资源加载 (Network Robustness)
 # ==========================================
 
+# 重命名函数以强制刷新 Streamlit 缓存 (Fix TypeError)
 @st.cache_resource(show_spinner="正在初始化 NLP 引擎...")
-def load_nlp_resources():
+def load_nlp_resources_v2():
     """
     针对国内网络环境优化的资源加载器。
     优先检查本地目录，下载失败时提供明确指引，不直接报错崩溃。
@@ -126,7 +116,7 @@ def load_nlp_resources():
             # 尝试静默下载
             nltk.download(missing_packages, download_dir=local_nltk_dir, quiet=True)
         except Exception as e:
-            # 下载失败 (国内常见情况)
+            # 下载失败 (国内常见情况)，忽略错误，稍后在 UI 提示
             pass
 
     return nltk, lemminflect, missing_packages
@@ -162,7 +152,7 @@ def load_vocab_data():
 
 # 全局加载
 VOCAB_DICT = load_vocab_data()
-NLTK_LIB, LEMMA_LIB, MISSING_PKGS = load_nlp_resources()
+NLTK_LIB, LEMMA_LIB, MISSING_PKGS = load_nlp_resources_v2()
 
 def get_beijing_time_str():
     utc_now = datetime.now(timezone.utc)
@@ -321,14 +311,20 @@ def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
 st.title("⚡️ Vocab Flow Ultra (Stable)")
 
 # ⚠️ NLTK 缺失警告 (针对国内网络)
-if MISSING_PKGS:
+# 安全处理：确保 MISSING_PKGS 是列表且不为空才显示
+if MISSING_PKGS and isinstance(MISSING_PKGS, list):
+    try:
+        missing_str = ', '.join([str(p) for p in MISSING_PKGS if p])
+    except:
+        missing_str = "Unknown"
+        
     st.error(f"""
     **⚠️ 缺少必要的 NLP 数据包 (网络下载失败)**
     
     由于网络原因，NLTK 数据未能自动下载。请手动执行以下操作：
     1. 确保已安装 NLTK: `pip install nltk`
     2. 在 Python 中运行: `import nltk; nltk.download('popular')`
-    3. 或者手动下载缺失的包: {', '.join(MISSING_PKGS)}
+    3. 或者手动下载缺失的包: {missing_str}
     """)
 
 if not VOCAB_DICT:
