@@ -31,9 +31,10 @@ st.markdown("""
 <style>
     .stTextArea textarea { font-family: 'Consolas', monospace; font-size: 14px; }
     .stButton>button { border-radius: 8px; font-weight: 600; width: 100%; }
-    .batch-container { border: 1px solid #e0e0e0; padding: 15px; border-radius: 8px; margin-bottom: 10px; background-color: #f9f9f9; }
-    .stat-box { padding: 10px; background-color: #e6fffa; border-radius: 8px; text-align: center; color: #006d5b; margin-bottom: 10px; }
-    .reset-btn { color: red; border-color: red; }
+    .stat-box { padding: 15px; background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; text-align: center; color: #166534; margin-bottom: 20px; }
+    .or-divider { text-align: center; margin: 10px 0; color: #888; font-size: 0.9em; font-weight: bold; }
+    /* 调整上传组件的内边距 */
+    [data-testid='stFileUploader'] { padding-top: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -199,50 +200,65 @@ if not VOCAB_DICT:
 with st.sidebar:
     st.header("控制台")
     if st.button("🗑️ 清空所有数据", type="secondary", on_click=clear_all_state):
-        pass # 回调已处理
+        pass 
 
 # Input Tabs
-tab_input, tab_anki = st.tabs(["1️⃣ 提取 & 生成", "2️⃣ 打包 Anki"])
+tab_extract, tab_anki = st.tabs(["1️⃣ 内容提取 & 生成", "2️⃣ 打包 Anki"])
 
-with tab_input:
-    # 1. 来源选择
-    input_method = st.radio("选择来源", ["📄 粘贴文本", "📂 上传文件", "🔢 词频Rank生成"], horizontal=True, label_visibility="collapsed")
+# ------------------------------------------
+# TAB 1: 提取逻辑
+# ------------------------------------------
+with tab_extract:
+    # 子 Tab：区分“语境分析”和“纯Rank列表”
+    mode_context, mode_rank = st.tabs(["📄 语境分析 (文本/文件)", "🔢 词频列表 (Rank)"])
     
-    final_words = []
-    
-    # --- A. 文本/文件逻辑 ---
-    if input_method in ["📄 粘贴文本", "📂 上传文件"]:
+    # --- A. 语境分析模式 (合并后的界面) ---
+    with mode_context:
+        st.markdown("#### 1. 设定词汇分级")
         c1, c2 = st.columns(2)
-        curr = c1.number_input("Current Level (Ignore <)", 1000, 20000, 4000, step=500)
-        targ = c2.number_input("Target Level (Ignore >)", 2000, 50000, 15000, step=500)
+        curr = c1.number_input("忽略太简单的 (Current Level)", 1000, 20000, 4000, step=500, help="小于此排名的词会被认为是已掌握词汇")
+        targ = c2.number_input("忽略太难的 (Target Level)", 2000, 50000, 15000, step=500, help="只提取此排名内的词")
         
-        raw_text = ""
+        st.markdown("#### 2. 输入内容 (文件或文本)")
         
-        if input_method == "📄 粘贴文本":
-            raw_text = st.text_area("在此粘贴文本", height=200)
-            if st.button("🔍 分析文本"):
-                if raw_text:
-                    final_words, total = analyze_logic(raw_text, curr, targ)
-                    st.session_state['gen_words'] = final_words
-                    st.session_state['total_count'] = total
-        else:
-            up_file = st.file_uploader("支持 PDF/TXT/DOCX/EPUB", type=['txt','pdf','docx','epub'])
-            if up_file and st.button("🚀 分析文件"):
-                with st.spinner("解析中..."):
-                    raw_text = extract_text_from_file(up_file)
-                    if len(raw_text) > 10:
-                        final_words, total = analyze_logic(raw_text, curr, targ)
-                        st.session_state['gen_words'] = final_words
-                        st.session_state['total_count'] = total
-                    else:
-                        st.error("无法读取文件内容")
+        # 统一输入区
+        uploaded_file = st.file_uploader("📂 上传文档 (PDF/TXT/DOCX/EPUB)", type=['txt','pdf','docx','epub'])
+        
+        st.markdown('<div class="or-divider">- OR -</div>', unsafe_allow_html=True)
+        
+        pasted_text = st.text_area("📄 ...或在此直接粘贴文本", height=150, placeholder="在此处粘贴英文文章...")
+        
+        # 统一的分析按钮
+        if st.button("🚀 开始分析", type="primary"):
+            raw_text = ""
+            is_file = False
+            
+            # 优先处理文件
+            if uploaded_file:
+                with st.spinner(f"正在读取 {uploaded_file.name}..."):
+                    raw_text = extract_text_from_file(uploaded_file)
+                    is_file = True
+            elif pasted_text.strip():
+                raw_text = pasted_text
+                
+            # 执行分析
+            if raw_text and len(raw_text) > 10:
+                final_words, total = analyze_logic(raw_text, curr, targ)
+                st.session_state['gen_words'] = final_words
+                st.session_state['total_count'] = total
+                if is_file:
+                    st.toast(f"文件解析成功，发现 {total} 个词", icon="✅")
+            else:
+                st.warning("⚠️ 请先上传文件或粘贴文本内容")
 
-    # --- B. 词频生成逻辑 ---
-    else:
+    # --- B. 纯词频生成模式 ---
+    with mode_rank:
+        st.info("直接从 COCA 词频表中提取指定段落的单词。")
         c_a, c_b = st.columns(2)
-        s_rank = c_a.number_input("Start Rank", 1, 20000, 8000, step=100)
-        count = c_b.number_input("Count", 10, 500, 50, step=10)
-        if st.button("🔢 生成列表"):
+        s_rank = c_a.number_input("起始排名 (Start Rank)", 1, 20000, 8000, step=100)
+        count = c_b.number_input("生成数量 (Count)", 10, 500, 50, step=10)
+        
+        if st.button("🔢 生成列表", type="primary"):
             if FULL_DF is not None:
                 try:
                     r_col = next(c for c in FULL_DF.columns if 'rank' in c)
@@ -252,52 +268,54 @@ with tab_input:
                     st.session_state['total_count'] = count
                 except: st.error("数据源格式错误")
 
-    # --- 结果展示 & 分批 Prompt ---
+    # --- 共通结果展示区 ---
     if 'gen_words' in st.session_state:
         words = st.session_state['gen_words']
         
         st.divider()
         st.markdown(f"""
         <div class="stat-box">
-            📊 来源词数: {st.session_state.get('total_count', 0)} | 
-            🎯 筛选结果: <b>{len(words)}</b> 个单词
+            📊 来源总词数: <b>{st.session_state.get('total_count', 0)}</b> | 
+            🎯 筛选后生词: <b>{len(words)}</b> 个
         </div>
         """, unsafe_allow_html=True)
 
         if len(words) > 0:
-            # 分批设置
-            c_batch, c_info = st.columns([1, 3])
+            # 结果预览
+            with st.expander("👁️ 预览单词列表", expanded=False):
+                st.write(", ".join(words))
+
+            st.markdown("### 🤖 获取 AI Prompt")
+            c_batch, c_info = st.columns([1, 2])
             batch_size = c_batch.number_input("每组单词数 (Batch Size)", 10, 100, 30, step=10)
-            c_info.info(f"💡 单词较多时，AI 容易输出中断。建议每组 20-40 个。共需 {len(words)//batch_size + (1 if len(words)%batch_size else 0)} 次生成。")
+            c_info.caption(f"💡 建议 20-40 个一组。共需 {len(words)//batch_size + (1 if len(words)%batch_size else 0)} 次对话。")
             
             # 自动分批逻辑
             batches = [words[i:i + batch_size] for i in range(0, len(words), batch_size)]
             
-            st.markdown("### 🤖 AI Prompt 生成区 (分批)")
-            
             for idx, batch in enumerate(batches):
                 with st.expander(f"第 {idx+1} 组 (单词 {idx*batch_size+1} - {idx*batch_size+len(batch)})", expanded=(idx==0)):
-                    st.write(f"包含: {', '.join(batch[:5])}...")
-                    
-                    # 生成该批次的 prompt
                     prompt = get_ai_prompt(batch)
                     st.code(prompt, language="markdown")
-                    st.caption("👆 点击右上角复制，发给 AI。完成后复制下一组。")
+                    st.caption("👆 点击右上角复制 -> 发给 AI -> 复制回复 -> 粘贴到 '打包 Anki' 页面")
 
+# ------------------------------------------
+# TAB 2: 打包 Anki
+# ------------------------------------------
 with tab_anki:
-    st.markdown("### 📦 打包 Anki (.apkg)")
-    st.caption("在此处粘贴 AI 回复的所有内容。你可以把多次生成的回复粘贴在一起（换行分隔）。")
+    st.markdown("### 📦 制作 Anki 牌组")
+    st.info("💡 提示：将 AI 对话中的回复内容（包含 | 分隔符的行）全部粘贴到下方。支持多次粘贴。")
     
-    ai_resp = st.text_area("粘贴内容 (支持多次粘贴)", height=300, placeholder="word1 | ...\nword2 | ...")
-    deck_name = st.text_input("牌组命名", "VocabFlow Deck")
+    ai_resp = st.text_area("在此粘贴 AI 的回复内容", height=300, placeholder="word1 | /ipa/ | meaning... \nword2 | ...")
+    deck_name = st.text_input("牌组名称 (.apkg)", "VocabFlow_Deck")
     
-    if st.button("🚀 生成 .apkg 文件", type="primary"):
+    if st.button("🔨 生成 .apkg 文件", type="primary"):
         if not ai_resp.strip():
-            st.error("内容为空")
+            st.error("❌ 内容为空，请先粘贴 AI 的回复")
         else:
             cards = []
             skipped = 0
-            # 宽容解析：过滤空行和可能的表头
+            # 宽容解析
             for line in ai_resp.strip().split('\n'):
                 line = line.strip()
                 if not line: continue
@@ -319,10 +337,16 @@ with tab_anki:
             if cards:
                 f_path = generate_anki_package(cards, deck_name)
                 with open(f_path, "rb") as f:
-                    st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
-                
-                st.success(f"成功打包 {len(cards)} 张卡片！")
+                    st.download_button(
+                        f"📥 点击下载 {deck_name}.apkg", 
+                        f, 
+                        file_name=f"{deck_name}.apkg", 
+                        mime="application/octet-stream", 
+                        type="primary"
+                    )
+                st.balloons()
+                st.success(f"🎉 成功打包 {len(cards)} 张卡片！")
                 if skipped > 0:
-                    st.warning(f"跳过了 {skipped} 行格式不符的数据")
+                    st.caption(f"注：跳过了 {skipped} 行格式不符的数据")
             else:
-                st.error("未找到有效数据，请检查是否使用了 | 分隔符")
+                st.error("⚠️ 未识别到有效数据，请检查分隔符是否为 '|'")
