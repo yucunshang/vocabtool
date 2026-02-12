@@ -4,6 +4,7 @@ import re
 import os
 import random
 import json
+import time
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
@@ -125,16 +126,19 @@ def analyze_logic(text, current_lvl, target_lvl):
         except: return word
 
     raw_tokens = re.findall(r"[a-z]+", text.lower())
-    total_words = len(raw_tokens)
+    total_words = len(raw_tokens) # 文档总字数
     unique_tokens = set(raw_tokens)
     target_words = []
+    
     for w in unique_tokens:
         if len(w) < 2: continue 
         lemma = get_lemma_local(w)
         rank = VOCAB_DICT.get(lemma, 99999)
         if rank >= current_lvl and rank <= target_lvl:
             target_words.append((lemma, rank))
+            
     target_words.sort(key=lambda x: x[1])
+    # 返回：生词列表, 文档总字数
     return [x[0] for x in target_words], total_words
 
 def parse_anki_data(raw_text):
@@ -261,12 +265,11 @@ Words: {w_list}
 # ==========================================
 # 5. UI 主程序
 # ==========================================
-st.title("⚡️ Vocab Flow Ultra")
+st.title("⚡️ Vocab Flow Ultra (V21)")
 
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`")
 
-# --- 新增：文档标签页 ---
 tab_guide, tab_extract, tab_anki = st.tabs(["📖 使用指南", "1️⃣ 单词提取", "2️⃣ Anki 制作"])
 
 with tab_guide:
@@ -293,11 +296,10 @@ with tab_guide:
     分析完成后：<br>
     1. 展开 <strong>⚙️ 自定义 Prompt 设置</strong>：选择你要背单词还是短语，释义要中文还是英文。<br>
     2. 设置 <strong>AI 分组大小</strong>（建议 50-100）。<br>
-    3. 系统会生成多组 Prompt。<br>
-    4. <strong>复制 Prompt</strong>：
+    3. <strong>复制 Prompt</strong>：
        - 📱 <strong>手机/鸿蒙</strong>：使用下方的“文本框”长按全选复制。<br>
        - 💻 <strong>电脑</strong>：点击代码块右上角的 Copy 按钮。<br>
-    5. 发送给 ChatGPT / Claude / Gemini 等 AI 模型。
+    4. 发送给 ChatGPT / Claude / Gemini 等 AI 模型。
     </div>
 
     <div class="guide-step">
@@ -321,16 +323,22 @@ with tab_extract:
         pasted_text = st.text_area("📄 ...或粘贴文本", height=100)
         
         if st.button("🚀 开始分析", type="primary"):
-            with st.status("正在启动引擎...", expanded=True) as status:
+            with st.status("正在处理...", expanded=True) as status:
+                start_time = time.time() # ⏱️ 开始计时
+                
                 status.write("📂 读取文件...")
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
                 if len(raw_text) > 10:
                     status.write(f"🔍 提取 {len(raw_text)} 字符，加载 NLP 库...")
-                    final_words, total = analyze_logic(raw_text, curr, targ)
+                    final_words, raw_count = analyze_logic(raw_text, curr, targ)
+                    
+                    # 存储到 session
                     st.session_state['gen_words'] = final_words
-                    st.session_state['total_count'] = total
-                    status.update(label=f"✅ 完成! 发现 {len(final_words)} 个单词", state="complete", expanded=False)
+                    st.session_state['raw_count'] = raw_count
+                    st.session_state['process_time'] = time.time() - start_time
+                    
+                    status.update(label="✅ 分析完成", state="complete", expanded=False)
                 else:
                     status.update(label="⚠️ 内容太短", state="error")
         
@@ -343,18 +351,21 @@ with tab_extract:
             s_rank = c_a.number_input("起始排名", 1, 20000, 1000, step=100)
             count = c_b.number_input("数量", 10, 500, 50, step=10)
             if st.button("🚀 生成"):
+                start_time = time.time()
                 if FULL_DF is not None:
                     r_col = next(c for c in FULL_DF.columns if 'rank' in c)
                     w_col = next(c for c in FULL_DF.columns if 'word' in c)
                     subset = FULL_DF[FULL_DF[r_col] >= s_rank].sort_values(r_col).head(count)
                     st.session_state['gen_words'] = subset[w_col].tolist()
-                    st.session_state['total_count'] = count
+                    st.session_state['raw_count'] = 0 # 随机模式无原文档
+                    st.session_state['process_time'] = time.time() - start_time
         else:
             c_min, c_max, c_cnt = st.columns([1,1,1])
             min_r = c_min.number_input("Min Rank", 1, 20000, 1, step=100)
             max_r = c_max.number_input("Max Rank", 1, 25000, 5000, step=100)
             r_count = c_cnt.number_input("Count", 10, 200, 50, step=10)
             if st.button("🎲 抽取"):
+                start_time = time.time()
                 if FULL_DF is not None:
                     r_col = next(c for c in FULL_DF.columns if 'rank' in c)
                     w_col = next(c for c in FULL_DF.columns if 'word' in c)
@@ -363,13 +374,30 @@ with tab_extract:
                     if len(candidates) > 0:
                         subset = candidates.sample(n=min(r_count, len(candidates))).sort_values(r_col)
                         st.session_state['gen_words'] = subset[w_col].tolist()
-                        st.session_state['total_count'] = len(subset)
+                        st.session_state['raw_count'] = 0
+                        st.session_state['process_time'] = time.time() - start_time
 
     if 'gen_words' in st.session_state and st.session_state['gen_words']:
         words = st.session_state['gen_words']
-        st.divider()
-        st.markdown(f"### 🎯 待处理: {len(words)} 词")
         
+        # --- V21 新增：数据统计看板 ---
+        st.divider()
+        st.markdown("### 📊 分析报告")
+        k1, k2, k3 = st.columns(3)
+        
+        raw_c = st.session_state.get('raw_count', 0)
+        p_time = st.session_state.get('process_time', 0.1)
+        
+        k1.metric("📄 文档总字数", f"{raw_c:,}")
+        k2.metric("🎯 筛选生词", f"{len(words)}")
+        k3.metric("⚡ 耗时", f"{p_time:.2f}s")
+        
+        # --- V21 新增：全词汇一键复制 ---
+        st.markdown("### 📋 全部生词预览 (一键复制)")
+        all_words_str = ", ".join(words)
+        st.text_area("所有单词 (逗号分隔)", value=all_words_str, height=100)
+
+        # --- 设置面板 ---
         with st.expander("⚙️ **自定义 Prompt 设置 (点击展开)**", expanded=True):
             col_s1, col_s2 = st.columns(2)
             front_mode = col_s1.selectbox("正面内容", ["短语搭配 (Phrase)", "单词 (Word)"])
