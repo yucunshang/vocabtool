@@ -201,7 +201,6 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
         lemma = get_lemma_local(w)
         
         # B. 获取 Rank (优先查 Lemma，查不到查原词)
-        # 很多词频表里只有 go，没有 went。但也有少数情况原词有排名。
         rank_lemma = VOCAB_DICT.get(lemma, 99999)
         rank_orig = VOCAB_DICT.get(w, 99999)
         
@@ -225,7 +224,6 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
             word_to_keep = lemma if rank_lemma != 99999 else w
             
             # 使用 lemma 作为去重键值 (Key)
-            # 这样 went(go) 和 go(go) 会被视为同一个，只保留一个
             if lemma not in seen_lemmas:
                 final_candidates.append((word_to_keep, best_rank))
                 seen_lemmas.add(lemma)
@@ -235,39 +233,102 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     
     return final_candidates, total_words
 
+# ==========================================
+# (优化版) JSON 解析逻辑
+# ==========================================
 def parse_anki_data(raw_text):
+    """
+    V30 优化版：极其鲁棒的 JSON 解析器
+    1. 去除 Markdown 代码块 (```json ... ```)
+    2. 支持 JSON 数组 [...]
+    3. 支持 NDJSON 或零散的 JSON 对象 (一行一个或者堆在一起)
+    4. 键名归一化 (w, W, word 都能识别)
+    """
     parsed_cards = []
-    text = raw_text.replace("```json", "").replace("```", "").strip()
-    matches = re.finditer(r'\{.*?\}', text, re.DOTALL)
+    
+    # 1. 预处理：清洗 Markdown 和首尾空白
+    text = raw_text.strip()
+    # 移除 ```json 或 ```
+    text = re.sub(r'```[a-zA-Z]*\n?', '', text)
+    text = re.sub(r'```', '', text).strip()
+    
+    json_objects = []
+
+    # 2. 策略 A: 尝试作为一个完整的 JSON 列表解析
+    # AI 经常会输出一个包含所有对象的数组
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            json_objects = data
+    except:
+        # 3. 策略 B: 使用 JSONDecoder 扫描文本中的对象
+        # 适用于 NDJSON, 或者中间混杂了文字的情况
+        decoder = json.JSONDecoder()
+        pos = 0
+        while pos < len(text):
+            # 跳过空白和逗号 (有些 AI 会输出 {..}, {..})
+            while pos < len(text) and (text[pos].isspace() or text[pos] == ','):
+                pos += 1
+            if pos >= len(text):
+                break
+            
+            try:
+                obj, index = decoder.raw_decode(text[pos:])
+                json_objects.append(obj)
+                pos += index
+            except:
+                # 如果当前位置解析失败，尝试跳过一个字符继续寻找
+                # 这是一个“暴力恢复”策略，防止因一个字符错误导致后面全部失败
+                pos += 1
+
+    # 4. 数据提取与归一化
     seen_phrases_lower = set()
 
-    for match in matches:
-        json_str = match.group()
-        try:
-            data = json.loads(json_str, strict=False)
-            front_text = data.get("w", "").strip()
-            meaning = data.get("m", "").strip()
-            examples = data.get("e", "").strip()
-            etymology = data.get("r", "").strip()
+    for data in json_objects:
+        if not isinstance(data, dict):
+            continue
             
-            if not etymology or etymology.lower() == "none" or etymology == "":
-                etymology = ""
+        # 键名归一化查找 (Case-insensitive 且支持全名)
+        def get_val(keys_list):
+            for k in keys_list:
+                # 尝试完全匹配
+                if k in data: return data[k]
+                # 尝试小写匹配
+                for data_k in data.keys():
+                    if data_k.lower() == k.lower():
+                        return data[data_k]
+            return ""
 
-            if not front_text or not meaning: continue
-            
-            front_text = front_text.replace('**', '')
-            
-            if front_text.lower() in seen_phrases_lower: 
-                continue
-            seen_phrases_lower.add(front_text.lower())
+        # 定义可能的键名别名
+        front_text = get_val(['w', 'word', 'phrase', 'term'])
+        meaning = get_val(['m', 'meaning', 'def', 'definition'])
+        examples = get_val(['e', 'example', 'examples', 'sentence'])
+        etymology = get_val(['r', 'root', 'etymology', 'origin'])
 
-            parsed_cards.append({
-                'front_phrase': front_text,
-                'meaning': meaning,
-                'examples': examples,
-                'etymology': etymology
-            })
-        except: continue
+        if not front_text or not meaning:
+            continue
+        
+        # 清洗数据
+        front_text = str(front_text).replace('**', '').strip()
+        meaning = str(meaning).strip()
+        examples = str(examples).strip()
+        etymology = str(etymology).strip()
+        
+        if etymology.lower() in ["none", "null", ""]:
+            etymology = ""
+
+        # 去重
+        if front_text.lower() in seen_phrases_lower: 
+            continue
+        seen_phrases_lower.add(front_text.lower())
+
+        parsed_cards.append({
+            'front_phrase': front_text,
+            'meaning': meaning,
+            'examples': examples,
+            'etymology': etymology
+        })
+
     return parsed_cards
 
 # ==========================================
@@ -308,8 +369,19 @@ def generate_anki_package(cards_data, deck_name):
         }], css=CSS
     )
     deck = genanki.Deck(random.randrange(1 << 30, 1 << 31), deck_name)
+    
     for c in cards_data:
-        deck.add_note(genanki.Note(model=model, fields=[str(c['front_phrase']), str(c['meaning']), str(c['examples']).replace('\n','<br>'), str(c['etymology'])]))
+        # 确保所有字段都是字符串，防止 NoneType 错误
+        f_phrase = str(c.get('front_phrase', ''))
+        f_meaning = str(c.get('meaning', ''))
+        f_examples = str(c.get('examples', '')).replace('\n','<br>')
+        f_etymology = str(c.get('etymology', ''))
+        
+        deck.add_note(genanki.Note(
+            model=model, 
+            fields=[f_phrase, f_meaning, f_examples, f_etymology]
+        ))
+        
     with tempfile.NamedTemporaryFile(delete=False, suffix='.apkg') as tmp:
         genanki.Package(deck).write_to_file(tmp.name)
         return tmp.name
@@ -567,4 +639,4 @@ with tab_anki:
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 等待粘贴...")
+            st.warning("⚠️ 解析失败：请检查内容是否为 JSON。建议只粘贴 AI 回复的代码块部分。")
