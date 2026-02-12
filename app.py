@@ -34,6 +34,8 @@ st.markdown("""
     .stat-box { padding: 15px; background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; text-align: center; color: #166534; margin-bottom: 20px; }
     .or-divider { text-align: center; margin: 10px 0; color: #888; font-size: 0.9em; font-weight: bold; }
     [data-testid='stFileUploader'] { padding-top: 10px; }
+    /* 针对 Anki 预览的简单样式 */
+    .anki-preview { border: 1px dashed #ccc; padding: 10px; border-radius: 5px; background: #fafafa; margin-bottom: 5px; font-size: 0.9em; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -67,6 +69,7 @@ def load_vocab_data():
             df = df.dropna(subset=[w_col])
             df[w_col] = df[w_col].astype(str).str.lower().str.strip()
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
+            # 排序并去重，保留排名靠前的
             df = df.sort_values(r_col).drop_duplicates(subset=[w_col], keep='first')
             return pd.Series(df[r_col].values, index=df[w_col]).to_dict(), df
         except: return {}, None
@@ -139,48 +142,90 @@ def analyze_logic(text, current_lvl, target_lvl):
     return final_list, total_words
 
 # ==========================================
-# 3. Anki 生成逻辑
+# 3. Anki 生成逻辑 (修复词源显示)
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
-    # 字体大小: Examples -> 20px, Etymology -> 17px
+    # CSS 样式增强：确保词源醒目
     CSS = """
     .card { font-family: arial; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .nightMode .card { background-color: #2f2f31; color: #f5f5f5; }
     .word { font-size: 40px; font-weight: bold; color: #007AFF; margin-bottom: 10px; }
     .nightMode .word { color: #5FA9FF; }
-    .phonetic { color: #888; font-size: 18px; font-family: sans-serif; }
-    .def-container { text-align: left; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 10px; }
-    .definition { font-weight: bold; color: #444; margin-bottom: 10px; }
-    .nightMode .definition { color: #ddd; }
-    .examples { background: #f4f4f4; padding: 10px; border-radius: 5px; color: #555; font-style: italic; font-size: 20px; }
-    .nightMode .examples { background: #333; color: #ccc; }
-    .etymology { margin-top: 15px; font-size: 17px; color: #888; border: 1px dashed #ccc; padding: 5px; display: inline-block;}
+    .phonetic { color: #888; font-size: 18px; font-family: sans-serif; margin-bottom: 15px; }
+    
+    .def-container { text-align: left; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 15px; }
+    
+    .definition { font-weight: bold; color: #222; margin-bottom: 15px; font-size: 22px; }
+    .nightMode .definition { color: #eee; }
+    
+    .examples { background: #f4f4f4; padding: 15px; border-radius: 8px; color: #444; font-style: italic; font-size: 20px; line-height: 1.4; margin-bottom: 15px; }
+    .nightMode .examples { background: #383838; color: #ddd; }
+    
+    /* 词源样式增强 */
+    .etymology { 
+        display: block; 
+        font-size: 18px; 
+        color: #555; 
+        border: 1px dashed #bbb; 
+        padding: 8px 12px; 
+        border-radius: 6px;
+        background-color: #fffaf0;
+        margin-top: 10px;
+    }
+    .nightMode .etymology { 
+        color: #aaa; 
+        border-color: #555;
+        background-color: #333;
+    }
     """
     
+    # 随机生成 Model ID，防止不同牌组冲突
+    model_id = random.randrange(1 << 30, 1 << 31)
+    
     model = genanki.Model(
-        random.randrange(1 << 30, 1 << 31), 'VocabFlow Model',
-        fields=[{'name': 'Word'}, {'name': 'IPA'}, {'name': 'Meaning'}, {'name': 'Examples'}, {'name': 'Etymology'}],
+        model_id, 
+        f'VocabFlow Model {model_id}',
+        fields=[
+            {'name': 'Word'}, 
+            {'name': 'IPA'}, 
+            {'name': 'Meaning'}, 
+            {'name': 'Examples'}, 
+            {'name': 'Etymology'}
+        ],
         templates=[{
             'name': 'Card 1',
             'qfmt': '<div class="word">{{Word}}</div><div class="phonetic">{{IPA}}</div>',
-            'afmt': '{{FrontSide}}<div class="def-container"><div class="definition">{{Meaning}}</div><div class="examples">{{Examples}}</div><div class="etymology">🌱 {{Etymology}}</div></div>',
+            'afmt': '''
+            {{FrontSide}}
+            <div class="def-container">
+                <div class="definition">{{Meaning}}</div>
+                <div class="examples">{{Examples}}</div>
+                <div class="etymology">🌱 <b>Etymology:</b> {{Etymology}}</div>
+            </div>
+            ''',
         }], css=CSS
     )
     
     deck = genanki.Deck(random.randrange(1 << 30, 1 << 31), deck_name)
+    
     for c in cards_data:
-        deck.add_note(genanki.Note(model=model, fields=[c['word'], c['ipa'], c['meaning'], c['examples'].replace('\n','<br>'), c['etymology']]))
+        deck.add_note(genanki.Note(
+            model=model, 
+            fields=[
+                str(c.get('word','')), 
+                str(c.get('ipa','')), 
+                str(c.get('meaning','')), 
+                str(c.get('examples','')).replace('\n','<br>'), 
+                str(c.get('etymology','')) # 确保这里取到了值
+            ]
+        ))
         
     with tempfile.NamedTemporaryFile(delete=False, suffix='.apkg') as tmp:
         genanki.Package(deck).write_to_file(tmp.name)
         return tmp.name
 
 def get_ai_prompt(words):
-    """
-    Prompt 优化版：
-    1. 强制要求 Etymology (词源)，不允许留空。
-    2. 禁止 Markdown 表格。
-    """
+    """Prompt 优化"""
     w_list = ", ".join(words)
     return f"""
 Act as a Dictionary API. Convert the following words into strictly formatted data.
@@ -188,17 +233,16 @@ Act as a Dictionary API. Convert the following words into strictly formatted dat
 **Words:** {w_list}
 
 **CRITICAL FORMATTING RULES (Must Follow):**
-1. **NO Markdown Tables:** Do NOT use tables. Do NOT use `|` at the start or end of lines. Do NOT use `---` separator lines.
-2. **Separator:** Use `|` ONLY to separate fields.
-3. **No Header:** Do NOT output a header row. Output ONLY data lines.
-4. **Etymology is MANDATORY:** You MUST provide the root/suffix breakdown. Do not leave it empty.
-
-**Output Structure per line:**
-`Word | IPA | Definition (Concise, <12 words) | Examples (2 sentences separated by <br>) | Etymology (Root+Suffix)`
+1. **Format:** `Word | IPA | Definition | Examples | Etymology`
+2. **NO Markdown Tables:** Do NOT use tables. Do NOT use `|` at the start or end of lines.
+3. **Separator:** Use `|` ONLY to separate fields.
+4. **Content:**
+   - Definition: Concise (<12 words).
+   - Examples: 2 sentences separated by `<br>`.
+   - **Etymology:** REQUIRED. Provide root/suffix analysis (e.g., "bene(good)+vol(wish)"). If unknown, state origin (e.g., "From Old French...").
 
 **Example of CORRECT Output:**
-benevolent | /bəˈnevələnt/ | kind and helpful | He is a **benevolent** leader.<br>The fund is for **benevolent** purposes. | bene(good) + vol(wish)
-ephemeral | /əˈfemərəl/ | lasting a short time | Fashions are **ephemeral**.<br>The joy was **ephemeral**. | epi(on) + hemera(day)
+benevolent | /bəˈnevələnt/ | kind and helpful | He is **benevolent**.<br>A **benevolent** fund. | bene(good) + vol(wish)
 
 **Begin Output:**
 """
@@ -218,7 +262,7 @@ tab_extract, tab_anki = st.tabs(["1️⃣ 内容提取 & 生成", "2️⃣ 打�
 # TAB 1: 提取逻辑
 # ------------------------------------------
 with tab_extract:
-    mode_context, mode_rank = st.tabs(["📄 语境分析 (文本/文件)", "🔢 词频列表 (Rank)"])
+    mode_context, mode_rank = st.tabs(["📄 语境分析 (文本/文件)", "🔢 词频列表 (Rank & Random)"])
     
     # --- A. 语境分析 ---
     with mode_context:
@@ -250,20 +294,58 @@ with tab_extract:
         if st.button("🗑️ 清空所有数据 (Reset)", type="secondary", on_click=clear_all_state):
             pass
 
-    # --- B. 纯词频列表 ---
+    # --- B. 纯词频列表 (新增随机功能) ---
     with mode_rank:
-        c_a, c_b = st.columns(2)
-        s_rank = c_a.number_input("起始排名 (Start Rank)", 1, 20000, 8000, step=100)
-        count = c_b.number_input("生成数量 (Count)", 10, 500, 50, step=10)
+        st.info("从 COCA 词频表中生成单词列表。")
         
-        if st.button("🔢 生成列表", type="primary"):
-            if FULL_DF is not None:
-                r_col = next(c for c in FULL_DF.columns if 'rank' in c)
-                w_col = next(c for c in FULL_DF.columns if 'word' in c)
-                subset = FULL_DF[FULL_DF[r_col] >= s_rank].sort_values(r_col).head(count)
-                st.session_state['gen_words'] = subset[w_col].tolist()
-                st.session_state['total_count'] = count
+        # 两个模式：顺序 vs 随机
+        gen_type = st.radio("生成模式", ["🔢 顺序截取 (例如: 8000名后的50个)", "🔀 范围随机 (例如: 6000-8000名中随机取50个)"])
         
+        if "顺序" in gen_type:
+            c_a, c_b = st.columns(2)
+            s_rank = c_a.number_input("起始排名 (Start Rank)", 1, 20000, 8000, step=100)
+            count = c_b.number_input("数量 (Count)", 10, 500, 50, step=10)
+            
+            if st.button("🚀 生成顺序列表", type="primary"):
+                if FULL_DF is not None:
+                    r_col = next(c for c in FULL_DF.columns if 'rank' in c)
+                    w_col = next(c for c in FULL_DF.columns if 'word' in c)
+                    subset = FULL_DF[FULL_DF[r_col] >= s_rank].sort_values(r_col).head(count)
+                    st.session_state['gen_words'] = subset[w_col].tolist()
+                    st.session_state['total_count'] = count
+        else:
+            # 随机模式逻辑
+            c_min, c_max, c_cnt = st.columns([1,1,1])
+            min_r = c_min.number_input("最小排名 (Min)", 1, 20000, 6000, step=500)
+            max_r = c_max.number_input("最大排名 (Max)", 1, 25000, 8000, step=500)
+            r_count = c_cnt.number_input("随机数量 (Qty)", 10, 200, 50, step=10)
+            
+            if st.button("🎲 随机抽取", type="primary"):
+                if FULL_DF is not None:
+                    try:
+                        r_col = next(c for c in FULL_DF.columns if 'rank' in c)
+                        w_col = next(c for c in FULL_DF.columns if 'word' in c)
+                        
+                        # 筛选范围
+                        mask = (FULL_DF[r_col] >= min_r) & (FULL_DF[r_col] <= max_r)
+                        candidates = FULL_DF[mask]
+                        
+                        avail_count = len(candidates)
+                        if avail_count == 0:
+                            st.error(f"⚠️ 该范围内 (Rank {min_r}-{max_r}) 没有找到单词。")
+                        else:
+                            # 随机抽样
+                            real_count = min(r_count, avail_count)
+                            subset = candidates.sample(n=real_count)
+                            # 按Rank排序一下，方便查看
+                            subset = subset.sort_values(r_col)
+                            
+                            st.session_state['gen_words'] = subset[w_col].tolist()
+                            st.session_state['total_count'] = real_count
+                            st.success(f"成功从 {avail_count} 个候选词中随机抽取了 {real_count} 个！")
+                    except Exception as e:
+                        st.error(f"生成出错: {e}")
+
         if st.button("🗑️ 清空 (Reset)", type="secondary", key="reset_rank", on_click=clear_all_state):
             pass
 
@@ -301,7 +383,6 @@ with tab_extract:
 with tab_anki:
     st.markdown("### 📦 制作 Anki 牌组")
     
-    # 获取北京时间 (UTC+8) 的时间戳
     bj_time_str = get_beijing_time_str()
     default_name = f"Vocab_{bj_time_str}"
     
@@ -315,10 +396,9 @@ with tab_anki:
         key="anki_input_text"
     )
     
-    # 显示北京时间
     deck_name = st.text_input("牌组名称 (已自动设为北京时间)", default_name)
     
-    # 解析逻辑
+    # 解析逻辑 (增强容错率，确保词源被捕获)
     cards = []
     skipped = 0
     if ai_resp.strip():
@@ -326,7 +406,7 @@ with tab_anki:
             line = line.strip()
             if not line: continue
             
-            # 严格过滤
+            # 严格过滤无效行
             if line.startswith("|") or line.endswith("|") or "---" in line: continue
             if "Word" in line and "IPA" in line: continue
             
@@ -334,21 +414,33 @@ with tab_anki:
                 skipped += 1
                 continue
             
+            # 分割并自动补全缺失的列
             parts = [p.strip() for p in line.split('|')]
-            if len(parts) >= 3:
+            
+            # 补全逻辑：如果不够5列，自动补空字符串，防止报错
+            while len(parts) < 5:
+                parts.append("")
+                
+            if len(parts) >= 3: # 至少要有 单词|音标|释义
                 cards.append({
                     'word': parts[0],
-                    'ipa': parts[1] if len(parts) > 1 else '',
-                    'meaning': parts[2] if len(parts) > 2 else '',
-                    'examples': parts[3] if len(parts) > 3 else '',
-                    'etymology': parts[4] if len(parts) > 4 else ''
+                    'ipa': parts[1],
+                    'meaning': parts[2],
+                    'examples': parts[3],
+                    'etymology': parts[4] # 这里现在一定安全
                 })
             else:
                 skipped += 1
 
     # 显示状态与下载
     if cards:
-        st.success(f"✅ 已识别 {len(cards)} 张卡片 (包含词源)")
+        st.success(f"✅ 已识别 {len(cards)} 张卡片")
+        
+        # 简单的预览，让用户确认词源是否提取到了
+        with st.expander("🔍 检查解析结果 (前3条)"):
+            for c in cards[:3]:
+                st.markdown(f"**{c['word']}**: {c['etymology'] if c['etymology'] else '❌ 未检测到词源'}")
+        
         if skipped > 0:
             st.caption(f"⚠️ 过滤了 {skipped} 行无效数据")
             
