@@ -8,17 +8,37 @@ import time
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 0. 页面配置
+# 0. 页面配置 & 极速重置逻辑
 # ==========================================
 st.set_page_config(
-    page_title="Vocab Flow Stable", 
+    page_title="Vocab Flow Fast", 
     page_icon="⚡️", 
     layout="centered", 
     initial_sidebar_state="collapsed"
 )
 
+# 核心重置函数：瞬间清空所有状态并刷新
+def reset_app():
+    # 1. 保留部分无需重置的配置(如果有)，这里选择全清
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    
+    # 2. 重新生成上传组件的 ID，强制 UI 丢弃旧文件
+    st.session_state['uploader_id'] = str(random.randint(100000, 999999))
+    
+    # 3. 强制重新运行脚本 (比 F5 快很多)
+    st.rerun()
+
+# 初始化上传器 ID
 if 'uploader_id' not in st.session_state:
     st.session_state['uploader_id'] = "1000"
+
+# 侧边栏添加重置按钮
+with st.sidebar:
+    st.header("功能菜单")
+    if st.button("🔄 一键重置 / 清空", type="primary"):
+        reset_app()
+    st.caption("点击此按钮可瞬间清空所有内容并重置系统。")
 
 st.markdown("""
 <style>
@@ -32,11 +52,21 @@ st.markdown("""
         border: 1px solid #eee; border-radius: 5px;
         background-color: #fafafa; font-family: monospace; white-space: pre-wrap;
     }
+    /* 侧边栏按钮样式优化 */
+    [data-testid="stSidebar"] button {
+        background-color: #ff4b4b;
+        color: white;
+        border: none;
+    }
+    [data-testid="stSidebar"] button:hover {
+        background-color: #ff2b2b;
+        color: white;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 资源加载
+# 1. 资源加载 (带缓存)
 # ==========================================
 @st.cache_resource(show_spinner="加载 NLP 引擎...")
 def load_nlp_resources():
@@ -92,14 +122,6 @@ def get_beijing_time_str():
     utc_now = datetime.now(timezone.utc)
     beijing_now = utc_now + timedelta(hours=8)
     return beijing_now.strftime('%m%d_%H%M')
-
-def clear_all_state():
-    keys_to_drop = ['gen_words_data', 'raw_count', 'process_time']
-    for k in keys_to_drop:
-        if k in st.session_state: del st.session_state[k]
-    st.session_state['uploader_id'] = str(random.randint(100000, 999999))
-    if 'paste_key' in st.session_state: st.session_state['paste_key'] = ""
-    if 'anki_input_text' in st.session_state: st.session_state['anki_input_text'] = ""
 
 # ==========================================
 # 2. 核心逻辑
@@ -181,7 +203,7 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 # ==========================================
-# 3. Anki 生成 (核心不动)
+# 3. Anki 生成
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
     genanki, tempfile = get_genanki()
@@ -212,15 +234,15 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt Logic (已升级: 自动防爆)
+# 4. Prompt Logic (修复完整)
 # ==========================================
 def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     w_list = ", ".join(words)
     w_instr = "Key `w`: The word itself (lowercase)." if front_mode == "单词 (Word)" else "Key `w`: A short practical collocation/phrase (2-5 words)."
     m_instr = "Key `m`: Concise Chinese definition." if def_mode == "中文" else ("Key `m`: English + Chinese Definition." if def_mode == "中英双语" else "Key `m`: English definition.")
+    e_instr = f"Key `e`: {ex_count} example sentence(s). Use `<br>` to separate if multiple."
     r_instr = "Key `r`: Simplified Chinese Etymology." if need_ety else "Key `r`: Empty string \"\"."
 
-    # 🟢 关键修改：增加了关于 Double Quotes 的强制要求
     return f"""
 Task: Create Anki cards.
 Words: {w_list}
@@ -236,7 +258,7 @@ Words: {w_list}
 **Fields:**
 1. {w_instr}
 2. {m_instr}
-3. {e_instr} (Max {ex_count} examples)
+3. {e_instr}
 4. {r_instr}
 
 **Format Example:**
@@ -248,7 +270,7 @@ Words: {w_list}
 # ==========================================
 # 5. UI 主程序
 # ==========================================
-st.title("⚡️ Vocab Flow Stable")
+st.title("⚡️ Vocab Flow Fast")
 
 if not VOCAB_DICT: st.error("⚠️ 缺失 `coca_cleaned.csv`")
 
@@ -276,7 +298,7 @@ with tab_extract:
                     st.session_state['process_time'] = time.time() - st.session_state['process_time']
                     status.update(label="✅ 完成", state="complete", expanded=False)
                 else: status.update(label="⚠️ 内容太短", state="error")
-        if st.button("🗑️ 清空", type="secondary", on_click=clear_all_state): pass
+        if st.button("🗑️ 清空当前", type="secondary", on_click=reset_app): pass
 
     with mode_rank:
         c_min, c_max, c_cnt = st.columns([1,1,1])
