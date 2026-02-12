@@ -116,40 +116,57 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     
     return final_candidates, total_words
 
-def parse_anki_data(raw_text):
-    parsed_cards = []
-    text = raw_text.replace("```json", "").replace("```", "").strip()
-    matches = re.finditer(r'\{.*?\}', text, re.DOTALL)
-    seen_phrases_lower = set()
+# logic.py (仅替换 parse_anki_data 函数，其他不变)
 
-    for match in matches:
-        json_str = match.group()
+def parse_anki_data(json_input):
+    """
+    解析 AI 返回的 JSON，支持：
+    1. 标准 JSON 数组 [...]
+    2. JSON Lines (每行一个对象)
+    3. 自动跳过错误行
+    """
+    results = []
+    
+    # 1. 尝试作为整体 JSON 数组解析
+    try:
+        # 尝试提取 [...] 部分
+        match = re.search(r'\[.*\]', json_input, re.DOTALL)
+        if match:
+            clean_json = match.group(0)
+            return json.loads(clean_json)
+    except:
+        pass # 如果整体解析失败，进入逐行解析模式
+
+    # 2. 逐行解析模式 (针对 AI 生成的非标准格式或一行一个 JSON 的情况)
+    lines = json_input.strip().split('\n')
+    
+    for line in lines:
+        line = line.strip()
+        # 去掉行尾可能的逗号
+        if line.endswith(','): 
+            line = line[:-1]
+            
+        if not line: continue
+        
         try:
-            data = json.loads(json_str, strict=False)
-            front_text = data.get("w", "").strip()
-            meaning = data.get("m", "").strip()
-            examples = data.get("e", "").strip()
-            etymology = data.get("r", "").strip()
+            obj = json.loads(line)
+            # 简单验证是否包含必要字段
+            if isinstance(obj, dict) and 'w' in obj:
+                # 兼容不同 AI 可能返回的字段名差异
+                standard_obj = {
+                    'front_phrase': obj.get('front_phrase', obj.get('w')), # 兼容简写 w
+                    'word': obj.get('word', obj.get('w')),
+                    'meaning': obj.get('meaning', obj.get('m')),           # 兼容简写 m
+                    'example_sentence': obj.get('example_sentence', obj.get('e')), # 兼容简写 e
+                    'etymology': obj.get('etymology', obj.get('r'))        # 兼容简写 r
+                }
+                results.append(standard_obj)
+        except json.JSONDecodeError:
+            # 这里可以打印日志，或者直接跳过错误行
+            print(f"Skipping invalid line: {line[:20]}...")
+            continue
             
-            if not etymology or etymology.lower() == "none" or etymology == "":
-                etymology = ""
-
-            if not front_text or not meaning: continue
-            
-            front_text = front_text.replace('**', '')
-            
-            if front_text.lower() in seen_phrases_lower: 
-                continue
-            seen_phrases_lower.add(front_text.lower())
-
-            parsed_cards.append({
-                'front_phrase': front_text,
-                'meaning': meaning,
-                'examples': examples,
-                'etymology': etymology
-            })
-        except: continue
-    return parsed_cards
+    return results
 
 # ==========================================
 # Anki 生成
