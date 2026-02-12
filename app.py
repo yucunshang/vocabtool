@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import re
 import os
-import io
 import time
+from datetime import datetime
 import lemminflect
 import nltk
 import genanki
@@ -30,13 +30,10 @@ st.set_page_config(
 st.markdown("""
 <style>
     .stTextArea textarea { font-family: 'Consolas', monospace; font-size: 14px; }
-    .stButton>button { border-radius: 8px; font-weight: 600; width: 100%; }
+    .stButton>button { border-radius: 8px; font-weight: 600; width: 100%; margin-top: 5px; }
     .stat-box { padding: 15px; background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; text-align: center; color: #166534; margin-bottom: 20px; }
     .or-divider { text-align: center; margin: 10px 0; color: #888; font-size: 0.9em; font-weight: bold; }
-    /* 调整上传组件的内边距 */
     [data-testid='stFileUploader'] { padding-top: 10px; }
-    /* 调整按钮间距 */
-    .stButton { margin-top: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -138,7 +135,7 @@ def analyze_logic(text, current_lvl, target_lvl):
 # ==========================================
 # 3. Anki 生成逻辑
 # ==========================================
-def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
+def generate_anki_package(cards_data, deck_name):
     # 字体大小: Examples -> 20px, Etymology -> 17px
     CSS = """
     .card { font-family: arial; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
@@ -173,29 +170,32 @@ def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
         return tmp.name
 
 def get_ai_prompt(words):
-    """优化后的 Prompt"""
+    """
+    Prompt 强力优化版：
+    1. 增加 Negative Constraints (禁止Markdown表格)。
+    2. 强调 Raw Text 格式，防止解析错误。
+    """
     w_list = ", ".join(words)
     return f"""
-You are a strictly compliant dictionary data generator. 
-Convert the provided words into Anki card format using the rules below.
+Act as a Dictionary API. Convert the following words into strictly formatted data.
 
-**Input Words:** {w_list}
+**Words:** {w_list}
 
-**Strict Output Rules:**
-1. **Format:** `Word | IPA | Definition | Examples | Etymology`
-2. **Separator:** Use `|` strictly as the field separator. Do NOT use `|` inside the content text.
-3. **No Fluff:** Output ONLY the raw text lines. NO headers, NO markdown code blocks, NO conversational filler (e.g., "Here is the list").
-4. **Newlines:** Use `<br>` for line breaks inside examples. Do NOT generate actual newlines within a single entry.
+**CRITICAL FORMATTING RULES (Must Follow):**
+1. **NO Markdown Tables:** Do NOT use tables. Do NOT use `|` at the start or end of lines. Do NOT use `---` separator lines.
+2. **Separator:** Use `|` ONLY to separate fields.
+3. **No Header:** Do NOT output a header row (e.g., "Word | IPA...").
+4. **Plain Text:** Output ONLY the data lines. No intro/outro text.
+5. **Content Safety:** If a field is empty, leave it empty (do not write "N/A").
 
-**Content Requirements:**
-- **IPA:** US pronunciation.
-- **Definition:** Simple B2/C1 English. Keep it concise (< 12 words).
-- **Examples:** 1 or 2 short, high-context sentences. Separate them with `<br>`. Highlight the keyword in **bold** if possible.
-- **Etymology:** Brief root analysis (e.g., "bene(good) + vol(wish)"). If unknown, leave empty.
+**Output Structure per line:**
+`Word | IPA | Definition (Concise, <12 words) | Examples (2 sentences separated by <br>) | Etymology (Root+Suffix)`
 
-**Example Output:**
-benevolent | /bəˈnevələnt/ | kind and helpful | He was a **benevolent** old man.<br>The fund is for **benevolent** purposes. | bene(good) + vol(wish)
-ephemeral | /əˈfemərəl/ | lasting for a very short time | Fashions are **ephemeral**, changing with every season. | epi(on) + hemera(day)
+**Example of CORRECT Output:**
+benevolent | /bəˈnevələnt/ | kind and helpful | He is a **benevolent** leader.<br>The fund is for **benevolent** purposes. | bene(good) + vol(wish)
+ephemeral | /əˈfemərəl/ | lasting a short time | Fashions are **ephemeral**.<br>The joy was **ephemeral**. | epi(on) + hemera(day)
+
+**Begin Output:**
 """
 
 # ==========================================
@@ -213,77 +213,58 @@ tab_extract, tab_anki = st.tabs(["1️⃣ 内容提取 & 生成", "2️⃣ 打�
 # TAB 1: 提取逻辑
 # ------------------------------------------
 with tab_extract:
-    # 子 Tab：区分“语境分析”和“纯Rank列表”
     mode_context, mode_rank = st.tabs(["📄 语境分析 (文本/文件)", "🔢 词频列表 (Rank)"])
     
-    # --- A. 语境分析模式 ---
+    # --- A. 语境分析 ---
     with mode_context:
         st.markdown("#### 1. 设定词汇分级")
         c1, c2 = st.columns(2)
-        curr = c1.number_input("忽略太简单的 (Current Level)", 1000, 20000, 4000, step=500, help="小于此排名的词会被认为是已掌握词汇")
-        targ = c2.number_input("忽略太难的 (Target Level)", 2000, 50000, 15000, step=500, help="只提取此排名内的词")
+        curr = c1.number_input("忽略太简单的 (Current Level)", 1000, 20000, 4000, step=500)
+        targ = c2.number_input("忽略太难的 (Target Level)", 2000, 50000, 15000, step=500)
         
-        st.markdown("#### 2. 输入内容 (文件或文本)")
-        
-        # 统一输入区
+        st.markdown("#### 2. 输入内容")
         uploaded_file = st.file_uploader("📂 上传文档 (PDF/TXT/DOCX/EPUB)", type=['txt','pdf','docx','epub'])
-        
         st.markdown('<div class="or-divider">- OR -</div>', unsafe_allow_html=True)
+        pasted_text = st.text_area("📄 ...或在此直接粘贴文本", height=150)
         
-        pasted_text = st.text_area("📄 ...或在此直接粘贴文本", height=150, placeholder="在此处粘贴英文文章...")
-        
-        # 统一的分析按钮
         if st.button("🚀 开始分析", type="primary"):
             raw_text = ""
-            is_file = False
-            
-            # 优先处理文件
             if uploaded_file:
                 with st.spinner(f"正在读取 {uploaded_file.name}..."):
                     raw_text = extract_text_from_file(uploaded_file)
-                    is_file = True
             elif pasted_text.strip():
                 raw_text = pasted_text
                 
-            # 执行分析
             if raw_text and len(raw_text) > 10:
                 final_words, total = analyze_logic(raw_text, curr, targ)
                 st.session_state['gen_words'] = final_words
                 st.session_state['total_count'] = total
-                if is_file:
-                    st.toast(f"文件解析成功，发现 {total} 个词", icon="✅")
             else:
-                st.warning("⚠️ 请先上传文件或粘贴文本内容")
+                st.warning("⚠️ 请输入有效内容")
 
-        # 移动后的清空按钮：直接显示在分析按钮下方
         if st.button("🗑️ 清空所有数据 (Reset)", type="secondary", on_click=clear_all_state):
             pass
 
-    # --- B. 纯词频生成模式 ---
+    # --- B. 纯词频列表 ---
     with mode_rank:
-        st.info("直接从 COCA 词频表中提取指定段落的单词。")
         c_a, c_b = st.columns(2)
         s_rank = c_a.number_input("起始排名 (Start Rank)", 1, 20000, 8000, step=100)
         count = c_b.number_input("生成数量 (Count)", 10, 500, 50, step=10)
         
         if st.button("🔢 生成列表", type="primary"):
             if FULL_DF is not None:
-                try:
-                    r_col = next(c for c in FULL_DF.columns if 'rank' in c)
-                    w_col = next(c for c in FULL_DF.columns if 'word' in c)
-                    subset = FULL_DF[FULL_DF[r_col] >= s_rank].sort_values(r_col).head(count)
-                    st.session_state['gen_words'] = subset[w_col].tolist()
-                    st.session_state['total_count'] = count
-                except: st.error("数据源格式错误")
+                r_col = next(c for c in FULL_DF.columns if 'rank' in c)
+                w_col = next(c for c in FULL_DF.columns if 'word' in c)
+                subset = FULL_DF[FULL_DF[r_col] >= s_rank].sort_values(r_col).head(count)
+                st.session_state['gen_words'] = subset[w_col].tolist()
+                st.session_state['total_count'] = count
         
-        # 同样给这里也加一个重置按钮方便操作
         if st.button("🗑️ 清空 (Reset)", type="secondary", key="reset_rank", on_click=clear_all_state):
             pass
 
-    # --- 共通结果展示区 ---
+    # --- 结果展示 ---
     if 'gen_words' in st.session_state:
         words = st.session_state['gen_words']
-        
         st.divider()
         st.markdown(f"""
         <div class="stat-box">
@@ -293,19 +274,14 @@ with tab_extract:
         """, unsafe_allow_html=True)
 
         if len(words) > 0:
-            # 结果预览
             with st.expander("👁️ 预览单词列表", expanded=False):
                 st.write(", ".join(words))
 
             st.markdown("### 🤖 获取 AI Prompt")
             c_batch, c_info = st.columns([1, 2])
+            batch_size = c_batch.number_input("每组单词数", 10, 200, 50, step=10)
+            c_info.caption(f"💡 分组建议：每次复制一组给AI，防止生成中断。")
             
-            # 默认 50，上限 200
-            batch_size = c_batch.number_input("每组单词数 (Batch Size)", 10, 200, 50, step=10)
-            
-            c_info.caption(f"💡 建议 30-50 个一组。共需 {len(words)//batch_size + (1 if len(words)%batch_size else 0)} 次对话。")
-            
-            # 自动分批逻辑
             batches = [words[i:i + batch_size] for i in range(0, len(words), batch_size)]
             
             for idx, batch in enumerate(batches):
@@ -319,52 +295,69 @@ with tab_extract:
 # ------------------------------------------
 with tab_anki:
     st.markdown("### 📦 制作 Anki 牌组")
-    st.info("💡 提示：将 AI 对话中的回复内容（包含 | 分隔符的行）全部粘贴到下方。支持多次粘贴。")
     
-    ai_resp = st.text_area("在此粘贴 AI 的回复内容", height=300, placeholder="word1 | /ipa/ | meaning... \nword2 | ...")
-    deck_name = st.text_input("牌组名称 (.apkg)", "VocabFlow_Deck")
+    # 自动生成唯一文件名（带时间戳），防止重名
+    default_name = f"Vocab_{datetime.now().strftime('%m%d_%H%M')}"
     
-    if st.button("🔨 生成 .apkg 文件", type="primary"):
-        if not ai_resp.strip():
-            st.error("❌ 内容为空，请先粘贴 AI 的回复")
-        else:
-            cards = []
-            skipped = 0
-            # 宽容解析
-            for line in ai_resp.strip().split('\n'):
-                line = line.strip()
-                if not line: continue
-                if "|" not in line: continue
-                
-                # 增强过滤逻辑：过滤表头和分割线
-                if "Word" in line and "IPA" in line: continue  
-                if set(line.strip()) == {'-', '|'} or "---" in line: continue 
-                
-                parts = [p.strip() for p in line.split('|')]
-                if len(parts) >= 3:
-                    cards.append({
-                        'word': parts[0],
-                        'ipa': parts[1] if len(parts) > 1 else '',
-                        'meaning': parts[2] if len(parts) > 2 else '',
-                        'examples': parts[3] if len(parts) > 3 else '',
-                        'etymology': parts[4] if len(parts) > 4 else ''
-                    })
-                else:
-                    skipped += 1
+    # 使用 session_state 绑定输入框，防止下载后内容消失
+    if 'anki_input_text' not in st.session_state:
+        st.session_state['anki_input_text'] = ""
+
+    ai_resp = st.text_area(
+        "在此粘贴 AI 的回复内容 (下载后不会消失，可继续添加)", 
+        height=300, 
+        placeholder="word1 | /ipa/ | meaning... \nword2 | ...",
+        key="anki_input_text" # 绑定 state
+    )
+    
+    deck_name = st.text_input("牌组名称 (自动添加时间戳，无需手动修改)", default_name)
+    
+    # 解析逻辑 (不依赖按钮，实时显示解析结果)
+    cards = []
+    skipped = 0
+    if ai_resp.strip():
+        for line in ai_resp.strip().split('\n'):
+            line = line.strip()
+            if not line: continue
             
-            if cards:
-                f_path = generate_anki_package(cards, deck_name)
-                with open(f_path, "rb") as f:
-                    st.download_button(
-                        f"📥 点击下载 {deck_name}.apkg", 
-                        f, 
-                        file_name=f"{deck_name}.apkg", 
-                        mime="application/octet-stream", 
-                        type="primary"
-                    )
-                st.balloons()
-                st.success(f"🎉 成功打包 {len(cards)} 张卡片！")
-                if skipped > 0:
-                    st.caption(f"注：跳过了 {skipped} 行格式不符的数据")
+            # 严格过滤：跳过Markdown表格行、表头
+            if line.startswith("|") or line.endswith("|") or "---" in line: continue
+            if "Word" in line and "IPA" in line: continue
+            
+            if "|" not in line: 
+                skipped += 1
+                continue
+            
+            parts = [p.strip() for p in line.split('|')]
+            if len(parts) >= 3:
+                cards.append({
+                    'word': parts[0],
+                    'ipa': parts[1] if len(parts) > 1 else '',
+                    'meaning': parts[2] if len(parts) > 2 else '',
+                    'examples': parts[3] if len(parts) > 3 else '',
+                    'etymology': parts[4] if len(parts) > 4 else ''
+                })
             else:
-                st.error("⚠️ 未识别到有效数据，请检查分隔符是否为 '|'")
+                skipped += 1
+
+    # 显示状态
+    if cards:
+        st.success(f"✅ 已识别 {len(cards)} 张卡片 (等待下载)")
+        if skipped > 0:
+            st.caption(f"⚠️ 过滤了 {skipped} 行无效数据 (表头或格式错误)")
+            
+        # 生成逻辑放到按钮内部
+        final_filename = f"{deck_name}.apkg"
+        f_path = generate_anki_package(cards, deck_name)
+        
+        with open(f_path, "rb") as f:
+            # 下载按钮
+            st.download_button(
+                label=f"📥 下载 {final_filename}",
+                data=f,
+                file_name=final_filename,
+                mime="application/octet-stream",
+                type="primary"
+            )
+    elif ai_resp.strip():
+        st.warning("⚠️ 粘贴内容中未识别到有效卡片，请检查是否包含 '|' 分隔符")
