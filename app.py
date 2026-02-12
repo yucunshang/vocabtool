@@ -132,7 +132,7 @@ def analyze_logic(text, current_lvl, target_lvl):
 
 def parse_anki_data(raw_text):
     """
-    智能解析：Phrase | IPA | Definition | Examples | Etymology
+    智能解析：Phrase | IPA | Definition | Examples | Etymology (CN)
     强制清洗：去除句号，确保正面不是句子。
     """
     parsed_cards = []
@@ -141,6 +141,7 @@ def parse_anki_data(raw_text):
     for line in lines:
         line = line.strip()
         if not line: continue
+        # 跳过 Markdown 表格分隔线
         if set(line) == {'|', '-'} or '---' in line: continue
         if 'Phrase' in line and 'Definition' in line: continue
 
@@ -152,23 +153,23 @@ def parse_anki_data(raw_text):
             
             # --- 核心修复：强制清洗正面 ---
             front_text = parts[0]
-            # 1. 去除末尾句号
-            front_text = front_text.rstrip('.')
-            # 2. 如果首字母是大写，尝试转小写（除非是专有名词，但这里简单处理防止句子感）
-            # front_text = front_text[0].lower() + front_text[1:] if front_text else ""
+            # 1. 去除末尾句号/逗号
+            front_text = front_text.rstrip('.,')
+            # 2. 清理多余的星号（Markdown加粗）
+            front_text = front_text.replace('*', '')
             
             parsed_cards.append({
                 'front_phrase': front_text,
                 'ipa': parts[1],
-                'meaning': parts[2],
+                'meaning': parts[2], # 英文释义
                 'examples': parts[3],
-                'etymology': parts[4]
+                'etymology': parts[4] # 中文词源
             })
             
     return parsed_cards
 
 # ==========================================
-# 3. Anki 生成逻辑 (样式完全匹配您的要求)
+# 3. Anki 生成逻辑 (样式优化)
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
     CSS = """
@@ -214,7 +215,7 @@ def generate_anki_package(cards_data, deck_name):
     }
     .nightMode .examples { background: #383838; color: #ccc; border-left-color: #66b0ff; }
     
-    /* 3. 词源 (包含音标辅助显示) */
+    /* 3. 词源 (中文) */
     .footer-info {
         margin-top: 20px;
         border-top: 1px dashed #ccc;
@@ -225,15 +226,19 @@ def generate_anki_package(cards_data, deck_name):
     .etymology { 
         display: block; 
         font-size: 16px; 
-        color: #666; 
+        color: #555; 
         background-color: #fffdf5; 
-        padding: 5px 10px;
+        padding: 8px 10px;
         border-radius: 4px;
         margin-bottom: 5px;
+        line-height: 1.4;
     }
-    .ipa { color: #999; font-size: 14px; font-family: monospace; }
+    .etymology b { color: #8b5cf6; } /* 强调词源标题 */
+    
+    .ipa { color: #999; font-size: 14px; font-family: monospace; margin-top: 5px;}
     
     .nightMode .etymology { background-color: #333; color: #aaa; }
+    .nightMode .etymology b { color: #a78bfa; }
     """
     
     model_id = random.randrange(1 << 30, 1 << 31)
@@ -257,7 +262,7 @@ def generate_anki_package(cards_data, deck_name):
             <div class="examples">{{Examples}}</div>
             
             <div class="footer-info">
-                <div class="etymology">🌱 <b>Etymology:</b> {{Etymology}}</div>
+                <div class="etymology">🌱 <b>词源:</b> {{Etymology}}</div>
                 <div class="ipa">IPA: {{IPA}}</div>
             </div>
             ''',
@@ -283,38 +288,40 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt 生成逻辑 (超强约束版)
+# 4. Prompt 生成逻辑 (优化版：中文词源+英文释义)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
     return f"""
-Act as a Dictionary Data Generator.
-Task: Convert words into Anki card data.
+Role: Expert Linguist & Anki Card Generator.
+Task: Convert the provided words into Anki card data.
 
 **Target Words:** {w_list}
 
-**CRITICAL RULE FOR FRONT CARD (Column 1):**
-* **MUST BE A SHORT PHRASE (2-6 words).**
-* **ABSOLUTELY NO FULL SENTENCES.** * **NO** periods (.) at the end of the first column.
-* **NO** Subject-Verb-Object structures that look like a sentence.
+**STRICT OUTPUT FORMAT (Pipe Separated):**
+`Phrase | IPA | English Definition | Example Sentences | Etymology (Chinese)`
 
-**Strict Output Format (Pipe Separated):**
-`Phrase | IPA | Definition | Examples | Etymology`
+**CRITICAL RULES:**
+1. **Column 1 (Front - Phrase):** 
+   - Generate a natural, high-frequency **collocation or short phrase** (2-6 words).
+   - **MUST** include the target word.
+   - **NO** full sentences. **NO** periods (.) at the end.
+   - Example: *a benevolent leader* (✅) vs *He is benevolent.* (❌)
 
-**Examples of CORRECT vs WRONG:**
-* ❌ WRONG: The abandoned house was empty. (Too long, is a sentence)
-* ✅ RIGHT: **an abandoned house**
-* ❌ WRONG: He made a subtle change. (Sentence)
-* ✅ RIGHT: **a subtle change**
-* ❌ WRONG: benevolent (Single word)
-* ✅ RIGHT: **a benevolent leader**
+2. **Column 2 (IPA):** US pronunciation (e.g., /wɜrd/).
 
-**Requirements:**
-1. **Phrase:** Natural collocation.
-2. **IPA:** US pronunciation.
-3. **Definition:** Concise English definition.
-4. **Examples:** 2 sentences, separated by `<br>`.
-5. **Etymology:** Root + Suffix (MANDATORY).
+3. **Column 3 (Definition):** Concise **English** definition.
+
+4. **Column 4 (Examples):** 
+   - 1 or 2 sentences. 
+   - If 2 sentences, separate them with `<br>`.
+
+5. **Column 5 (Etymology - CHINESE):** 
+   - Explain the root/suffix in **Simplified Chinese (简体中文)**.
+   - Format: "词根: ... (含义) + ...".
+
+**Output Example:**
+a benevolent leader | /bəˈnevələnt/ | characterized by or expressing goodwill | The benevolent gentleman left money to the poor.<br>She was a benevolent woman. | 词根: bene (好) + vol (意愿) + ent (形容词后缀) →以此表示“好意的”。
 
 **Begin Output:**
 """
@@ -397,7 +404,7 @@ with tab_anki:
     bj_time_str = get_beijing_time_str()
     if 'anki_input_text' not in st.session_state: st.session_state['anki_input_text'] = ""
 
-    ai_resp = st.text_area("在此粘贴 AI 回复 (格式: 短语 | IPA | 释义 | 例句 | 词源)", height=200, key="anki_input_text")
+    ai_resp = st.text_area("在此粘贴 AI 回复 (格式: 短语 | IPA | 英文释义 | 例句 | 中文词源)", height=200, key="anki_input_text")
     deck_name = st.text_input("牌组名称", f"Vocab_{bj_time_str}")
     
     if ai_resp.strip():
@@ -405,7 +412,7 @@ with tab_anki:
         if parsed_data:
             st.markdown("#### 👁️ 预览 (确认正面为短语)")
             df_view = pd.DataFrame(parsed_data)
-            df_view.rename(columns={'front_phrase': '正面 (短语)', 'ipa': 'IPA', 'meaning': '释义', 'examples': '例句', 'etymology': '词源'}, inplace=True)
+            df_view.rename(columns={'front_phrase': '正面 (短语)', 'ipa': 'IPA', 'meaning': '英文释义', 'examples': '例句', 'etymology': '中文词源'}, inplace=True)
             st.dataframe(df_view, use_container_width=True, hide_index=True)
             
             st.success(f"✅ 解析成功: {len(parsed_data)} 条")
@@ -413,4 +420,4 @@ with tab_anki:
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 格式无法解析")
+            st.warning("⚠️ 格式无法解析，请检查 AI 回复是否使用了 '|' 分隔符")
