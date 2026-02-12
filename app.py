@@ -85,7 +85,7 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. 核心解析逻辑 (V8 修复版)
+# 2. 核心解析逻辑
 # ==========================================
 def extract_text_from_file(uploaded_file):
     text = ""
@@ -129,73 +129,63 @@ def analyze_logic(text, current_lvl, target_lvl):
 
 def parse_anki_data(raw_text):
     """
-    V8 解析器：修复 '词源' 列丢失的问题
+    V10 终极解析器：使用自定义分隔符 |#|
     """
     parsed_cards = []
-    # 统一全角符号
-    raw_text = raw_text.replace('｜', '|')
+    
+    # 移除可能存在的代码块标记
+    raw_text = raw_text.replace("```markdown", "").replace("```", "")
+    
     lines = raw_text.strip().split('\n')
     seen_phrases = set()
 
     for line in lines:
         line = line.strip()
         if not line: continue
-        if '---' in line: continue
-        # 跳过表头行
-        if 'Phrase' in line and 'Definition' in line: continue
-
-        # 1. 原始分割
-        segments = line.split('|')
         
-        # 2. 清洗每一列的内容
-        parts = [s.strip() for s in segments]
-        
-        # 3. 移除 Markdown 表格首尾产生的空字符串
-        # 例如 "| A | B |" -> ["", "A", "B", ""] -> 移除首尾
-        if len(parts) > 0 and parts[0] == "":
-            parts.pop(0)
-        if len(parts) > 0 and parts[-1] == "":
-            parts.pop(-1)
+        # 必须包含自定义分隔符才处理
+        if "|#|" not in line:
+            continue
 
-        # 4. 提取数据 (只要有前3列数据即可)
+        # 使用自定义分隔符分割，非常安全
+        parts = line.split('|#|')
+        
+        # 清洗空格
+        parts = [p.strip() for p in parts]
+
+        # 只要列数大于等于3，就算有效数据
         if len(parts) >= 3:
-            front_text = parts[0]
-            
-            # --- 清洗正面 ---
-            front_text = front_text.rstrip('.,?!:; ')
-            front_text = front_text.replace('*', '') # 去除 Markdown 加粗
-            
-            # 过滤超长句子 (>7单词)
-            if len(front_text.split()) > 7:
-                continue
+            try:
+                front_text = parts[0]
+                meaning = parts[1]
+                examples = parts[2]
+                
+                # 获取词源，如果不够长则给默认值
+                etymology = parts[3] if len(parts) >= 4 else "🔍 词源暂缺"
+                
+                # --- 内容清洗 ---
+                front_text = front_text.replace('**', '').replace('__', '').strip()
+                if not front_text: continue # 空内容跳过
 
-            # 首字母小写处理
-            if front_text:
+                # 首字母处理
                 first_word = front_text.split()[0]
                 if first_word != "I" and not first_word.isupper():
                     front_text = front_text[0].lower() + front_text[1:]
 
-            if front_text in seen_phrases:
+                # 去重
+                if front_text in seen_phrases:
+                    continue
+                seen_phrases.add(front_text)
+
+                parsed_cards.append({
+                    'front_phrase': front_text,
+                    'meaning': meaning,
+                    'examples': examples,
+                    'etymology': etymology
+                })
+            except Exception as e:
+                print(f"Error parsing line: {line[:20]}... -> {e}")
                 continue
-            seen_phrases.add(front_text)
-
-            meaning = parts[1]
-            examples = parts[2]
-            
-            # --- 关键修复：获取词源 ---
-            # 只要 parts 长度足够，就取第4个元素（索引3）
-            if len(parts) >= 4:
-                etymology = parts[3]
-            else:
-                # 如果 AI 真的漏生成了，给予默认提示而不是报错
-                etymology = "词源暂缺"
-
-            parsed_cards.append({
-                'front_phrase': front_text,
-                'meaning': meaning,
-                'examples': examples,
-                'etymology': etymology
-            })
             
     return parsed_cards
 
@@ -269,7 +259,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt 生成逻辑 (V8 终极版)
+# 4. Prompt 生成逻辑 (V10 终极分隔符版)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
@@ -277,18 +267,20 @@ def get_ai_prompt(words):
 Task: Create Anki cards.
 Words: {w_list}
 
-**STRICT OUTPUT FORMAT (Markdown Table, 4 Columns):**
-`| Phrase | English Definition | Example Sentences | Chinese Etymology |`
+**STRICT OUTPUT FORMAT:**
+Use the separator `|#|` between columns.
+Format: `Phrase |#| English Definition |#| Example Sentences |#| Chinese Etymology`
 
 **RULES:**
-1. **NO IPA.** 2. **Column 1 (Phrase):** Short collocation (2-5 words). NO sentences. Lowercase.
-3. **Column 3 (Examples):** 1-2 sentences. Use `<br>` to separate lines. **DO NOT use actual newlines.**
-4. **Column 4 (Etymology):** Simplified Chinese only. **MUST NOT BE EMPTY.** If unknown, write "词源暂缺".
+1. **ONE LINE PER WORD.**
+2. **Column 1 (Phrase):** Short collocation (2-5 words). Lowercase.
+3. **Column 3 (Examples):** Use `<br>` for line breaks. **NO actual newlines.**
+4. **Column 4 (Etymology):** Simplified Chinese. If unknown, write "暂无".
+5. **NO IPA.**
 
-**Example:**
-| a benevolent leader | characterized by goodwill | The benevolent man helped the poor.<br>She is benevolent. | 词根: bene (好) + vol (意愿) |
-
-**Start Output:**
+**Example Output:**
+a benevolent leader |#| characterized by goodwill |#| He is benevolent.<br>A benevolent smile. |#| 词根: bene (好) + vol (意愿)
+next phrase here |#| definition here |#| example 1.<br>example 2. |#| etymology here
 """
 
 # ==========================================
@@ -374,19 +366,31 @@ with tab_anki:
         parsed_data = parse_anki_data(ai_resp)
         if parsed_data:
             st.markdown(f"#### 👁️ 预览 (成功解析 {len(parsed_data)} 条)")
+            
+            # 转换为 DataFrame 并重命名以便预览
             df_view = pd.DataFrame(parsed_data)
-            # 调整预览列名，方便检查
             df_view.rename(columns={
-                'front_phrase': '正面 (短语)', 
-                'meaning': '英文释义', 
-                'examples': '例句', 
-                'etymology': '中文词源'
+                'front_phrase': '正面 (Phrase)', 
+                'meaning': '英文释义 (Meaning)', 
+                'examples': '例句 (Examples)', 
+                'etymology': '中文词源 (Etymology)'
             }, inplace=True)
             
-            st.dataframe(df_view, use_container_width=True, hide_index=True)
+            # 强制显示所有列
+            st.dataframe(
+                df_view, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "正面 (Phrase)": st.column_config.TextColumn(width="medium"),
+                    "英文释义 (Meaning)": st.column_config.TextColumn(width="medium"),
+                    "例句 (Examples)": st.column_config.TextColumn(width="large"),
+                    "中文词源 (Etymology)": st.column_config.TextColumn(width="medium"),
+                }
+            )
             
             f_path = generate_anki_package(parsed_data, deck_name)
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 格式解析失败，请检查 AI 内容或确认是否包含有效表格。")
+            st.warning("⚠️ 未检测到有效数据，请确保 AI 使用了 `|#|` 作为分隔符。")
