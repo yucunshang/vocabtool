@@ -22,13 +22,19 @@ st.markdown("""
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     [data-testid="stSidebarCollapsedControl"] {display: none;}
     
+    /* 大按钮 */
     .stButton>button {
         width: 100%; border-radius: 10px; height: 3.2em; font-weight: bold; font-size: 16px !important;
         margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
+    /* 文本框优化 */
     .stTextArea textarea { font-size: 15px !important; border-radius: 10px; font-family: monospace; }
+    
+    /* 折叠栏样式 */
     [data-testid="stExpander"] { border-radius: 10px; border: 1px solid #e0e0e0; margin-bottom: 10px; }
+    
+    /* 复制提示 */
     .copy-tip { font-size: 12px; color: #888; margin-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
@@ -108,9 +114,10 @@ def generate_prompt(word_list, settings):
     ex_count = settings.get("example_count", 1)
     lang = settings.get("lang", "Chinese")
     
-    # 【Prompt 修正】
-    # 1. HTML Layout: 使用 <br> <br> 增加空行
-    # 2. Example Style: 明确 NO italics (无斜体)
+    # 【Prompt 更新】
+    # 1. 使用您提供的 latitude/detainee/moose 示例
+    # 2. 保持 <br> <br> 空行格式
+    # 3. 保持无斜体格式
     
     prompt = f"""Role: High-Efficiency Anki Card Creator
 Task: Convert the provided word list into a strict {fmt} data block.
@@ -137,6 +144,11 @@ Task: Convert the provided word list into a strict {fmt} data block.
    - Format: 【源】Root (Meaning) + Affix (Meaning)
 
 5. Atomicity: Separate rows for distinct meanings.
+
+--- EXAMPLE OUTPUT ---
+"north latitude","the angular distance of a place north or south of the equator<br> <br> The island is located at 20 degrees north latitude.<br> <br> 【源】Lat. 'latus' (宽)"
+"political detainee","a person held in custody, especially for political reasons<br> <br> The detainees were held without trial.<br> <br> 【源】detain (拘留) + -ee (被...的人)"
+"wild moose","a large deer with palmate antlers found in North America<br> <br> We saw a moose by the lake.<br> <br> 【源】Algonquian 'moosu' (食树枝者)"
 
 --- WORD LIST ({len(word_list)} words) ---
 {word_str}
