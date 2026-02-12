@@ -91,25 +91,20 @@ def get_beijing_time_str():
 
 def clear_all_state():
     """
-    V27 强力清空：
-    除了清除分析结果，还会重置文件上传器和文本输入框
+    强制清空所有状态
     """
-    # 清除分析数据
     keys_to_drop = ['gen_words', 'raw_count', 'process_time', 'raw_text_preview']
     for k in keys_to_drop:
         if k in st.session_state:
             del st.session_state[k]
     
-    # 清除输入控件 (通过 Session State key)
-    if 'uploader_key' in st.session_state:
-        st.session_state['uploader_key'] = None
-    if 'paste_key' in st.session_state:
-        st.session_state['paste_key'] = ""
-    if 'anki_input_text' in st.session_state:
-        st.session_state['anki_input_text'] = ""
+    # 重置组件状态
+    if 'uploader_key' in st.session_state: st.session_state['uploader_key'] = str(random.random())
+    if 'paste_key' in st.session_state: st.session_state['paste_key'] = ""
+    if 'anki_input_text' in st.session_state: st.session_state['anki_input_text'] = ""
 
 # ==========================================
-# 2. 核心逻辑
+# 2. 核心逻辑 (V28: 严格去重版)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -146,20 +141,26 @@ def extract_text_from_file(uploaded_file):
     return text
 
 def analyze_logic(text, current_lvl, target_lvl, include_unknown, mode="smart"):
-    # 宽松分词，兼容连字符
+    # 1. 宽松分词
     raw_tokens = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", text)
     total_words = len(raw_tokens)
     
+    # 2. 预处理：转小写 + 长度过滤
     tokens = [t.lower() for t in raw_tokens if len(t) >= 2]
+    
+    # 3. 严格去重 (Set Deduplication)
+    # 此时 'Apple' 和 'apple' 都变成了 'apple'，set 会自动去除重复
     unique_tokens = sorted(list(set(tokens)))
     
     final_list = []
     
     if mode == "direct":
-        # 直通模式：直接去重返回
+        # === 直通模式：严格去重，不还原，不过滤 ===
+        # 此时 unique_tokens 已经是去重后的结果了
+        # 例如: 原文有 "Go, go, WENT, went"，这里只有 "go, went"
         final_list = unique_tokens
     else:
-        # 智能模式：词形还原 + 过滤
+        # === 智能模式：词形还原 + 过滤 ===
         nltk, lemminflect = load_nlp_resources()
         def get_lemma_local(word):
             try: return lemminflect.getLemma(word, upos='VERB')[0]
@@ -171,6 +172,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown, mode="smart"):
         for w in unique_tokens:
             lemma = get_lemma_local(w)
             
+            # 词根级去重 (防止 go 和 went 同时出现)
             if lemma in seen_lemmas: continue
             
             rank = VOCAB_DICT.get(lemma, 99999)
@@ -190,7 +192,9 @@ def parse_anki_data(raw_text):
     parsed_cards = []
     text = raw_text.replace("```json", "").replace("```", "").strip()
     matches = re.finditer(r'\{.*?\}', text, re.DOTALL)
-    seen_phrases = set()
+    
+    # 关键修复：使用 set 存储小写形式，防止 AI 生成重复词
+    seen_phrases_lower = set()
 
     for match in matches:
         json_str = match.group()
@@ -200,13 +204,18 @@ def parse_anki_data(raw_text):
             meaning = data.get("m", "").strip()
             examples = data.get("e", "").strip()
             etymology = data.get("r", "").strip()
+            
             if not etymology or etymology.lower() == "none" or etymology == "":
                 etymology = ""
 
             if not front_text or not meaning: continue
+            
             front_text = front_text.replace('**', '')
-            if front_text in seen_phrases: continue
-            seen_phrases.add(front_text)
+            
+            # --- 严格去重检查 ---
+            if front_text.lower() in seen_phrases_lower: 
+                continue
+            seen_phrases_lower.add(front_text.lower())
 
             parsed_cards.append({
                 'front_phrase': front_text,
@@ -319,69 +328,41 @@ tab_guide, tab_extract, tab_anki = st.tabs(["📖 使用指南", "1️⃣ 单词
 with tab_guide:
     st.markdown("""
     ### 👋 欢迎使用 Vocab Flow Ultra
-    这是一个**从阅读材料中提取生词**，并利用 **AI** 自动生成 **Anki 卡片**的效率工具。
-    
-    ---
     
     <div class="guide-step">
     <span class="guide-title">Step 1: 提取生词 (Extract)</span>
     在 <code>1️⃣ 单词提取</code> 标签页：<br><br>
-    <strong>1. 上传文件</strong><br>
-    支持 <code>.pdf</code>, <code>.txt</code>, <code>.epub</code>, <code>.docx</code>，或者直接粘贴文本。<br>
-    <div class="guide-tip">💡 系统会自动过滤掉文档中的非单词字符，并将 <code>went</code>, <code>goes</code> 还原为 <code>go</code> 进行统计。</div>
-    <br>
-    <strong>2. 设置过滤范围 (Rank Filter)</strong><br>
-    利用 COCA 20000 词频表进行科学筛选：
+    <strong>1. 选择模式 (必选)</strong><br>
     <ul>
-        <li><strong>忽略排名前 N</strong> (Min Rank)：例如设为 <code>2000</code>，会过滤掉 `the, is, you` 等最基础的高频词。</li>
-        <li><strong>忽略排名后 N</strong> (Max Rank)：例如设为 <code>15000</code>，会过滤掉极其生僻的词。</li>
-        <li><strong>🔓 包含生僻词</strong> (Unknown)：《冰与火之歌》等小说包含大量人名或自造词，它们没有排名。勾选此项可以强制提取它们。</li>
+        <li><strong>📖 智能分析 (Smart)</strong>：适合小说/文章。会自动合并词形（如 went -> go），并支持词频过滤。</li>
+        <li><strong>📋 直通模式 (Direct)</strong>：适合生词本/单词表。<strong>严格去重，但不还原词形</strong>（保留 went），不过滤词频，原样提取。</li>
     </ul>
     <br>
+    <strong>2. 上传文件</strong><br>
+    支持 PDF, TXT, EPUB, DOCX。直通模式下建议上传 TXT 单词表。<br>
+    <br>
     <strong>3. 点击 🚀 开始分析</strong><br>
-    系统会显示“数据看板”，告诉你文档总字数、筛选出了多少生词，以及耗时。
+    系统会自动进行<strong>严格去重</strong>处理（Apple = apple）。
     </div>
 
     <div class="guide-step">
     <span class="guide-title">Step 2: 获取 Prompt (AI Generation)</span>
-    分析完成后，你会看到生成的单词列表。<br><br>
-    <strong>1. 自定义设置 (Customize)</strong><br>
-    点击 <code>⚙️ 自定义 Prompt 设置</code> 展开面板：
-    <ul>
-        <li><strong>正面内容</strong>：选择背单词本身，还是背短语搭配。</li>
-        <li><strong>背面释义</strong>：英文、中文或中英双语。</li>
-        <li><strong>例句/词源</strong>：按需开启。</li>
-    </ul>
+    分析完成后：<br><br>
+    <strong>1. 自定义设置</strong><br>
+    点击 <code>⚙️ 自定义 Prompt 设置</code>，选择正面是单词还是短语，释义语言等。<br>
     <br>
     <strong>2. 复制 Prompt</strong><br>
-    系统会自动将单词分组（防止 AI 长度溢出）。
-    <ul>
-        <li>📱 <strong>手机/鸿蒙端</strong>：使用下方的“纯文本框”，长按全选 -> 复制。</li>
-        <li>💻 <strong>电脑端</strong>：点击代码块右上角的 Copy 📄 图标。</li>
-    </ul>
+    系统会自动分组。使用下方的“纯文本框”或 Copy 按钮复制代码。
     <br>
     <strong>3. 发送给 AI</strong><br>
-    将复制的内容发送给 ChatGPT / Claude / Gemini / DeepSeek。AI 会返回一串 JSON 数据。
+    将代码发送给 ChatGPT / Claude / Gemini。
     </div>
 
     <div class="guide-step">
     <span class="guide-title">Step 3: 制作 Anki 牌组 (Create Deck)</span>
     在 <code>2️⃣ Anki 制作</code> 标签页：<br><br>
-    <strong>1. 粘贴 AI 回复</strong><br>
-    将 AI 生成的 JSON 内容粘贴到输入框中。<br>
-    <div class="guide-tip">💡 <strong>支持追加粘贴</strong>：如果你有 5 组单词，可以把 AI 的 5 次回复依次粘贴在同一个框里，不需要分批下载。</div>
-    <br>
-    <strong>2. 下载与导入</strong><br>
-    点击 <strong>📥 下载 .apkg</strong>，然后双击该文件，它会自动导入到你的 Anki 软件中。
-    </div>
-    
-    <div class="guide-step" style="border-left-color: #10b981; background-color: #ecfdf5;">
-    <span class="guide-title">💡 进阶技巧</span>
-    <ul>
-        <li><strong>一键复制所有单词</strong>：在“分析报告”下方，有一个“全部生词”的代码块，点击右上角图标可一次性导出到 Excel。</li>
-        <li><strong>直通模式</strong>：如果你已经有整理好的单词表（不希望程序过滤），可以在“处理模式”中选择“直通模式”。</li>
-        <li><strong>一键清空</strong>：点击底部的“清空”按钮，会同时清除上传的文件和粘贴的文本，方便进行下一个任务。</li>
-    </ul>
+    <strong>1. 粘贴 & 下载</strong><br>
+    将 AI 回复粘贴到输入框，点击下载 .apkg 文件。<br>
     </div>
     """, unsafe_allow_html=True)
 
@@ -395,7 +376,7 @@ with tab_extract:
             ["📖 智能分析 (文章/小说)", "📋 直通模式 (单词表/生词本)"], 
             horizontal=True,
             label_visibility="collapsed",
-            help="智能分析：会自动合并变形词(go=went)并按词频过滤。\n直通模式：不做合并，不做过滤，原样提取所有单词。"
+            help="智能分析：自动合并变形词(go=went)并过滤。\n直通模式：严格去重，不还原词形，不过滤。"
         )
         
         is_smart_mode = ("智能" in proc_mode)
@@ -406,10 +387,9 @@ with tab_extract:
             targ = c2.number_input("忽略排名后 N 的词", 2000, 50000, 20000, step=500)
             include_unknown = st.checkbox("🔓 包含生僻词/人名", value=False)
         else:
-            st.info("ℹ️ **直通模式已开启**：将跳过 NLP 还原和词频过滤，直接提取文档中的所有单词。适合处理已整理好的单词列表。")
+            st.info("ℹ️ **直通模式已开启**：系统将对上传内容进行**严格去重**（忽略大小写），保留原词形（不还原），不过滤。适合处理单词表。")
             curr, targ, include_unknown = 0, 999999, True
 
-        # 添加 key 使得可以被 clear_all_state 清空
         uploaded_file = st.file_uploader("📂 上传文档 (TXT/PDF/DOCX/EPUB)", key="uploader_key")
         pasted_text = st.text_area("📄 ...或粘贴文本", height=100, key="paste_key")
         
@@ -419,7 +399,7 @@ with tab_extract:
                 status.write("📂 读取文件...")
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
-                if len(raw_text) > 5:
+                if len(raw_text) > 2:
                     status.write("🔍 分析中...")
                     mode_str = "smart" if is_smart_mode else "direct"
                     final_words, raw_count = analyze_logic(raw_text, curr, targ, include_unknown, mode=mode_str)
@@ -476,7 +456,7 @@ with tab_extract:
         raw_c = st.session_state.get('raw_count', 0)
         p_time = st.session_state.get('process_time', 0.1)
         k1.metric("📄 文档总字数", f"{raw_c:,}")
-        k2.metric("🎯 筛选生词", f"{len(words)}")
+        k2.metric("🎯 筛选生词 (已去重)", f"{len(words)}")
         k3.metric("⚡ 耗时", f"{p_time:.2f}s")
         
         st.markdown("### 📋 全部生词 (点击右上角复制)")
