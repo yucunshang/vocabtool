@@ -48,28 +48,38 @@ ANKI_CSS = """
 @st.cache_resource(show_spinner="正在初始化 NLP 智能引擎...")
 def load_nlp_resources():
     """
-    按需加载 NLP 库 & 词性标注模型
+    修复版加载器：显式映射资源名与路径，防止 LookupError
     """
     import nltk
     import lemminflect
     
+    # 1. 设置本地下载目录
     root_dir = os.path.dirname(os.path.abspath(__file__))
     nltk_data_dir = os.path.join(root_dir, 'nltk_data')
     os.makedirs(nltk_data_dir, exist_ok=True)
-    nltk.data.path.append(nltk_data_dir)
     
-    # 核心包：Tokenizer, Tagger(词性), Wordnet(还原)
-    required_packages = ['averaged_perceptron_tagger', 'punkt', 'punkt_tab', 'wordnet']
+    # 2. 关键：将本地目录插入到搜索路径的最前面 (Priority 0)
+    if nltk_data_dir not in nltk.data.path:
+        nltk.data.path.insert(0, nltk_data_dir)
     
-    for pkg in required_packages:
-        try: 
-            # 尝试查找不同路径下的资源
-            nltk.data.find(f'tokenizers/{pkg}')
-        except LookupError: 
-            try: nltk.data.find(f'taggers/{pkg}')
-            except LookupError: 
-                try: nltk.data.find(f'corpora/{pkg}')
-                except LookupError: nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
+    # 3. 资源清单映射 { '下载包名': '检查路径(data.find使用)' }
+    required_resources = {
+        'punkt': 'tokenizers/punkt',
+        'punkt_tab': 'tokenizers/punkt_tab', # 新版 NLTK 必须
+        'averaged_perceptron_tagger': 'taggers/averaged_perceptron_tagger',
+        'wordnet': 'corpora/wordnet'
+    }
+    
+    # 4. 逐个检查，缺失则下载
+    for pkg, check_path in required_resources.items():
+        try:
+            nltk.data.find(check_path)
+        except LookupError:
+            try:
+                # print(f"Downloading {pkg}...") 
+                nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
+            except Exception as e:
+                pass # 忽略网络错误，后续会再次报错提示用户
             
     return nltk, lemminflect
 
@@ -92,7 +102,6 @@ def load_vocab_db():
         df[w_col] = df[w_col].astype(str).str.lower().str.strip()
         df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
         
-        # 去重，保留排名最靠前的 (e.g. 动词 wind 和名词 wind，保留高频的)
         df = df.sort_values(r_col).drop_duplicates(subset=[w_col], keep='first')
         return pd.Series(df[r_col].values, index=df[w_col]).to_dict(), df
     except Exception as e:
@@ -103,7 +112,7 @@ VOCAB_DICT, FULL_DF = load_vocab_db()
 
 def read_file_content(uploaded_file):
     """
-    鲁棒的文件读取器 (PDF/Docx/Epub/Txt)
+    文件读取器 (PDF/Docx/Epub/Txt)
     """
     import pypdf, docx, ebooklib
     from ebooklib import epub
@@ -139,39 +148,45 @@ def read_file_content(uploaded_file):
 
 def process_text_logic(text, cfg):
     """
-    V29 Plus 算法：NLP POS 过滤 + 智能还原 + 词频比对
+    Vibe Logic: NLP POS 过滤 + 智能还原 + 词频比对
     """
     nltk, lemminflect = load_nlp_resources()
     
-    # 1. 预清洗：去除 URL、邮箱、数字乱码
+    # 1. 预清洗
     text = re.sub(r'http\S+|www\.\S+', '', text)
     text = re.sub(r'\b\w*\d\w*\b', '', text)
     
     # 2. NLTK 智能分词
-    raw_tokens = nltk.word_tokenize(text)
+    try:
+        raw_tokens = nltk.word_tokenize(text)
+    except LookupError:
+        # Fallback: 如果 punkt 还是挂了，退化为正则分词
+        raw_tokens = re.findall(r"\b[a-zA-Z]+\b", text)
+        
     total_words = len(raw_tokens)
     
     # 3. 词性标注 (POS Tagging) - 核心精度来源
-    tagged_tokens = nltk.pos_tag(raw_tokens)
+    try:
+        tagged_tokens = nltk.pos_tag(raw_tokens)
+    except LookupError as e:
+        # 最后的防线：如果 tagger 真的完全下载失败，手动抛出友好错误
+        st.error(f"NLP 资源加载失败。请刷新页面重试，或检查网络连接。Error: {e}")
+        return [], 0
     
-    # 允许的词性: 名词(N), 动词(V), 形容词(J), 副词(R)
-    # 拒绝: 代词, 介词, 连词, 冠词等
+    # 允许的词性前缀: N(名词), V(动词), J(形容词), R(副词)
     VALID_PREFIXES = ('N', 'V', 'J', 'R') 
     
     candidates = []
     seen_lemmas = set()
     
     for word, tag in tagged_tokens:
-        # A. 基础过滤：全字母，长度>1
         if len(word) < 2 or not word.isalpha():
             continue
             
-        # B. 词性过滤
         if not tag.startswith(VALID_PREFIXES):
             continue
             
-        # C. 智能还原 (Lemma)
-        # 将 Treebank Tag 映射到 Lemminflect UPOS
+        # 智能还原映射
         if tag.startswith('V'): upos = 'VERB'
         elif tag.startswith('J'): upos = 'ADJ'
         elif tag.startswith('R'): upos = 'ADV'
@@ -179,11 +194,10 @@ def process_text_logic(text, cfg):
         
         lemma = lemminflect.getLemma(word.lower(), upos=upos)[0]
         
-        # D. 查词频 (优先查 Lemma)
+        # 查词频
         rank_l = VOCAB_DICT.get(lemma, 99999)
         rank_w = VOCAB_DICT.get(word.lower(), 99999)
         
-        # 确定最佳 Rank (如果两者都有排名，取更靠前的)
         if rank_l != 99999 and rank_w != 99999:
             best_rank = min(rank_l, rank_w)
         elif rank_l != 99999:
@@ -191,29 +205,22 @@ def process_text_logic(text, cfg):
         else:
             best_rank = rank_w
             
-        # E. 范围判定
+        # 范围判定
         in_range = cfg['curr'] <= best_rank <= cfg['targ']
         is_unknown = (best_rank == 99999 and cfg['include_unknown'])
         
         if in_range or is_unknown:
-            # 过滤全大写缩写 (如 API, HTML)，除非它是已知高频词
-            if word.isupper() and best_rank > 5000:
-                continue
+            if word.isupper() and best_rank > 5000: continue
 
-            # 最终展示词 (优先展示 Lemma)
             display_word = lemma if rank_l != 99999 else word.lower()
             
             if display_word not in seen_lemmas:
                 candidates.append((display_word, best_rank))
                 seen_lemmas.add(display_word)
 
-    # 排序：按词频 (常见 -> 生僻 -> 未知)
     return sorted(candidates, key=lambda x: x[1]), total_words
 
 def create_anki_pkg(cards, deck_name):
-    """
-    生成 Anki .apkg 文件
-    """
     import genanki, tempfile
     
     model = genanki.Model(
@@ -237,9 +244,6 @@ def create_anki_pkg(cards, deck_name):
         return tmp.name
 
 def get_ai_prompt(words, settings):
-    """
-    生成 AI 提示词 (NDJSON 格式)
-    """
     w_str = ", ".join(words)
     context_desc = "short phrase/collocation (2-5 words)" if settings['front'] == "短语" else "word itself"
     
@@ -248,7 +252,7 @@ Task: Create Anki cards for learning English.
 Target Words: {w_str}
 
 **OUTPUT FORMAT: NDJSON (One JSON object per line).**
-**Strictly NO markdown code blocks (```json ... ```). Just raw NDJSON.**
+**Strictly NO markdown code blocks. Just raw NDJSON.**
 
 **Fields:**
 1. `w` (Front): The {context_desc} containing the target word.
@@ -272,7 +276,6 @@ st.title("⚡️ Vocab Flow Ultra")
 if not VOCAB_DICT:
     st.warning("⚠️ 未检测到 `coca_cleaned.csv`，仅可使用无词频过滤模式。")
 
-# 初始化 Session State
 if 'uploader_id' not in st.session_state: st.session_state['uploader_id'] = "1000"
 if 'gen_data' not in st.session_state: st.session_state['gen_data'] = []
 if 'raw_count' not in st.session_state: st.session_state['raw_count'] = 0
@@ -318,7 +321,6 @@ with tab_extract:
                 st.session_state['raw_count'] = total
                 status.update(label=f"✅ 分析完成！从 {total} 词中提取出 {len(data)} 个生词", state="complete", expanded=False)
 
-    # 结果展示区
     if st.session_state['gen_data']:
         data = st.session_state['gen_data']
         words = [x[0] for x in data]
@@ -334,10 +336,8 @@ with tab_extract:
             s_def = cols[1].selectbox("释义语言", ["中文", "英文", "中英"], index=0)
             s_ex = cols[2].slider("例句数量", 1, 3, 1)
             s_ety = cols[3].checkbox("包含词源", True)
-            
             settings = {'front': s_front, 'def_lang': s_def, 'ex_count': s_ex, 'ety': s_ety}
 
-        # 预览与复制区
         st.markdown("### 📋 生成 Prompt")
         batch_size = st.number_input("每组单词数量 (Batch Size)", 10, 500, 50)
         batches = [words[i:i + batch_size] for i in range(0, len(words), batch_size)]
@@ -357,7 +357,6 @@ with tab_anki:
 
     if json_input:
         try:
-            # 宽松解析: 提取所有 {} 包裹的内容
             matches = re.findall(r'\{.*?\}', json_input, re.DOTALL)
             parsed = []
             for m in matches:
@@ -374,9 +373,7 @@ with tab_anki:
             
             if clean_cards:
                 st.success(f"✅ 解析成功: {len(clean_cards)} 张卡片")
-                # 预览前5条
                 st.dataframe(pd.DataFrame(clean_cards).head(5)[['w', 'm', 'r']], hide_index=True, use_container_width=True)
-                
                 pkg_path = create_anki_pkg(clean_cards, deck_name)
                 with open(pkg_path, "rb") as f:
                     st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", type="primary")
