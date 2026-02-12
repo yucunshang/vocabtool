@@ -89,7 +89,7 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. 核心逻辑
+# 2. 核心逻辑 (V23: 增加词根去重)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -127,15 +127,23 @@ def analyze_logic(text, current_lvl, target_lvl):
 
     raw_tokens = re.findall(r"[a-z]+", text.lower())
     total_words = len(raw_tokens)
-    unique_tokens = set(raw_tokens)
+    unique_tokens = set(raw_tokens) # 1. 原始 token 去重
+    
     target_words = []
+    seen_lemmas = set() # 2. 词根级去重 (Fix: 防止 go/went 导致重复)
     
     for w in unique_tokens:
         if len(w) < 2: continue 
         lemma = get_lemma_local(w)
+        
+        # 核心修复：如果这个词根已经收录过了，直接跳过
+        if lemma in seen_lemmas:
+            continue
+            
         rank = VOCAB_DICT.get(lemma, 99999)
         if rank >= current_lvl and rank <= target_lvl:
             target_words.append((lemma, rank))
+            seen_lemmas.add(lemma) # 标记为已收录
             
     target_words.sort(key=lambda x: x[1])
     return [x[0] for x in target_words], total_words
@@ -264,7 +272,7 @@ Words: {w_list}
 # ==========================================
 # 5. UI 主程序
 # ==========================================
-st.title("⚡️ Vocab Flow Ultra (V22)")
+st.title("⚡️ Vocab Flow Ultra (V23)")
 
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`")
@@ -385,7 +393,7 @@ with tab_extract:
         k2.metric("🎯 筛选生词", f"{len(words)}")
         k3.metric("⚡ 耗时", f"{p_time:.2f}s")
         
-        # --- 📋 一键复制 (使用 st.code 实现) ---
+        # --- 📋 一键复制 (优化：使用 Code Block) ---
         st.markdown("### 📋 全部生词 (点击右上角复制)")
         all_words_str = ", ".join(words)
         st.code(all_words_str, language="text")
