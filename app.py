@@ -1,343 +1,195 @@
 import streamlit as st
 import pandas as pd
-import re
 import os
-import lemminflect
-import nltk
-import time
+import sys
 
 # ==========================================
-# 0. 基础配置
+# 0. 页面配置 (必须是第一个 Streamlit 命令)
 # ==========================================
 st.set_page_config(
-    page_title="Vocab Master", 
-    page_icon="⚡️", 
-    layout="centered", 
-    initial_sidebar_state="collapsed"
+    page_title="Vocab Master (Debug Mode)", 
+    page_icon="🛠️", 
+    layout="centered"
 )
 
-st.markdown("""
-<style>
-    .block-container { padding-top: 1rem; padding-bottom: 5rem; }
-    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
-    [data-testid="stSidebarCollapsedControl"] {display: none;}
-    
-    .stButton>button {
-        width: 100%; border-radius: 10px; height: 3.2em; font-weight: bold; font-size: 16px !important;
-        margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    
-    .stTextArea textarea { font-size: 15px !important; border-radius: 10px; font-family: monospace; }
-    [data-testid="stExpander"] { border-radius: 10px; border: 1px solid #e0e0e0; margin-bottom: 10px; }
-    .copy-tip { font-size: 12px; color: #888; margin-bottom: 5px; }
-</style>
-""", unsafe_allow_html=True)
+# ==========================================
+# 1. 依赖库检查与导入
+# ==========================================
+# 检查 NLTK
+try:
+    import nltk
+    from nltk.stem import WordNetLemmatizer
+except ImportError:
+    st.error("❌ 缺少 nltk 库。请运行: pip install nltk")
+    st.stop()
+
+# 检查 Lemminflect (可选，没有就降级)
+try:
+    import lemminflect
+    HAS_LEMMINFLECT = True
+except ImportError:
+    HAS_LEMMINFLECT = False
+    st.warning("⚠️ 未检测到 lemminflect 库，将使用基础还原模式。建议运行: pip install lemminflect")
 
 # ==========================================
-# 1. 资源加载
+# 2. 资源初始化 (带错误捕获)
 # ==========================================
 @st.cache_resource
-def setup_nltk():
-    root_dir = os.path.dirname(os.path.abspath(__file__))
-    nltk_data_dir = os.path.join(root_dir, 'nltk_data')
-    os.makedirs(nltk_data_dir, exist_ok=True)
-    nltk.data.path.append(nltk_data_dir)
-    try: 
-        nltk.download('averaged_perceptron_tagger', download_dir=nltk_data_dir, quiet=True)
-        nltk.download('punkt', download_dir=nltk_data_dir, quiet=True)
-    except: pass
-setup_nltk()
+def init_nlp_resources():
+    status_text = st.empty()
+    status_text.text("正在初始化 NLP 资源...")
+    
+    # 1. 下载 NLTK 数据
+    nltk_packages = ['punkt', 'averaged_perceptron_tagger', 'wordnet', 'omw-1.4']
+    nltk_path = os.path.join(os.getcwd(), 'nltk_data')
+    os.makedirs(nltk_path, exist_ok=True)
+    nltk.data.path.append(nltk_path)
+    
+    for pkg in nltk_packages:
+        try:
+            # 先尝试查找
+            nltk.data.find(f'tokenizers/{pkg}') if pkg == 'punkt' else \
+            nltk.data.find(f'taggers/{pkg}') if pkg == 'averaged_perceptron_tagger' else \
+            nltk.data.find(f'corpora/{pkg}')
+        except LookupError:
+            try:
+                # 找不到则下载
+                nltk.download(pkg, download_dir=nltk_path, quiet=True)
+            except Exception as e:
+                st.error(f"❌ NLTK 数据 '{pkg}' 下载失败: {e}")
+                st.info("💡 提示：如果是网络问题，请尝试挂梯子或手动下载 NLTK data。")
+                
+    status_text.empty()
+    return True
 
+init_nlp_resources()
+
+# ==========================================
+# 3. 数据加载 (带路径调试)
+# ==========================================
 @st.cache_data
 def load_data():
-    possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
-    file_path = next((f for f in possible_files if os.path.exists(f)), None)
+    # 打印当前路径，帮助调试
+    current_dir = os.getcwd()
+    files_in_dir = os.listdir(current_dir) if os.path.exists(current_dir) else []
     
-    if file_path:
+    # 自动寻找 csv
+    target_file = "coca_cleaned.csv"
+    if target_file not in files_in_dir:
+        st.error(f"❌ 找不到文件: {target_file}")
+        st.code(f"当前运行目录: {current_dir}\n目录下的文件: {files_in_dir}")
+        return None, None
+        
+    try:
+        df = pd.read_csv(target_file)
+        # 清洗列名
+        df.columns = [c.strip().lower() for c in df.columns]
+        
+        # 寻找 word 和 rank 列
+        w_col = next((c for c in df.columns if 'word' in c), None)
+        r_col = next((c for c in df.columns if 'rank' in c), None)
+        
+        if not w_col or not r_col:
+            st.error(f"❌ CSV 格式错误。找不到 'word' 或 'rank' 列。\n检测到的列名: {df.columns.tolist()}")
+            return None, None
+            
+        df = df.dropna(subset=[w_col, r_col])
+        df[w_col] = df[w_col].astype(str).str.lower().str.strip()
+        df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
+        
+        # 字典化
+        df = df.sort_values(r_col).drop_duplicates(subset=[w_col])
+        vocab_dict = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
+        
+        return vocab_dict, df
+        
+    except Exception as e:
+        st.error(f"❌ 读取 CSV 出错: {e}")
+        return None, None
+
+VOCAB_DICT, FULL_DF = load_data()
+
+# ==========================================
+# 4. 核心逻辑 (混合模式)
+# ==========================================
+def get_lemma(word, tag):
+    """兼容两种库的还原逻辑"""
+    if not word.isalpha(): return word
+    
+    # 转换 tag
+    pos = 'n'
+    if tag.startswith('V'): pos = 'v'
+    elif tag.startswith('J'): pos = 'a'
+    elif tag.startswith('R'): pos = 'r'
+
+    # 优先使用 Lemminflect
+    if HAS_LEMMINFLECT:
         try:
-            df = pd.read_csv(file_path)
-            cols = [str(c).strip().lower() for c in df.columns]
-            df.columns = cols
-            w_col = next((c for c in cols if 'word' in c), cols[0])
-            r_col = next((c for c in cols if 'rank' in c), cols[1])
+            upos = 'VERB' if pos == 'v' else 'ADJ' if pos == 'a' else 'ADV' if pos == 'r' else 'NOUN'
+            return lemminflect.getLemma(word, upos=upos)[0]
+        except:
+            pass
             
-            df = df.dropna(subset=[w_col])
-            df[w_col] = df[w_col].astype(str).str.lower().str.strip()
-            df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
-            df = df.dropna(subset=[r_col])
-            
-            # 排序去重，保留最常用义 (Rank 最小)
-            df = df.sort_values(r_col, ascending=True)
-            df_unique = df.drop_duplicates(subset=[w_col], keep='first')
-            
-            vocab_dict = pd.Series(df_unique[r_col].values, index=df_unique[w_col]).to_dict()
-            return vocab_dict, df_unique, r_col, w_col
-        except Exception as e:
-            st.error(f"数据加载出错: {e}")
-            return {}, None, None, None
-    return {}, None, None, None
+    # 降级使用 WordNet
+    lemmatizer = WordNetLemmatizer()
+    return lemmatizer.lemmatize(word, pos)
 
-VOCAB_DICT, FULL_DF, RANK_COL, WORD_COL = load_data()
-def get_lemma(word): return lemminflect.getLemma(word, upos='VERB')[0] 
-
-# ==========================================
-# 2. 核心逻辑
-# ==========================================
 def analyze_text(text, current_lvl, target_lvl):
-    raw_words = re.findall(r"[a-z]+", text.lower())
-    unique_words = set(raw_words)
+    if not VOCAB_DICT: return pd.DataFrame()
     
-    data_list = []
-    for w in unique_words:
-        if len(w) < 2: continue
-        lemma = get_lemma(w)
+    # 简单分词 (不依赖 punkt 防止报错)
+    try:
+        tokens = nltk.word_tokenize(text.lower())
+    except:
+        import re
+        tokens = re.findall(r"[a-z]+", text.lower())
+        
+    # 词性标注
+    try:
+        tagged = nltk.pos_tag(tokens)
+    except:
+        tagged = [(t, 'n') for t in tokens] # 失败则全默认为名词
+        
+    res = []
+    seen = set()
+    
+    for word, tag in tagged:
+        if len(word) < 2: continue
+        lemma = get_lemma(word, tag)
+        
+        if lemma in seen: continue
+        seen.add(lemma)
+        
         rank = VOCAB_DICT.get(lemma, 99999)
         
-        category = "Beyond"
-        if rank <= current_lvl: category = "Mastered"
-        elif rank <= target_lvl: category = "Target"
+        cat = "Beyond"
+        if rank <= current_lvl: cat = "Mastered"
+        elif rank <= target_lvl: cat = "Target"
         
-        data_list.append({"Word": lemma, "Rank": int(rank), "Category": category})
+        res.append({"Word": lemma, "Rank": rank, "Category": cat})
         
-    df = pd.DataFrame(data_list)
-    return df
-
-def generate_prompt(word_list, settings):
-    word_str = ", ".join(word_list)
-    
-    # 解析设置
-    fmt = settings.get("format", "CSV")
-    ex_count = settings.get("example_count", 1)
-    
-    # 1. 正面风格逻辑
-    front_style = settings.get("front_style", "Phrase")
-    if "Phrase" in front_style:
-        front_instruction = "A natural, short English phrase or collocation containing the target word (e.g., 'shaky hands')."
-    else:
-        front_instruction = "The target word ONLY (e.g., 'shaky')."
-
-    # 2. 释义语言逻辑
-    def_lang_opt = settings.get("def_lang", "Chinese")
-    if "中文" in def_lang_opt:
-        def_instruction = "Concise Chinese definition."
-    elif "双语" in def_lang_opt:
-        def_instruction = "Concise English definition + Concise Chinese definition."
-    else:
-        def_instruction = "Concise English definition."
-
-    prompt = f"""Role: High-Efficiency Anki Card Creator
-Task: Convert the provided word list into a strict {fmt} data block.
-
---- OUTPUT FORMAT RULES ---
-1. Structure: {'2 Columns (Front, Back)' if fmt=='CSV' else 'Custom Text Format'}.
-   Format: "Front","Back"
-   Header: **Do NOT output a header row.**
-
-2. Column 1 (Front):
-   - Content: {front_instruction}
-   - Style: **ALL LOWERCASE**.
-
-3. Column 2 (Back):
-   - Content: Definition + {ex_count} Example(s) + Etymology.
-   - HTML Layout: Definition <br> <br> Example <br> <br> 【源】Etymology
-   - Spacing Rules: 
-     - Use double <br> tags ( <br> <br> ) to create empty lines between sections.
-   - Example Style: Plain text (NO italics). **Start with UPPERCASE**.
-   - Definition Language: {def_instruction}
-
-4. Etymology Style:
-   - **ALWAYS Chinese (中文)**.
-   - Only explain roots/affixes.
-   - Format: 【源】Root (Meaning) + Affix (Meaning)
-
-5. Atomicity: Separate rows for distinct meanings.
-
---- EXAMPLE OUTPUT ---
-"north latitude","the angular distance north of the equator<br> <br> The island is at 20 degrees north latitude.<br> <br> 【源】Lat. 'latus' (宽)"
-"political detainee","a person held in custody for political reasons<br> <br> The detainees were held without trial.<br> <br> 【源】detain (拘留) + -ee (被...的人)"
-
---- WORD LIST ({len(word_list)} words) ---
-{word_str}
-"""
-    return prompt
+    return pd.DataFrame(res)
 
 # ==========================================
-# 3. 主界面
+# 5. 界面
 # ==========================================
-st.title("⚡️ Vocab Master")
+st.title("⚡️ Vocab Master (修复版)")
 
 if FULL_DF is None:
-    st.error("⚠️ 缺少词频文件")
+    st.warning("⚠️ 请先解决上述报错 (缺少文件或CSV格式不对)")
 else:
-    # --- 顶栏设置 (全新) ---
-    with st.expander("⚙️ Prompt 设置 (Settings)", expanded=False):
-        c1, c2 = st.columns(2)
-        with c1:
-            # 1. 正面单词/短语
-            set_front_style = st.selectbox(
-                "正面内容 (Front)", 
-                ["短语/搭配 (Phrase)", "单词 (Word)"], 
-                index=0
-            )
-            # 2. 释义语言
-            set_def_lang = st.selectbox(
-                "释义语言 (Definition)", 
-                ["中文 (Chinese)", "英文 (English)", "中英双语 (Bilingual)"], 
-                index=0
-            )
-        with c2:
-            # 3. 例句数量
-            set_ex_count = st.number_input("例句数量 (Examples)", 1, 3, 1)
-            set_format = st.selectbox("导出格式", ["CSV", "TXT"], index=0)
-            
-    settings = {
-        "format": set_format, 
-        "front_style": set_front_style,
-        "def_lang": set_def_lang,
-        "example_count": set_ex_count
-    }
-
-    # --- 模式选择 ---
-    mode = st.radio("模式", ["📖 文本提取", "🔢 词频刷词", "🛠️ 格式转换"], horizontal=True, label_visibility="collapsed")
-    st.divider()
-
-    # ------------------------------------------------
-    # 模式 A: 文本提取
-    # ------------------------------------------------
-    if mode == "📖 文本提取":
-        st.caption("分析文章，筛选重点词")
-        
-        c_a, c_b = st.columns(2)
-        with c_a: curr_lvl = st.number_input("当前水平", 4000, step=500)
-        with c_b: targ_lvl = st.number_input("目标水平", 8000, step=500)
-        
-        inp_type = st.radio("Input", ["粘贴", "上传"], horizontal=True, label_visibility="collapsed")
-        
-        user_text = ""
-        if inp_type == "粘贴":
-            user_text = st.text_area("在此粘贴文本", height=100)
+    txt = st.text_area("输入英文文本", height=150)
+    
+    if st.button("分析"):
+        if not txt.strip():
+            st.warning("请输入内容")
         else:
-            up = st.file_uploader("上传 (TXT/PDF)", type=["txt","pdf"])
-            if up:
-                try:
-                    if up.name.endswith('.txt'): user_text = up.getvalue().decode("utf-8")
-                    else: 
-                        import PyPDF2
-                        r = PyPDF2.PdfReader(up)
-                        user_text = " ".join([p.extract_text() for p in r.pages])
-                except: st.error("读取失败")
-
-        if user_text and st.button("🔍 开始分析", type="primary"):
             with st.spinner("分析中..."):
-                t0 = time.time()
-                df_res = analyze_text(user_text, curr_lvl, targ_lvl)
-                st.session_state['analysis_df'] = df_res
-                st.session_state['analysis_time'] = time.time() - t0
-        
-        if 'analysis_df' in st.session_state:
-            df = st.session_state['analysis_df']
-            
-            # 排序：重点词按 Rank 降序 (难->易)
-            df_target = df[df['Category'] == 'Target'].sort_values(by="Rank", ascending=False)
-            df_mastered = df[df['Category'] == 'Mastered'].sort_values(by="Rank")
-            df_beyond = df[df['Category'] == 'Beyond'].sort_values(by="Rank")
-            
-            st.success(f"共 {len(df)} 词 (耗时 {st.session_state['analysis_time']:.2f}s)")
-            
-            t1, t2, t3 = st.tabs([
-                f"🎯 重点 ({len(df_target)})", 
-                f"✅ 已掌握 ({len(df_mastered)})", 
-                f"🚀 超纲 ({len(df_beyond)})"
-            ])
-            
-            # --- 重点词 Tab ---
-            with t1:
-                default_target_str = ", ".join(df_target["Word"].tolist())
+                df = analyze_text(txt, 4000, 8000)
                 
-                with st.expander("📝 编辑重点词 (可折叠)", expanded=True):
-                    st.caption("👇 在此修改列表：")
-                    edited_target_str = st.text_area("Target List", value=default_target_str, height=150, key="ta_target")
-                
-                st.markdown("<p class='copy-tip'>👇 纯单词列表 (点击右上角复制)</p>", unsafe_allow_html=True)
-                st.code(edited_target_str, language="text")
-
-                final_words = [w.strip() for w in edited_target_str.split(',') if w.strip()]
-                
-                if final_words:
-                    # 分批逻辑：100个一组
-                    BATCH_SIZE = 100
-                    total = len(final_words)
-                    
-                    if total > BATCH_SIZE:
-                        st.warning(f"单词较多 ({total})，自动分批 (每批 {BATCH_SIZE})")
-                        num_batches = (total // BATCH_SIZE) + (1 if total % BATCH_SIZE != 0 else 0)
-                        
-                        sel_batch = st.radio(
-                            "选择批次:", 
-                            range(1, num_batches + 1), 
-                            format_func=lambda x: f"第 {x} 批 ({min(x*BATCH_SIZE, total)}词)",
-                            horizontal=True
-                        )
-                        
-                        start = (sel_batch - 1) * BATCH_SIZE
-                        batch_words = final_words[start : start + BATCH_SIZE]
-                        
-                        if st.button(f"🚀 生成 Prompt (第 {sel_batch} 批)", type="primary"):
-                            prompt = generate_prompt(batch_words, settings)
-                            st.code(prompt, language="markdown")
-                            st.success("👆 点击代码块右上角复制")
-                    else:
-                        if st.button("🚀 生成 Prompt (全部)", type="primary"):
-                            prompt = generate_prompt(final_words, settings)
-                            st.code(prompt, language="markdown")
-                            st.success("👆 点击代码块右上角复制")
-
-            # --- 已掌握 Tab ---
-            with t2:
-                words_m = ", ".join(df_mastered["Word"].tolist())
-                st.caption("👇 点击右上角复制")
-                st.code(words_m, language="text")
-            
-            # --- 超纲 Tab ---
-            with t3:
-                words_b = ", ".join(df_beyond["Word"].tolist())
-                st.caption("👇 点击右上角复制")
-                st.code(words_b, language="text")
-
-    # ------------------------------------------------
-    # 模式 B: 刷词
-    # ------------------------------------------------
-    elif mode == "🔢 词频刷词":
-        c1, c2 = st.columns(2)
-        with c1: s_r = st.number_input("起始排名 (Start)", value=8000, step=100)
-        with c2: cnt = st.number_input("生成数量 (Count)", value=50, step=10)
-        
-        if st.button("提取"):
-            res = FULL_DF[FULL_DF[RANK_COL] >= s_r].sort_values(RANK_COL).head(cnt)
-            w_str = ", ".join(res[WORD_COL].tolist())
-            st.session_state['range_str'] = w_str
-            
-        if 'range_str' in st.session_state:
-            with st.expander("📝 编辑列表", expanded=True):
-                edited_range_str = st.text_area("List", value=st.session_state['range_str'], height=150)
-            
-            st.code(edited_range_str, language="text")
-            
-            words = [w.strip() for w in edited_range_str.split(',') if w.strip()]
-            
-            if st.button("🚀 生成 Prompt", type="primary"):
-                prompt = generate_prompt(words, settings)
-                st.code(prompt, language="markdown")
-
-    # ------------------------------------------------
-    # 模式 C: 转换
-    # ------------------------------------------------
-    elif mode == "🛠️ 格式转换":
-        st.markdown("### 📥 转 Anki CSV")
-        st.caption("粘贴 AI 回复 (无表头)")
-        txt = st.text_area("粘贴内容", height=200)
-        
-        if txt:
-            # 清洗
-            clean_txt = txt.replace("```csv", "").replace("```", "").strip()
-            st.download_button("📥 下载 .csv", clean_txt.encode("utf-8"), "anki.csv", "text/csv", type="primary")
+            if df.empty:
+                st.info("未提取到单词 (或所有单词均不在词库中)")
+            else:
+                target_words = df[df['Category'] == 'Target'].sort_values('Rank')
+                st.success(f"分析完成! 发现 {len(target_words)} 个重点生词")
+                st.dataframe(target_words)
