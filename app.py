@@ -22,19 +22,13 @@ st.markdown("""
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     [data-testid="stSidebarCollapsedControl"] {display: none;}
     
-    /* 大按钮 */
     .stButton>button {
         width: 100%; border-radius: 10px; height: 3.2em; font-weight: bold; font-size: 16px !important;
         margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    /* 文本框优化 */
     .stTextArea textarea { font-size: 15px !important; border-radius: 10px; font-family: monospace; }
-    
-    /* 折叠栏样式 */
     [data-testid="stExpander"] { border-radius: 10px; border: 1px solid #e0e0e0; margin-bottom: 10px; }
-    
-    /* 复制提示 */
     .copy-tip { font-size: 12px; color: #888; margin-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
@@ -72,8 +66,10 @@ def load_data():
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
             df = df.dropna(subset=[r_col])
             
-            # 【关键修复】先按排名排序(升序)，然后去重保留第一个
-            # 这样保证 say (rank 19) 优先于 say (rank 11771)
+            # 【修复逻辑】
+            # 1. 按排名升序排列 (1, 2, 3...)
+            # 2. 去重，保留第一个 (即保留排名最靠前的那个)
+            # 结果: say (19) 会保留，say (11771) 会被丢弃
             df = df.sort_values(r_col, ascending=True)
             df_unique = df.drop_duplicates(subset=[w_col], keep='first')
             
@@ -91,6 +87,7 @@ def get_lemma(word): return lemminflect.getLemma(word, upos='VERB')[0]
 # 2. 核心逻辑
 # ==========================================
 def analyze_text(text, current_lvl, target_lvl):
+    # 简单的正则分词，转小写
     raw_words = re.findall(r"[a-z]+", text.lower())
     unique_words = set(raw_words)
     
@@ -98,6 +95,7 @@ def analyze_text(text, current_lvl, target_lvl):
     for w in unique_words:
         if len(w) < 2: continue
         lemma = get_lemma(w)
+        # 获取排名，如果没找到则设为 99999 (超纲)
         rank = VOCAB_DICT.get(lemma, 99999)
         
         category = "Beyond"
@@ -115,6 +113,11 @@ def generate_prompt(word_list, settings):
     ex_count = settings.get("example_count", 1)
     lang = settings.get("lang", "Chinese")
     
+    # 【Prompt 修正】
+    # 1. 禁止使用 &emsp;
+    # 2. 使用 <i> 替代 <em> 
+    # 3. 使用单 <br>
+    
     prompt = f"""Role: High-Efficiency Anki Card Creator
 Task: Convert the provided word list into a strict {fmt} data block.
 
@@ -129,15 +132,16 @@ Task: Convert the provided word list into a strict {fmt} data block.
 
 3. Column 2 (Back):
    - Content: Definition + {ex_count} Example(s) + Etymology.
-   - HTML Layout: Definition <br> <br> <em>Example</em> <br> <br> 【源】Etymology
-   - Definition Language: {lang} & English concise (Start with lowercase).
-   - Example Style: **Start with UPPERCASE**. Wrapped in <em>.
-   - Spacing: Double <br> tags.
+   - HTML Layout: Definition <br> <i>Example</i> <br> 【源】Etymology
+   - Spacing Rules: 
+     - Use **SINGLE** <br> tag for line breaks (Compact Mode).
+     - Use **REAL SPACE** (ASCII 32). **NEVER use &emsp; or &nbsp;**.
+   - Example Style: Wrapped in <i> tags. **Start with UPPERCASE**.
+   - Definition: {lang} concise.
 
 4. Etymology Style:
    - Only explain roots/affixes in {lang}.
    - Format: 【源】Root (Meaning) + Affix (Meaning)
-   - Do NOT explain the final word meaning.
 
 5. Atomicity: Separate rows for distinct meanings.
 
@@ -155,7 +159,7 @@ if FULL_DF is None:
     st.error("⚠️ 缺少词频文件")
 else:
     # --- 顶栏设置 ---
-    with st.expander("⚙️ Prompt 设置 (Settings)", expanded=False):
+    with st.expander("⚙️ Prompt 设置", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
             set_format = st.selectbox("格式", ["CSV", "TXT"], index=0)
@@ -175,7 +179,6 @@ else:
     if mode == "📖 文本提取":
         st.caption("分析文章，筛选重点词")
         
-        # 1. 输入
         c_a, c_b = st.columns(2)
         with c_a: curr_lvl = st.number_input("当前水平", 4000, step=500)
         with c_b: targ_lvl = st.number_input("目标水平", 8000, step=500)
@@ -196,7 +199,6 @@ else:
                         user_text = " ".join([p.extract_text() for p in r.pages])
                 except: st.error("读取失败")
 
-        # 2. 分析按钮
         if user_text and st.button("🔍 开始分析", type="primary"):
             with st.spinner("分析中..."):
                 t0 = time.time()
@@ -204,11 +206,10 @@ else:
                 st.session_state['analysis_df'] = df_res
                 st.session_state['analysis_time'] = time.time() - t0
         
-        # 3. 结果展示
         if 'analysis_df' in st.session_state:
             df = st.session_state['analysis_df']
             
-            # 排序逻辑
+            # 排序：重点词按 Rank 降序 (难->易)
             df_target = df[df['Category'] == 'Target'].sort_values(by="Rank", ascending=False)
             df_mastered = df[df['Category'] == 'Mastered'].sort_values(by="Rank")
             df_beyond = df[df['Category'] == 'Beyond'].sort_values(by="Rank")
@@ -226,24 +227,23 @@ else:
                 default_target_str = ", ".join(df_target["Word"].tolist())
                 
                 # 编辑区
-                with st.expander("📝 编辑单词列表 (可展开)", expanded=True):
-                    st.caption("👇 在此文本框内直接修改，然后生成 Prompt。")
+                with st.expander("📝 编辑重点词 (可折叠)", expanded=True):
+                    st.caption("👇 在此修改列表：")
                     edited_target_str = st.text_area("Target List", value=default_target_str, height=150, key="ta_target")
                 
-                # 纯单词列表一键复制
+                # 一键复制区
                 st.markdown("<p class='copy-tip'>👇 纯单词列表 (点击右上角复制)</p>", unsafe_allow_html=True)
                 st.code(edited_target_str, language="text")
 
-                # 处理逻辑
                 final_words = [w.strip() for w in edited_target_str.split(',') if w.strip()]
                 
                 if final_words:
-                    # 🟢 分批逻辑 (100个一组)
+                    # 分批逻辑：100个一组
                     BATCH_SIZE = 100
                     total = len(final_words)
                     
                     if total > BATCH_SIZE:
-                        st.warning(f"单词较多 ({total})，已自动分批 (每批 {BATCH_SIZE}) 以确保 AI 输出完整。")
+                        st.warning(f"单词较多 ({total})，自动分批 (每批 {BATCH_SIZE})")
                         num_batches = (total // BATCH_SIZE) + (1 if total % BATCH_SIZE != 0 else 0)
                         
                         sel_batch = st.radio(
@@ -259,23 +259,23 @@ else:
                         if st.button(f"🚀 生成 Prompt (第 {sel_batch} 批)", type="primary"):
                             prompt = generate_prompt(batch_words, settings)
                             st.code(prompt, language="markdown")
-                            st.success("👆 点击代码块右上角复制，发送给 AI")
+                            st.success("👆 点击代码块右上角复制")
                     else:
                         if st.button("🚀 生成 Prompt (全部)", type="primary"):
                             prompt = generate_prompt(final_words, settings)
                             st.code(prompt, language="markdown")
-                            st.success("👆 点击代码块右上角复制，发送给 AI")
+                            st.success("👆 点击代码块右上角复制")
 
             # --- 已掌握 Tab ---
             with t2:
                 words_m = ", ".join(df_mastered["Word"].tolist())
-                st.caption("👇 点击右上角图标一键复制")
+                st.caption("👇 点击右上角复制")
                 st.code(words_m, language="text")
             
             # --- 超纲 Tab ---
             with t3:
                 words_b = ", ".join(df_beyond["Word"].tolist())
-                st.caption("👇 点击右上角图标一键复制")
+                st.caption("👇 点击右上角复制")
                 st.code(words_b, language="text")
 
     # ------------------------------------------------
@@ -295,7 +295,6 @@ else:
             with st.expander("📝 编辑列表", expanded=True):
                 edited_range_str = st.text_area("List", value=st.session_state['range_str'], height=150)
             
-            # 纯单词复制区
             st.code(edited_range_str, language="text")
             
             words = [w.strip() for w in edited_range_str.split(',') if w.strip()]
@@ -309,6 +308,6 @@ else:
     # ------------------------------------------------
     elif mode == "🛠️ 格式转换":
         st.markdown("### 📥 转 Anki CSV")
-        txt = st.text_area("粘贴 AI 回复", height=200)
+        txt = st.text_area("粘贴 AI 回复 (无表头)", height=200)
         if txt:
             st.download_button("📥 下载 .csv", txt.encode("utf-8"), "anki.csv", "text/csv", type="primary")
