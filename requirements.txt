@@ -1,8 +1,9 @@
 streamlit
 pandas
-requests
-lemminflect
 nltk
-PyPDF2
-python-docx
+lemminflect
 genanki
+pypdf
+python-docx
+EbookLib
+beautifulsoup4
