@@ -2,13 +2,11 @@ import streamlit as st
 import pandas as pd
 import re
 import os
-import time
-from datetime import datetime, timedelta, timezone
+import random
+import tempfile
 import lemminflect
 import nltk
 import genanki
-import random
-import tempfile
 from bs4 import BeautifulSoup
 
 # --- 文件处理库 ---
@@ -16,6 +14,7 @@ import pypdf
 import docx
 import ebooklib
 from ebooklib import epub
+from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # 0. 页面配置
@@ -86,7 +85,7 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. 核心解析逻辑 (容错增强版)
+# 2. 核心解析逻辑 (V7 无损解析版)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     text = ""
@@ -130,13 +129,11 @@ def analyze_logic(text, current_lvl, target_lvl):
 
 def parse_anki_data(raw_text):
     """
-    V6 容错解析器：
-    1. 自动替换全角竖线 '｜' 为 '|'
-    2. 智能忽略 Markdown 表格边缘的空字符
-    3. 允许最少 3 列数据 (若缺词源则补空)
+    V7 解析器：
+    不使用 filter，而是使用 pop 移除首尾空管，确保保留所有中间列。
     """
     parsed_cards = []
-    # 1. 预处理：统一全角符号
+    # 统一全角符号
     raw_text = raw_text.replace('｜', '|')
     lines = raw_text.strip().split('\n')
     seen_phrases = set()
@@ -144,29 +141,36 @@ def parse_anki_data(raw_text):
     for line in lines:
         line = line.strip()
         if not line: continue
-        
-        # 跳过表头和分隔线
-        if '---' in line or set(line).issubset({'|', '-', ' '}): continue
+        if '---' in line: continue
         if 'Phrase' in line and 'Definition' in line: continue
 
-        # 2. 智能分割：过滤掉 split 产生的空字符串（解决 Markdown 表格首尾 | 的问题）
-        # 例: "| a | b | c |" -> split -> ['', 'a', 'b', 'c', ''] -> 过滤后 -> ['a', 'b', 'c']
-        parts = [p.strip() for p in line.split('|') if p.strip()]
+        # 1. 原始分割
+        segments = line.split('|')
         
-        # 3. 校验：至少要有 3 部分 (Phrase, Meaning, Examples)
-        # 如果有 4 部分，则最后一部分是 Etymology
+        # 2. 智能去除 Markdown 表格两侧的空字符串
+        # 例如: "| A | B | C |" -> ["", "A", "B", "C", ""]
+        # 我们只移除首尾的空串，保留中间的空串(防止错位)
+        if len(segments) > 1 and segments[0].strip() == "":
+            segments.pop(0)
+        if len(segments) > 0 and segments[-1].strip() == "":
+            segments.pop(-1)
+            
+        # 3. 清洗每一列的内容
+        parts = [s.strip() for s in segments]
+        
+        # 4. 提取数据 (允许容错，最少3列)
         if len(parts) >= 3:
             front_text = parts[0]
             
             # --- 清洗正面 ---
-            front_text = front_text.rstrip('.,?!: ')
+            front_text = front_text.rstrip('.,?!:; ')
             front_text = front_text.replace('*', '')
             
-            # 过滤长句子 (>7 单词)
+            # 过滤超长句子 (>7单词)
             if len(front_text.split()) > 7:
                 continue
 
-            # 首字母小写处理
+            # 首字母小写
             if front_text:
                 first_word = front_text.split()[0]
                 if first_word != "I" and not first_word.isupper():
@@ -176,11 +180,12 @@ def parse_anki_data(raw_text):
                 continue
             seen_phrases.add(front_text)
 
-            # 映射字段 (安全获取)
             meaning = parts[1]
             examples = parts[2]
-            # 尝试获取词源，如果没有则为空
-            etymology = parts[3] if len(parts) > 3 else "（暂无词源信息）"
+            
+            # --- 关键修复：获取词源 ---
+            # 如果有第4列，取第4列；否则提示缺失
+            etymology = parts[3] if len(parts) >= 4 else "⚠️ 缺失：AI未生成此列"
 
             parsed_cards.append({
                 'front_phrase': front_text,
@@ -192,7 +197,7 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 # ==========================================
-# 3. Anki 生成逻辑 (无 IPA 版)
+# 3. Anki 生成逻辑 (无 IPA, 包含词源)
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
     CSS = """
@@ -261,7 +266,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt 生成逻辑 (4列版)
+# 4. Prompt 生成逻辑 (V7 终极版)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
@@ -274,11 +279,9 @@ Words: {w_list}
 
 **RULES:**
 1. **NO IPA.** 
-2. **Column 1 (Phrase):** 
-   - Short collocation (2-5 words). 
-   - **NO** sentences. **NO** periods. Lowercase preferred.
+2. **Column 1 (Phrase):** Short collocation (2-5 words). NO sentences. Lowercase.
 3. **Column 3 (Examples):** 1-2 sentences. Use `<br>` to separate.
-4. **Column 4 (Etymology):** Simplified Chinese only.
+4. **Column 4 (Etymology):** Simplified Chinese only. **MUST NOT BE EMPTY.** If unknown, write "词源暂缺".
 
 **Example:**
 a benevolent leader | characterized by goodwill | The benevolent man helped the poor.<br>She is benevolent. | 词根: bene (好) + vol (意愿)
@@ -362,7 +365,7 @@ with tab_anki:
     bj_time_str = get_beijing_time_str()
     if 'anki_input_text' not in st.session_state: st.session_state['anki_input_text'] = ""
 
-    ai_resp = st.text_area("在此粘贴 AI 回复 (无需关心格式细节)", height=200, key="anki_input_text")
+    ai_resp = st.text_area("在此粘贴 AI 回复", height=200, key="anki_input_text")
     deck_name = st.text_input("牌组名称", f"Vocab_{bj_time_str}")
     
     if ai_resp.strip():
@@ -377,9 +380,4 @@ with tab_anki:
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 格式解析失败。")
-            st.markdown("""
-            **排查建议：**
-            1. 确认 AI 回复中是否包含 `|` 符号。
-            2. 如果 AI 生成了代码块，请只复制其中的内容，不要复制 ``` 等符号。
-            """)
+            st.warning("⚠️ 格式解析失败，请检查 AI 内容。")
