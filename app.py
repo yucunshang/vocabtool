@@ -5,6 +5,7 @@ import os
 import random
 import json
 import time
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
@@ -111,10 +112,10 @@ def get_beijing_time_str():
 
 def clear_all_state():
     """
-    V29 强力清空：
+    强力清空：
     除了清除分析结果，还会重置文件上传器和文本输入框
     """
-    keys_to_drop = ['gen_words', 'raw_count', 'process_time', 'raw_text_preview']
+    keys_to_drop = ['gen_words_data', 'raw_count', 'process_time', 'stats_info']
     for k in keys_to_drop:
         if k in st.session_state:
             del st.session_state[k]
@@ -123,10 +124,9 @@ def clear_all_state():
     
     if 'paste_key' in st.session_state:
         st.session_state['paste_key'] = ""
-    # 注意：anki_input_text 现在由 tab_anki 内部逻辑管理，这里只重置提取部分的输入
 
 # ==========================================
-# 2. 核心逻辑 (V29: 融合算法)
+# 2. 核心逻辑 (优化版: 增加覆盖率统计)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -168,16 +168,15 @@ def is_valid_word(word):
     """
     if len(word) < 2: return False
     if len(word) > 25: return False 
-    # 连续3个相同字符 -> 认为是垃圾词
     if re.search(r'(.)\1{2,}', word): return False
-    # 没有元音 -> 认为是缩写或乱码 (排除 hmm, brrr, zszs)
     if not re.search(r'[aeiouy]', word): return False
     return True
 
 def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     """
-    V29 核心算法：混合增强匹配
-    同时检查 [单词原形] 和 [Lemma 还原词]，只要任意一个在词频表且符合 Rank 范围，即命中。
+    V31 优化算法：
+    1. 统计阅读覆盖率 (Reading Coverage)
+    2. 提取目标生词 (Target Extraction)
     """
     nltk, lemminflect = load_nlp_resources()
     
@@ -185,25 +184,30 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
         try: return lemminflect.getLemma(word, upos='VERB')[0]
         except: return word
 
-    # 1. 宽松分词 (保留 internal hyphens)
+    # 1. 宽松分词
     raw_tokens = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", text)
-    total_words = len(raw_tokens)
+    total_raw_count = len(raw_tokens)
     
-    # 2. 清洗 + 小写 + 初步去重
-    clean_tokens = set([t.lower() for t in raw_tokens if is_valid_word(t.lower())])
+    # 2. 统计词频 (使用有效词汇计算覆盖率)
+    valid_tokens = [t.lower() for t in raw_tokens if is_valid_word(t.lower())]
+    token_counts = Counter(valid_tokens)
     
-    final_candidates = [] # 存储 (display_word, rank)
-    seen_lemmas = set()   # 用于去重逻辑，防止 go 和 went 同时出现
+    stats_known_count = 0  # 熟词 (rank < current_lvl)
+    stats_target_count = 0 # 目标词 (current <= rank <= target)
+    stats_valid_total = sum(token_counts.values()) # 分母
     
-    for w in clean_tokens:
+    final_candidates = [] 
+    seen_lemmas = set()
+    
+    # 3. 遍历去重后的词类型 (Type)，但利用 count 计算 Token 覆盖率
+    for w, count in token_counts.items():
         # A. 计算 Lemma
         lemma = get_lemma_local(w)
         
-        # B. 获取 Rank (优先查 Lemma，查不到查原词)
+        # B. 获取 Rank
         rank_lemma = VOCAB_DICT.get(lemma, 99999)
         rank_orig = VOCAB_DICT.get(w, 99999)
         
-        # 取最靠前的有效排名 (非99999的最小值)
         if rank_lemma != 99999 and rank_orig != 99999:
             best_rank = min(rank_lemma, rank_orig)
         elif rank_lemma != 99999:
@@ -211,94 +215,81 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
         else:
             best_rank = rank_orig
             
-        # C. 判定是否符合范围
+        # --- 统计逻辑 (基于原文出现次数) ---
+        if best_rank < current_lvl:
+            stats_known_count += count
+        elif current_lvl <= best_rank <= target_lvl:
+            stats_target_count += count
+            
+        # --- 提取逻辑 (基于去重后的 Lemma) ---
         is_in_range = (best_rank >= current_lvl and best_rank <= target_lvl)
         is_unknown_included = (best_rank == 99999 and include_unknown)
         
         if is_in_range or is_unknown_included:
-            # D. 去重核心逻辑
-            # 我们希望输出的是 Lemma (例如输出 go 而不是 went)，这样对背单词更友好
-            # 但如果 Lemma 是未知词，而原词是已知词(极少见)，则保留原词
-            
             word_to_keep = lemma if rank_lemma != 99999 else w
             
-            # 使用 lemma 作为去重键值 (Key)
             if lemma not in seen_lemmas:
                 final_candidates.append((word_to_keep, best_rank))
                 seen_lemmas.add(lemma)
     
-    # E. 排序：Rank 小的在前 (高频 -> 低频)，未知词(99999)放最后
+    # 排序
     final_candidates.sort(key=lambda x: x[1])
     
-    return final_candidates, total_words
+    # 计算百分比
+    coverage_ratio = (stats_known_count / stats_valid_total) if stats_valid_total > 0 else 0
+    target_ratio = (stats_target_count / stats_valid_total) if stats_valid_total > 0 else 0
+    
+    stats_info = {
+        "coverage": coverage_ratio,
+        "target_density": target_ratio
+    }
+    
+    return final_candidates, total_raw_count, stats_info
 
 # ==========================================
 # (优化版) JSON 解析逻辑
 # ==========================================
 def parse_anki_data(raw_text):
-    """
-    V30 优化版：极其鲁棒的 JSON 解析器
-    1. 去除 Markdown 代码块 (```json ... ```)
-    2. 支持 JSON 数组 [...]
-    3. 支持 NDJSON 或零散的 JSON 对象 (一行一个或者堆在一起)
-    4. 键名归一化 (w, W, word 都能识别)
-    """
     parsed_cards = []
-    
-    # 1. 预处理：清洗 Markdown 和首尾空白
     text = raw_text.strip()
-    # 移除 ```json 或 ```
     text = re.sub(r'```[a-zA-Z]*\n?', '', text)
     text = re.sub(r'```', '', text).strip()
     
     json_objects = []
 
-    # 2. 策略 A: 尝试作为一个完整的 JSON 列表解析
-    # AI 经常会输出一个包含所有对象的数组
     try:
         data = json.loads(text)
         if isinstance(data, list):
             json_objects = data
     except:
-        # 3. 策略 B: 使用 JSONDecoder 扫描文本中的对象
-        # 适用于 NDJSON, 或者中间混杂了文字的情况
         decoder = json.JSONDecoder()
         pos = 0
         while pos < len(text):
-            # 跳过空白和逗号 (有些 AI 会输出 {..}, {..})
             while pos < len(text) and (text[pos].isspace() or text[pos] == ','):
                 pos += 1
             if pos >= len(text):
                 break
-            
             try:
                 obj, index = decoder.raw_decode(text[pos:])
                 json_objects.append(obj)
                 pos += index
             except:
-                # 如果当前位置解析失败，尝试跳过一个字符继续寻找
-                # 这是一个“暴力恢复”策略，防止因一个字符错误导致后面全部失败
                 pos += 1
 
-    # 4. 数据提取与归一化
     seen_phrases_lower = set()
 
     for data in json_objects:
         if not isinstance(data, dict):
             continue
             
-        # 键名归一化查找 (Case-insensitive 且支持全名)
         def get_val(keys_list):
             for k in keys_list:
-                # 尝试完全匹配
                 if k in data: return data[k]
-                # 尝试小写匹配
                 for data_k in data.keys():
                     if data_k.lower() == k.lower():
                         return data[data_k]
             return ""
 
-        # 定义可能的键名别名
         front_text = get_val(['w', 'word', 'phrase', 'term'])
         meaning = get_val(['m', 'meaning', 'def', 'definition'])
         examples = get_val(['e', 'example', 'examples', 'sentence'])
@@ -307,7 +298,6 @@ def parse_anki_data(raw_text):
         if not front_text or not meaning:
             continue
         
-        # 清洗数据
         front_text = str(front_text).replace('**', '').strip()
         meaning = str(meaning).strip()
         examples = str(examples).strip()
@@ -316,7 +306,6 @@ def parse_anki_data(raw_text):
         if etymology.lower() in ["none", "null", ""]:
             etymology = ""
 
-        # 去重
         if front_text.lower() in seen_phrases_lower: 
             continue
         seen_phrases_lower.add(front_text.lower())
@@ -370,7 +359,6 @@ def generate_anki_package(cards_data, deck_name):
     deck = genanki.Deck(random.randrange(1 << 30, 1 << 31), deck_name)
     
     for c in cards_data:
-        # 确保所有字段都是字符串，防止 NoneType 错误
         f_phrase = str(c.get('front_phrase', ''))
         f_meaning = str(c.get('meaning', ''))
         f_examples = str(c.get('examples', '')).replace('\n','<br>')
@@ -457,8 +445,8 @@ with tab_guide:
     <strong>2. 设置过滤范围 (Rank Filter)</strong><br>
     利用 COCA 20000 词频表进行科学筛选：
     <ul>
-        <li><strong>忽略排名前 N</strong> (Min Rank)：例如设为 <code>2000</code>，会过滤掉 `the, is, you` 等最基础的高频词。</li>
-        <li><strong>忽略排名后 N</strong> (Max Rank)：例如设为 <code>15000</code>，会过滤掉极其生僻的词。</li>
+        <li><strong>忽略排名前 N</strong> (Min Rank)：例如设为 <code>6000</code>，会过滤掉基础词汇。</li>
+        <li><strong>忽略排名后 N</strong> (Max Rank)：例如设为 <code>10000</code>，专注于进阶词汇。</li>
         <li><strong>🔓 包含生僻词</strong> (Unknown)：勾选后，将强制包含词频表中没有的词（如人名、地名、新造词）。</li>
     </ul>
     <br>
@@ -506,8 +494,9 @@ with tab_extract:
         st.info("💡 **全能模式**：系统将自动进行 NLP 词形还原、去重、垃圾词清洗。无论是文章还是单词表，直接上传即可。")
         
         c1, c2 = st.columns(2)
-        curr = c1.number_input("忽略排名前 N 的词", 1, 20000, 100, step=100)
-        targ = c2.number_input("忽略排名后 N 的词", 2000, 50000, 20000, step=500)
+        # 默认值修改：6000 / 10000
+        curr = c1.number_input("忽略排名前 N 的词", 1, 20000, 6000, step=100)
+        targ = c2.number_input("忽略排名后 N 的词", 2000, 50000, 10000, step=500)
         include_unknown = st.checkbox("🔓 包含生僻词/人名 (Rank > 20000)", value=False)
 
         uploaded_file = st.file_uploader("📂 上传文档 (TXT/PDF/DOCX/EPUB)", key=st.session_state['uploader_id'])
@@ -520,13 +509,14 @@ with tab_extract:
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
                 if len(raw_text) > 2:
-                    status.write("🔍 智能分析与词频比对...")
+                    status.write("🔍 智能分析、计算阅读覆盖率...")
                     
-                    # 统一调用，不再区分模式
-                    final_data, raw_count = analyze_logic(raw_text, curr, targ, include_unknown)
+                    # 调用新版逻辑，解包返回值
+                    final_data, raw_count, stats_info = analyze_logic(raw_text, curr, targ, include_unknown)
                     
                     st.session_state['gen_words_data'] = final_data # [(word, rank), ...]
                     st.session_state['raw_count'] = raw_count
+                    st.session_state['stats_info'] = stats_info
                     st.session_state['process_time'] = time.time() - start_time
                     
                     status.update(label="✅ 分析完成", state="complete", expanded=False)
@@ -547,10 +537,10 @@ with tab_extract:
                      r_col = next(c for c in FULL_DF.columns if 'rank' in c)
                      w_col = next(c for c in FULL_DF.columns if 'word' in c)
                      subset = FULL_DF[FULL_DF[r_col] >= s_rank].sort_values(r_col).head(count)
-                     # 构造统一格式 [(word, rank), ...]
                      data_list = list(zip(subset[w_col], subset[r_col]))
                      st.session_state['gen_words_data'] = data_list
                      st.session_state['raw_count'] = 0
+                     st.session_state['stats_info'] = None
                      st.session_state['process_time'] = time.time() - start_time
         else:
              c_min, c_max, c_cnt = st.columns([1,1,1])
@@ -569,6 +559,7 @@ with tab_extract:
                          data_list = list(zip(subset[w_col], subset[r_col]))
                          st.session_state['gen_words_data'] = data_list
                          st.session_state['raw_count'] = 0
+                         st.session_state['stats_info'] = None
                          st.session_state['process_time'] = time.time() - start_time
 
     if 'gen_words_data' in st.session_state and st.session_state['gen_words_data']:
@@ -578,24 +569,34 @@ with tab_extract:
         
         st.divider()
         st.markdown("### 📊 分析报告")
-        k1, k2, k3 = st.columns(3)
+        
+        # 显示 4 个指标
+        k1, k2, k3, k4 = st.columns(4)
         raw_c = st.session_state.get('raw_count', 0)
         p_time = st.session_state.get('process_time', 0.1)
-        k1.metric("📄 文档总字数", f"{raw_c:,}")
-        k2.metric("🎯 筛选生词 (已去重)", f"{len(words_only)}")
-        k3.metric("⚡ 耗时", f"{p_time:.2f}s")
+        stats = st.session_state.get('stats_info', {})
+        
+        k1.metric("📄 总字数", f"{raw_c:,}")
+        
+        # 如果是 Random/Seq 模式，stats_info 可能为 None，做个判断
+        if stats:
+            k2.metric("📖 熟词覆盖率", f"{stats.get('coverage', 0):.1%}")
+            k3.metric("🎯 重点词占比", f"{stats.get('target_density', 0):.1%}")
+        else:
+            k2.metric("📖 熟词覆盖率", "--")
+            k3.metric("🎯 重点词占比", "--")
+
+        k4.metric("📝 提取生词", f"{len(words_only)}")
         
         # --- V29: 增强版预览区 (折叠+Rank) ---
         show_rank = st.checkbox("显示单词 Rank", value=False)
         
-        # 构造显示文本
         if show_rank:
             display_text = ", ".join([f"{w}[{r}]" for w, r in data_pairs])
         else:
             display_text = ", ".join(words_only)
             
         with st.expander("📋 **全部生词预览 (点击展开/折叠)**", expanded=False):
-            # 使用自定义 CSS 实现滚动容器
             st.markdown(f'<div class="scrollable-text">{display_text}</div>', unsafe_allow_html=True)
             st.caption("提示：长按上方文本框可全选复制，或点击下方代码块复制按钮。")
             st.code(display_text, language="text")
@@ -609,7 +610,8 @@ with tab_extract:
             ex_count = col_s3.slider("例句数量", 1, 3, 1)
             need_ety = col_s4.checkbox("包含词源/词根", value=True)
 
-        batch_size = st.number_input("AI 分组大小", 10, 200, 100, step=10)
+        # 默认 Batch Size 修改为 150
+        batch_size = st.number_input("AI 分组大小", 50, 500, 150, step=10)
         batches = [words_only[i:i + batch_size] for i in range(0, len(words_only), batch_size)]
         
         for idx, batch in enumerate(batches):
@@ -658,7 +660,6 @@ with tab_anki:
         # 核心改动：只有点击这个按钮才开始解析
         start_gen = st.button("🚀 开始生成", type="primary", use_container_width=True)
     with c_btn2:
-        # 【关键修复】使用 on_click 回调来清除状态，避免 "StreamlitAPIException"
         st.button("🗑️ 清空重置", type="secondary", on_click=reset_anki_state)
 
     # --- 3. 逻辑处理 ---
