@@ -35,6 +35,8 @@ st.markdown("""
     .or-divider { text-align: center; margin: 10px 0; color: #888; font-size: 0.9em; font-weight: bold; }
     /* 调整上传组件的内边距 */
     [data-testid='stFileUploader'] { padding-top: 10px; }
+    /* 调整按钮间距 */
+    .stButton { margin-top: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -137,7 +139,7 @@ def analyze_logic(text, current_lvl, target_lvl):
 # 3. Anki 生成逻辑
 # ==========================================
 def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
-    # 字体大小调整: Examples -> 20px, Etymology -> 17px
+    # 字体大小: Examples -> 20px, Etymology -> 17px
     CSS = """
     .card { font-family: arial; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .nightMode .card { background-color: #2f2f31; color: #f5f5f5; }
@@ -204,12 +206,6 @@ st.title("⚡️ Vocab Flow Ultra")
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`")
 
-# --- 控制台 (移动到顶部 Expander) ---
-with st.expander("🔧 控制台 (Console / Reset)", expanded=False):
-    st.caption("需要重新开始或数据出错时，点击下方按钮清空所有缓存。")
-    if st.button("🗑️ 清空所有数据 (Clear State)", type="secondary", on_click=clear_all_state):
-        pass 
-
 # Input Tabs
 tab_extract, tab_anki = st.tabs(["1️⃣ 内容提取 & 生成", "2️⃣ 打包 Anki"])
 
@@ -259,6 +255,10 @@ with tab_extract:
             else:
                 st.warning("⚠️ 请先上传文件或粘贴文本内容")
 
+        # 移动后的清空按钮：直接显示在分析按钮下方
+        if st.button("🗑️ 清空所有数据 (Reset)", type="secondary", on_click=clear_all_state):
+            pass
+
     # --- B. 纯词频生成模式 ---
     with mode_rank:
         st.info("直接从 COCA 词频表中提取指定段落的单词。")
@@ -275,6 +275,10 @@ with tab_extract:
                     st.session_state['gen_words'] = subset[w_col].tolist()
                     st.session_state['total_count'] = count
                 except: st.error("数据源格式错误")
+        
+        # 同样给这里也加一个重置按钮方便操作
+        if st.button("🗑️ 清空 (Reset)", type="secondary", key="reset_rank", on_click=clear_all_state):
+            pass
 
     # --- 共通结果展示区 ---
     if 'gen_words' in st.session_state:
@@ -295,8 +299,11 @@ with tab_extract:
 
             st.markdown("### 🤖 获取 AI Prompt")
             c_batch, c_info = st.columns([1, 2])
-            batch_size = c_batch.number_input("每组单词数 (Batch Size)", 10, 100, 30, step=10)
-            c_info.caption(f"💡 建议 20-40 个一组。共需 {len(words)//batch_size + (1 if len(words)%batch_size else 0)} 次对话。")
+            
+            # 默认 50，上限 200
+            batch_size = c_batch.number_input("每组单词数 (Batch Size)", 10, 200, 50, step=10)
+            
+            c_info.caption(f"💡 建议 30-50 个一组。共需 {len(words)//batch_size + (1 if len(words)%batch_size else 0)} 次对话。")
             
             # 自动分批逻辑
             batches = [words[i:i + batch_size] for i in range(0, len(words), batch_size)]
