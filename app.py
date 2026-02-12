@@ -25,7 +25,6 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stExpander { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
-    .preview-box { font-family: monospace; font-size: 12px; background: #f4f4f5; padding: 10px; border-radius: 5px; color: #666; max-height: 150px; overflow-y: auto; }
     
     /* 指南样式 */
     .guide-step { background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #0056b3; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -94,21 +93,33 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. 核心逻辑
+# 2. 核心逻辑 (优化读取版)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
     text = ""
     file_type = uploaded_file.name.split('.')[-1].lower()
+    
     try:
         if file_type == 'txt':
-            text = uploaded_file.getvalue().decode("utf-8", errors='ignore')
+            # 优化：尝试多种编码，防止乱码
+            bytes_data = uploaded_file.getvalue()
+            for encoding in ['utf-8', 'gb18030', 'latin-1']:
+                try:
+                    text = bytes_data.decode(encoding)
+                    break
+                except: continue
+                
         elif file_type == 'pdf':
             reader = pypdf.PdfReader(uploaded_file)
-            text = " ".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            # 优化：使用 \n 连接每一页，防止跨页单词粘连
+            text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            
         elif file_type == 'docx':
             doc = docx.Document(uploaded_file)
+            # 优化：段落间增加换行
             text = "\n".join([p.text for p in doc.paragraphs])
+            
         elif file_type == 'epub':
             genanki, tempfile = get_genanki()
             with tempfile.NamedTemporaryFile(delete=False, suffix='.epub') as tmp:
@@ -118,10 +129,13 @@ def extract_text_from_file(uploaded_file):
             for item in book.get_items():
                 if item.get_type() == ebooklib.ITEM_DOCUMENT:
                     soup = BeautifulSoup(item.get_content(), 'html.parser')
-                    text += soup.get_text() + " "
+                    # 优化：使用 separator=' ' 防止 HTML 标签移除后单词粘连
+                    text += soup.get_text(separator=' ', strip=True) + " "
             os.remove(tmp_path)
+            
     except Exception as e:
         return f"Error: {e}"
+        
     return text
 
 def analyze_logic(text, current_lvl, target_lvl, include_unknown):
@@ -138,7 +152,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     unique_tokens = set(raw_tokens)
     
     target_words = []
-    seen_lemmas = set() # 3. 词根去重 (go/went 问题)
+    seen_lemmas = set() # 3. 词根去重
     
     for w in unique_tokens:
         if len(w) < 2: continue 
@@ -148,7 +162,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
             
         rank = VOCAB_DICT.get(lemma, 99999)
         
-        # 4. 筛选逻辑：区间内 OR (是生词 且 允许生词)
+        # 4. 筛选逻辑
         is_in_range = (rank >= current_lvl and rank <= target_lvl)
         is_unknown_included = (rank == 99999 and include_unknown)
         
@@ -163,7 +177,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
 def parse_anki_data(raw_text):
     parsed_cards = []
     text = raw_text.replace("```json", "").replace("```", "").strip()
-    # 正则流式解析，不惧换行
+    # 正则流式解析
     matches = re.finditer(r'\{.*?\}', text, re.DOTALL)
     seen_phrases = set()
 
@@ -285,12 +299,12 @@ Words: {w_list}
 # ==========================================
 # 5. UI 主程序
 # ==========================================
-st.title("⚡️ Vocab Flow Ultra (V25)")
+st.title("⚡️ Vocab Flow Ultra")
 
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`")
 
-tab_guide, tab_extract, tab_anki = st.tabs(["📖 使用指南 (完整版)", "1️⃣ 单词提取", "2️⃣ Anki 制作"])
+tab_guide, tab_extract, tab_anki = st.tabs(["📖 使用指南", "1️⃣ 单词提取", "2️⃣ Anki 制作"])
 
 with tab_guide:
     st.markdown("""
@@ -304,12 +318,12 @@ with tab_guide:
     在 <code>1️⃣ 单词提取</code> 标签页：<br><br>
     <strong>1. 上传文件</strong><br>
     支持 <code>.pdf</code>, <code>.txt</code>, <code>.epub</code>, <code>.docx</code>，或者直接粘贴文本。<br>
-    <div class="guide-tip">💡 系统会自动过滤掉文档中的非单词字符，并将 <code>went</code>, <code>goes</code> 还原为 <code>go</code> 进行统计。</div>
+    <div class="guide-tip">💡 系统会自动优化读取，防止 PDF/EPUB 跨页单词粘连。</div>
     <br>
     <strong>2. 设置过滤范围 (Rank Filter)</strong><br>
     利用 COCA 20000 词频表进行科学筛选：
     <ul>
-        <li><strong>忽略排名前 N</strong> (Min Rank)：例如设为 <code>2000</code>，会过滤掉 `the, is, you` 等最基础的高频词。如果你基础很好，可以设为 <code>5000</code>。</li>
+        <li><strong>忽略排名前 N</strong> (Min Rank)：例如设为 <code>2000</code>，会过滤掉 `the, is, you` 等最基础的高频词。</li>
         <li><strong>忽略排名后 N</strong> (Max Rank)：例如设为 <code>15000</code>，会过滤掉极其生僻的词。</li>
         <li><strong>🔓 包含生僻词</strong> (Unknown)：《冰与火之歌》等小说包含大量人名或自造词，它们没有排名。勾选此项可以强制提取它们。</li>
     </ul>
@@ -332,7 +346,7 @@ with tab_guide:
     <strong>2. 复制 Prompt</strong><br>
     系统会自动将单词分组（防止 AI 长度溢出）。
     <ul>
-        <li>📱 <strong>手机端</strong>：使用下方的“纯文本框”，长按全选 -> 复制。</li>
+        <li>📱 <strong>手机/鸿蒙端</strong>：使用下方的“纯文本框”，长按全选 -> 复制。</li>
         <li>💻 <strong>电脑端</strong>：点击代码块右上角的 Copy 📄 图标。</li>
     </ul>
     <br>
@@ -355,8 +369,8 @@ with tab_guide:
     <span class="guide-title">💡 进阶技巧</span>
     <ul>
         <li><strong>一键复制所有单词</strong>：在“分析报告”下方，有一个“全部生词”的代码块，点击右上角图标可一次性导出到 Excel。</li>
-        <li><strong>文件读取检查</strong>：如果觉得提取的词太少，可以展开“🔍 文件读取验尸”查看文档开头和结尾，确认程序是否读完了整本书。</li>
-        <li><strong>词根去重</strong>：V23 版本已升级去重算法，不会再同时出现 <code>go</code> 和 <code>went</code>。</li>
+        <li><strong>词根去重</strong>：系统内置了强大的词形还原，<code>go</code> 和 <code>went</code> 会被自动识别为同一个词，不会重复出现。</li>
+        <li><strong>文本读取优化</strong>：TXT 自动检测编码，PDF 自动处理换行，保证单词完整性。</li>
     </ul>
     </div>
     """, unsafe_allow_html=True)
@@ -369,7 +383,7 @@ with tab_extract:
         curr = c1.number_input("忽略排名前 N 的词", 1, 20000, 100, step=100)
         targ = c2.number_input("忽略排名后 N 的词", 2000, 50000, 20000, step=500)
         
-        include_unknown = st.checkbox("🔓 包含词典里没有的生僻词/人名 (Rank > 20000)", value=False, help="《冰与火之歌》等奇幻小说有很多自造词，勾选此项可以提取它们。")
+        include_unknown = st.checkbox("🔓 包含词典里没有的生僻词/人名 (Rank > 20000)", value=False, help="勾选后将强制包含所有未在词表中找到的单词。")
         
         uploaded_file = st.file_uploader("📂 上传文档 (TXT/PDF/DOCX/EPUB)")
         pasted_text = st.text_area("📄 ...或粘贴文本", height=100)
@@ -377,7 +391,7 @@ with tab_extract:
         if st.button("🚀 开始分析", type="primary"):
             with st.status("正在处理...", expanded=True) as status:
                 start_time = time.time()
-                status.write("📂 读取文件...")
+                status.write("📂 读取文件并优化格式...")
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
                 if len(raw_text) > 10:
@@ -387,7 +401,6 @@ with tab_extract:
                     st.session_state['gen_words'] = final_words
                     st.session_state['raw_count'] = raw_count
                     st.session_state['process_time'] = time.time() - start_time
-                    st.session_state['raw_text_preview'] = raw_text 
                     
                     status.update(label="✅ 分析完成", state="complete", expanded=False)
                 else:
@@ -433,17 +446,6 @@ with tab_extract:
         
         st.divider()
         st.markdown("### 📊 分析报告")
-        
-        with st.expander("🔍 **文件读取验尸 (Check First/Last 500 chars)**"):
-            raw_preview = st.session_state.get('raw_text_preview', "")
-            if raw_preview:
-                st.markdown("**Head (开头 500 字符):**")
-                st.markdown(f"<div class='preview-box'>{raw_preview[:500]}...</div>", unsafe_allow_html=True)
-                st.markdown("**Tail (结尾 500 字符):**")
-                st.markdown(f"<div class='preview-box'>...{raw_preview[-500:]}</div>", unsafe_allow_html=True)
-            else:
-                st.info("无原文档数据（词频模式或未上传）。")
-
         k1, k2, k3 = st.columns(3)
         raw_c = st.session_state.get('raw_count', 0)
         p_time = st.session_state.get('process_time', 0.1)
