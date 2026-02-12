@@ -10,32 +10,32 @@ import time
 # 0. 基础配置 (移动端优化)
 # ==========================================
 st.set_page_config(
-    page_title="Vocab Master", 
+    page_title="Vocab Master Pro", 
     page_icon="⚡️", 
-    layout="centered", 
-    initial_sidebar_state="collapsed"
+    layout="wide", #以此容纳表格
+    initial_sidebar_state="expanded" # 默认展开侧边栏以便看到按钮
 )
 
 st.markdown("""
 <style>
-    /* 界面紧凑 */
-    .block-container { padding-top: 1rem; padding-bottom: 3rem; }
+    /* 界面优化 */
+    .block-container { padding-top: 1rem; padding-bottom: 5rem; }
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
-    [data-testid="stSidebarCollapsedControl"] {display: none;}
+    
+    /* 侧边栏优化 */
+    [data-testid="stSidebar"] { background-color: #f9f9f9; }
     
     /* 按钮大尺寸 */
     .stButton>button {
-        width: 100%; border-radius: 12px; height: 3.5em; font-weight: bold; font-size: 16px !important;
-        margin-top: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        width: 100%; border-radius: 8px; height: 3em; font-weight: bold; font-size: 16px !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    /* 提示框圆角 */
-    .stAlert { border-radius: 10px; }
+    /* 表格编辑器优化 */
+    [data-testid="stDataFrameResizable"] { border: 1px solid #ddd; border-radius: 8px; }
     
-    /* 调整 Tab 样式 */
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { height: 45px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 8px; padding: 0 10px; }
-    .stTabs [aria-selected="true"] { background-color: #ff4b4b !important; color: white !important; }
+    /* 提示框 */
+    .stAlert { border-radius: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -71,6 +71,7 @@ def load_data():
             df[w_col] = df[w_col].astype(str).str.lower().str.strip()
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
             df = df.dropna(subset=[r_col])
+            # 默认按 Rank 升序 (1, 2, 3...)
             df = df.sort_values(r_col)
             
             vocab_dict = pd.Series(df[r_col].values, index=df[w_col]).to_dict()
@@ -84,54 +85,31 @@ VOCAB_DICT, FULL_DF, RANK_COL, WORD_COL = load_data()
 def get_lemma(word): return lemminflect.getLemma(word, upos='VERB')[0] 
 
 # ==========================================
-# 2. 核心算法 (极速优化版)
+# 2. 核心逻辑
 # ==========================================
-def classify_words_fast(text, current_lvl, target_lvl):
-    """
-    极速处理逻辑：
-    1. 正则提取
-    2. 立即 Set 去重 (速度提升核心)
-    3. 只对唯一单词进行词形还原和查询
-    """
-    # 1. 快速正则提取 + 小写
+def analyze_text(text, current_lvl, target_lvl):
+    """分析文本，返回 DataFrame 以便编辑器使用"""
     raw_words = re.findall(r"[a-z]+", text.lower())
-    total_count = len(raw_words)
-    
-    # 2. 立即去重 (例如文章 1万词，去重后可能只有 800 词)
     unique_words = set(raw_words)
     
-    mastered, target, beyond = [], [], []
+    data_list = [] # 存放字典 {'Word': w, 'Rank': r, 'Category': c}
     
-    # 3. 仅循环唯一单词
     for w in unique_words:
-        if len(w) < 2: continue # 忽略单字母
-        
-        # 还原 (耗时操作，现在次数少了很多)
+        if len(w) < 2: continue
         lemma = get_lemma(w)
+        rank = VOCAB_DICT.get(lemma, 99999) # 99999 代表未收录
         
-        # 查表
-        rank = VOCAB_DICT.get(lemma, 99999)
+        category = "Beyond"
+        if rank <= current_lvl: category = "Mastered"
+        elif rank <= target_lvl: category = "Target"
         
-        # 分类 (保留 rank 以便后续排序)
-        if rank <= current_lvl:
-            mastered.append((lemma, rank))
-        elif current_lvl < rank <= target_lvl:
-            target.append((lemma, rank))
-        else:
-            beyond.append((lemma, rank))
-            
-    # 4. 排序
-    mastered = sorted(list(set(mastered)), key=lambda x: x[1])
-    target = sorted(list(set(target)), key=lambda x: x[1])
-    beyond = sorted(list(set(beyond)), key=lambda x: x[1])
-    
-    return total_count, mastered, target, beyond
+        data_list.append({"Word": lemma, "Rank": int(rank), "Category": category})
+        
+    df = pd.DataFrame(data_list)
+    return df
 
-def generate_prompt(words, settings):
-    # Prompt 不包含 rank，只取单词
-    clean_words = [w for w, r in words]
-    word_list_str = ", ".join(clean_words)
-    
+def generate_prompt(word_list, settings):
+    word_str = ", ".join(word_list)
     fmt = settings.get("format", "CSV")
     ex_count = settings.get("example_count", 1)
     lang = settings.get("lang", "Chinese")
@@ -162,166 +140,195 @@ Task: Convert the provided word list into a strict {fmt} data block.
 
 5. Atomicity: Separate rows for distinct meanings.
 
---- WORD LIST ---
-{word_list_str}
+--- WORD LIST ({len(word_list)} words) ---
+{word_str}
 """
     return prompt
 
-def extract_text(file_obj):
-    try:
-        ext = file_obj.name.split('.')[-1].lower()
-        if ext == 'txt': return file_obj.getvalue().decode("utf-8", errors="ignore")
-        elif ext == 'pdf':
-            import PyPDF2; reader = PyPDF2.PdfReader(file_obj)
-            return " ".join([p.extract_text() for p in reader.pages if p.extract_text()])
-        elif ext == 'docx':
-            import docx; doc = docx.Document(file_obj)
-            return " ".join([p.text for p in doc.paragraphs])
-    except: return ""
-    return ""
-
 # ==========================================
-# 3. 主界面
+# 3. 侧边栏：全局控制 (需求1：按钮一直在)
 # ==========================================
-st.title("⚡️ Vocab Master")
-
-if FULL_DF is None:
-    st.error("⚠️ 缺少词频文件 (coca_cleaned.csv)")
-else:
-    # --- 全局设置 ---
-    with st.expander("⚙️ 生成设置 (Prompt Settings)", expanded=False):
-        c1, c2 = st.columns(2)
-        with c1:
-            set_format = st.selectbox("导出格式", ["CSV", "TXT"], index=0)
-            set_lang = st.selectbox("释义语言", ["Chinese", "English"], index=0)
-        with c2:
-            set_ex_count = st.number_input("例句数量", 1, 3, 1)
-            set_case = st.selectbox("风格", ["Front:Phrase (Lower)", "Front:Word"], index=0)
+with st.sidebar:
+    st.header("🎛️ 控制台")
+    
+    # 模式选择
+    mode = st.radio("模式", ["📖 文本提取", "🔢 词频刷词", "🛠️ 格式转换"])
+    st.divider()
+    
+    # 全局 Prompt 设置
+    with st.expander("⚙️ 生成设置", expanded=False):
+        set_format = st.selectbox("格式", ["CSV", "TXT"], index=0)
+        set_lang = st.selectbox("语言", ["Chinese", "English"], index=0)
+        set_ex_count = st.number_input("例句数", 1, 3, 1)
     
     settings = {"format": set_format, "lang": set_lang, "example_count": set_ex_count}
-
-    # --- 功能导航 ---
-    mode = st.radio("Mode", ["🔢 词频刷词", "📖 文本提取", "🛠️ 格式转换"], horizontal=True, label_visibility="collapsed")
     
-    # ------------------------------------------------
-    # 模式 1: 刷词
-    # ------------------------------------------------
-    if mode == "🔢 词频刷词":
-        c1, c2 = st.columns(2)
-        with c1: start_rank = st.number_input("起始排名", 8000, step=50)
-        with c2: count = st.number_input("生成数量", 50, step=10)
+    # --- 提取模式的输入 ---
+    if mode == "📖 文本提取":
+        st.subheader("1. 输入文本")
+        curr_lvl = st.number_input("当前水平", 4000, step=500)
+        targ_lvl = st.number_input("目标水平", 8000, step=500)
         
-        # 🟢 Rank 按钮
-        show_rank = st.checkbox("在列表中显示排名 (Show Rank)", value=False)
-
-        filtered = FULL_DF[FULL_DF[RANK_COL] >= start_rank].sort_values(RANK_COL).head(count)
+        inp_type = st.radio("来源", ["粘贴", "文件"], horizontal=True)
         
-        # 转换为 (word, rank) 元组列表
-        word_data = list(zip(filtered[WORD_COL], filtered[RANK_COL]))
-        
-        if word_data:
-            # 准备显示文本
-            if show_rank:
-                display_text = ", ".join([f"{w} ({int(r)})" for w, r in word_data])
-            else:
-                display_text = ", ".join([w for w, r in word_data])
-                
-            st.info(f"提取 {len(word_data)} 个单词 ({int(word_data[0][1])}-{int(word_data[-1][1])})")
-            
-            # 🟢 使用 st.code 实现一键复制
-            st.code(display_text, language="text")
-            st.caption("👆 点击右上角图标复制")
-            
-            if st.button("🚀 生成 Prompt", type="primary"):
-                prompt = generate_prompt(word_data, settings)
-                st.code(prompt, language="markdown")
+        user_text = ""
+        if inp_type == "粘贴":
+            user_text = st.text_area("在此粘贴", height=150)
         else:
-            st.warning("无数据")
+            up = st.file_uploader("上传 (TXT/PDF)", type=["txt","pdf"])
+            if up:
+                try:
+                    if up.name.endswith('.txt'): user_text = up.getvalue().decode("utf-8")
+                    else: 
+                        import PyPDF2
+                        r = PyPDF2.PdfReader(up)
+                        user_text = " ".join([p.extract_text() for p in r.pages])
+                except: st.error("文件读取失败")
+        
+        # 🟢 需求1：分析按钮放在 Sidebar，永远可见
+        analyze_clicked = st.button("🔍 开始分析", type="primary")
 
-    # ------------------------------------------------
-    # 模式 2: 提取 (极速版)
-    # ------------------------------------------------
-    elif mode == "📖 文本提取":
-        st.caption("分析文章，极速分级")
-        
-        c1, c2 = st.columns(2)
-        with c1: curr = st.number_input("当前水平", 4000, step=500)
-        with c2: targ = st.number_input("目标水平", 8000, step=500)
-        
-        inp = st.radio("输入", ["粘贴", "上传"], horizontal=True, label_visibility="collapsed")
-        text = ""
-        if inp == "粘贴": text = st.text_area("文本", height=150)
-        else: 
-            up = st.file_uploader("文件 (TXT/PDF/DOCX)", type=["txt","pdf","docx"])
-            if up: text = extract_text(up)
-        
-        # 🟢 Rank 按钮
-        show_rank_ext = st.checkbox("列表显示排名 (Show Rank)", value=False)
+# ==========================================
+# 4. 主界面：结果展示与编辑
+# ==========================================
+st.title("⚡️ Vocab Master Pro")
 
-        if text and st.button("🔍 开始分析", type="primary"):
-            # 🟢 进度反馈 + 计时
-            with st.spinner("正在极速分析中..."):
+if FULL_DF is None:
+    st.error("⚠️ 缺少词频文件")
+else:
+    # ------------------------------------------------
+    # 模式 A: 文本提取 (核心升级)
+    # ------------------------------------------------
+    if mode == "📖 文本提取":
+        # 使用 Session State 保存分析结果，防止刷新丢失
+        if analyze_clicked and user_text:
+            with st.spinner("正在极速分析..."):
                 t0 = time.time()
-                # 调用优化后的函数
-                total_words, m_list, t_list, b_list = classify_words_fast(text, curr, targ)
-                t1 = time.time()
+                df_result = analyze_text(user_text, curr_lvl, targ_lvl)
+                st.session_state['analysis_df'] = df_result
+                st.session_state['analysis_time'] = time.time() - t0
+        
+        if 'analysis_df' in st.session_state:
+            df = st.session_state['analysis_df']
+            t_taken = st.session_state.get('analysis_time', 0)
             
-            st.success(f"✅ 分析完成！处理 {total_words} 词，耗时 {t1-t0:.3f} 秒")
+            st.success(f"✅ 分析完成！共 {len(df)} 词 (耗时 {t_taken:.2f}s)")
             
-            # 准备显示函数
-            def get_display_str(data_list):
-                if show_rank_ext:
-                    return ", ".join([f"{w} ({int(r)})" for w, r in data_list])
-                else:
-                    return ", ".join([w for w, r in data_list])
-
-            # Tabs
-            t1, t2, t3 = st.tabs([f"🎯 重点 ({len(t_list)})", f"✅ 已掌握 ({len(m_list)})", f"🚀 超纲 ({len(b_list)})"])
+            # 分类筛选
+            df_target = df[df['Category'] == 'Target'].copy()
+            df_mastered = df[df['Category'] == 'Mastered'].copy()
+            df_beyond = df[df['Category'] == 'Beyond'].copy()
             
-            # --- 重点 ---
-            with t1:
-                if t_list:
-                    st.markdown("##### 🎯 重点背诵")
-                    # 🟢 st.code 实现复制
-                    st.code(get_display_str(t_list), language="text")
-                    
-                    # 🟢 数量预警
-                    if len(t_list) > 200:
-                        st.error(f"⚠️ 单词数量 ({len(t_list)}) 较多！AI 可能无法一次性生成所有卡片。建议分多次复制。")
-                    
-                    if st.button("🚀 生成 Prompt (重点词)"):
-                        prompt = generate_prompt(t_list, settings)
-                        st.code(prompt, language="markdown")
-                else: st.info("无")
+            # 🟢 需求3：重点词按 Rank 从高到低 (难 -> 易)
+            df_target = df_target.sort_values(by="Rank", ascending=False)
             
-            # --- 已掌握 ---
-            with t2:
-                if m_list:
-                    with st.expander("查看列表"):
-                        st.code(get_display_str(m_list), language="text")
-                else: st.write("无")
+            tab1, tab2, tab3 = st.tabs([
+                f"🎯 重点 ({len(df_target)})", 
+                f"✅ 已掌握 ({len(df_mastered)})", 
+                f"🚀 超纲 ({len(df_beyond)})"
+            ])
+            
+            # --- 重点词 Tab (可编辑 + 分批) ---
+            with tab1:
+                st.markdown("### 📝 编辑重点词列表")
+                st.caption("提示：你可以直接修改单词，或在最后一行添加新词。勾选左侧复选框并按 Delete 可删除行。")
                 
-            # --- 超纲 ---
-            with t3:
-                if b_list:
-                    with st.expander("查看列表"):
-                        st.code(get_display_str(b_list), language="text")
-                else: st.write("无")
+                # 🟢 需求2：可编辑表格 (Data Editor)
+                # num_rows="dynamic" 允许添加/删除行
+                edited_df = st.data_editor(
+                    df_target[["Word", "Rank"]],
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="editor_target",
+                    column_config={
+                        "Rank": st.column_config.NumberColumn("Rank (越大越生僻)")
+                    }
+                )
+                
+                # 获取编辑后的最终列表
+                final_words = edited_df["Word"].tolist()
+                final_words = [str(w).strip() for w in final_words if str(w).strip()] # 清洗空行
+                
+                if final_words:
+                    st.divider()
+                    st.markdown("### 🚀 生成 AI 指令")
+                    
+                    # 🟢 需求4：分批处理逻辑
+                    BATCH_SIZE = 30  # 建议批次大小
+                    total_words = len(final_words)
+                    
+                    if total_words > BATCH_SIZE:
+                        st.warning(f"⚠️ 单词总数 ({total_words}) 较多，建议分批生成以保证 AI 输出质量。")
+                        
+                        # 计算批次数
+                        num_batches = (total_words // BATCH_SIZE) + (1 if total_words % BATCH_SIZE != 0 else 0)
+                        
+                        # 批次选择器
+                        selected_batch = st.radio(
+                            "选择批次:",
+                            options=range(1, num_batches + 1),
+                            format_func=lambda x: f"第 {x} 批 (单词 {(x-1)*BATCH_SIZE + 1} - {min(x*BATCH_SIZE, total_words)})",
+                            horizontal=True
+                        )
+                        
+                        # 切片
+                        start_idx = (selected_batch - 1) * BATCH_SIZE
+                        end_idx = start_idx + BATCH_SIZE
+                        batch_words = final_words[start_idx : end_idx]
+                        
+                        st.info(f"当前选中: **{len(batch_words)}** 个单词")
+                        
+                        if st.button(f"生成 Prompt (第 {selected_batch} 批)", type="primary"):
+                            prompt = generate_prompt(batch_words, settings)
+                            st.code(prompt, language="markdown")
+                            
+                    else:
+                        # 数量少，直接生成
+                        if st.button("生成 Prompt (全部)", type="primary"):
+                            prompt = generate_prompt(final_words, settings)
+                            st.code(prompt, language="markdown")
+
+            # --- 其他 Tab (仅展示可复制) ---
+            with tab2:
+                st.code(", ".join(df_mastered["Word"].tolist()), language="text")
+            with tab3:
+                st.code(", ".join(df_beyond["Word"].tolist()), language="text")
 
     # ------------------------------------------------
-    # 模式 3: 转换
+    # 模式 B: 刷词
+    # ------------------------------------------------
+    elif mode == "🔢 词频刷词":
+        c1, c2 = st.columns(2)
+        with c1: s_r = st.number_input("Start", 8000, step=50)
+        with c2: cnt = st.number_input("Count", 50, step=10)
+        
+        if st.button("提取单词"):
+            res = FULL_DF[FULL_DF[RANK_COL] >= s_r].sort_values(RANK_COL).head(cnt)
+            # 存入 session 用于编辑
+            st.session_state['range_df'] = res[[WORD_COL, RANK_COL]]
+            
+        if 'range_df' in st.session_state:
+            st.markdown("### 📝 单词列表 (可编辑)")
+            
+            # 同样使用 Editor
+            range_edited = st.data_editor(
+                st.session_state['range_df'],
+                num_rows="dynamic",
+                use_container_width=True,
+                key="editor_range"
+            )
+            
+            words_to_gen = range_edited[WORD_COL].tolist()
+            
+            if st.button("生成 Prompt"):
+                prompt = generate_prompt(words_to_gen, settings)
+                st.code(prompt, language="markdown")
+
+    # ------------------------------------------------
+    # 模式 C: 转换
     # ------------------------------------------------
     elif mode == "🛠️ 格式转换":
         st.markdown("### 📥 转 Anki CSV")
-        st.caption("粘贴 AI 回复 (无表头)，自动转文件")
-        
-        csv_in = st.text_area("粘贴", height=200)
-        
-        if csv_in:
-            st.download_button(
-                "📥 下载 .csv",
-                csv_in.strip().encode('utf-8'),
-                "anki_import.csv",
-                "text/csv",
-                type="primary"
-            )
+        txt = st.text_area("粘贴 AI 回复", height=200)
+        if txt:
+            st.download_button("📥 下载 .csv", txt.encode("utf-8"), "anki.csv", "text/csv", type="primary")
