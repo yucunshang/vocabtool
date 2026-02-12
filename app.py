@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 0. 页面配置 (极速启动，不预加载重型库)
+# 0. 页面配置
 # ==========================================
 st.set_page_config(
     page_title="Vocab Flow Ultra", 
@@ -23,16 +23,13 @@ st.markdown("""
     .stat-box { padding: 15px; background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; text-align: center; color: #166534; margin-bottom: 20px; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    /* 优化移动端显示 */
     .stExpander { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 资源懒加载 (解决网速慢问题)
+# 1. 资源懒加载
 # ==========================================
-
-# 只有在需要分析时才加载 NLTK 和 NLP 库
 @st.cache_resource(show_spinner="正在加载 NLP 引擎...")
 def load_nlp_resources():
     import nltk
@@ -48,7 +45,6 @@ def load_nlp_resources():
     except: pass
     return nltk, lemminflect
 
-# 只有在需要解析文件时才加载 PDF/Epub 库
 def get_file_parsers():
     import pypdf
     import docx
@@ -57,7 +53,6 @@ def get_file_parsers():
     from bs4 import BeautifulSoup
     return pypdf, docx, ebooklib, epub, BeautifulSoup
 
-# 只有在生成 Anki 时才加载 Genanki
 def get_genanki():
     import genanki
     import tempfile
@@ -95,9 +90,7 @@ def clear_all_state():
 # 2. 核心逻辑
 # ==========================================
 def extract_text_from_file(uploaded_file):
-    # 懒加载文件解析库
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
-    
     text = ""
     file_type = uploaded_file.name.split('.')[-1].lower()
     try:
@@ -110,7 +103,7 @@ def extract_text_from_file(uploaded_file):
             doc = docx.Document(uploaded_file)
             text = "\n".join([p.text for p in doc.paragraphs])
         elif file_type == 'epub':
-            genanki, tempfile = get_genanki() # 复用 tempfile
+            genanki, tempfile = get_genanki()
             with tempfile.NamedTemporaryFile(delete=False, suffix='.epub') as tmp:
                 tmp.write(uploaded_file.getvalue())
                 tmp_path = tmp.name
@@ -125,9 +118,7 @@ def extract_text_from_file(uploaded_file):
     return text
 
 def analyze_logic(text, current_lvl, target_lvl):
-    # 懒加载 NLP 库
     nltk, lemminflect = load_nlp_resources()
-    
     def get_lemma_local(word):
         try: return lemminflect.getLemma(word, upos='VERB')[0]
         except: return word
@@ -136,14 +127,12 @@ def analyze_logic(text, current_lvl, target_lvl):
     total_words = len(raw_tokens)
     unique_tokens = set(raw_tokens)
     target_words = []
-    
     for w in unique_tokens:
         if len(w) < 3: continue 
         lemma = get_lemma_local(w)
         rank = VOCAB_DICT.get(lemma, 99999)
         if rank > current_lvl and rank <= target_lvl:
             target_words.append((lemma, rank))
-            
     target_words.sort(key=lambda x: x[1])
     return [x[0] for x in target_words], total_words
 
@@ -161,8 +150,10 @@ def parse_anki_data(raw_text):
             meaning = data.get("m", "").strip()
             examples = data.get("e", "").strip()
             etymology = data.get("r", "").strip()
-            if not etymology or etymology.lower() == "none":
-                etymology = "🔍 词源暂缺"
+            
+            # 处理选填项
+            if not etymology or etymology.lower() == "none" or etymology == "":
+                etymology = "" # 如果为空，就留空，Anki 模板会处理
 
             if not front_text or not meaning: continue
             front_text = front_text.replace('**', '')
@@ -179,7 +170,7 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 # ==========================================
-# 3. Anki 生成 (懒加载 Genanki)
+# 3. Anki 生成
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
     genanki, tempfile = get_genanki()
@@ -196,9 +187,7 @@ def generate_anki_package(cards_data, deck_name):
     .nightMode .examples { background: #383838; color: #ccc; border-left-color: #66b0ff; }
     .footer-info { margin-top: 20px; border-top: 1px dashed #ccc; padding-top: 10px; text-align: left; }
     .etymology { display: block; font-size: 16px; color: #555; background-color: #fffdf5; padding: 10px; border-radius: 6px; margin-bottom: 5px; line-height: 1.4; border: 1px solid #fef3c7; }
-    .etymology b { color: #8b5cf6; } 
     .nightMode .etymology { background-color: #333; color: #aaa; border-color: #444; }
-    .nightMode .etymology b { color: #a78bfa; }
     """
     model_id = random.randrange(1 << 30, 1 << 31)
     model = genanki.Model(
@@ -207,7 +196,14 @@ def generate_anki_package(cards_data, deck_name):
         templates=[{
             'name': 'Phrase Card',
             'qfmt': '<div class="phrase">{{FrontPhrase}}</div>', 
-            'afmt': '{{FrontSide}}<hr><div class="definition">{{Meaning}}</div><div class="examples">{{Examples}}</div><div class="footer-info"><div class="etymology">🌱 <b>词源:</b> {{Etymology}}</div></div>',
+            'afmt': '''
+            {{FrontSide}}<hr>
+            <div class="definition">{{Meaning}}</div>
+            <div class="examples">{{Examples}}</div>
+            {{#Etymology}}
+            <div class="footer-info"><div class="etymology">🌱 <b>词源:</b> {{Etymology}}</div></div>
+            {{/Etymology}}
+            ''',
         }], css=CSS
     )
     deck = genanki.Deck(random.randrange(1 << 30, 1 << 31), deck_name)
@@ -218,32 +214,58 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt Logic
+# 4. Prompt Logic (V18: 高度自定义)
 # ==========================================
-def get_ai_prompt(words):
+def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     w_list = ", ".join(words)
+    
+    # 1. 正面设定
+    if front_mode == "单词 (Word)":
+        w_instr = "Key `w`: The word itself (lowercase)."
+    else:
+        w_instr = "Key `w`: A short practical collocation/phrase (2-5 words)."
+
+    # 2. 释义设定
+    if def_mode == "中文":
+        m_instr = "Key `m`: Concise Chinese definition (max 10 chars)."
+    elif def_mode == "中英双语":
+        m_instr = "Key `m`: English Definition + Chinese Definition."
+    else:
+        m_instr = "Key `m`: English definition (concise)."
+
+    # 3. 例句设定
+    e_instr = f"Key `e`: {ex_count} example sentence(s). Use `<br>` to separate if multiple."
+
+    # 4. 词源设定
+    if need_ety:
+        r_instr = "Key `r`: Simplified Chinese Etymology (Root/Prefix)."
+    else:
+        r_instr = "Key `r`: Leave this empty string \"\"."
+
     return f"""
 Task: Create Anki cards.
 Words: {w_list}
 
-**STRICT OUTPUT FORMAT:**
-Output **NDJSON** (Newline Delimited JSON). ONE LINE per object. NO indentation.
+**OUTPUT: NDJSON (One line per object).**
 
-**Token Optimization:**
-1. **Meaning (`m`):** Concise (max 10 words).
-2. **Examples (`e`):** 1-2 short sentences. Use `<br>` for breaks.
-3. **Etymology (`r`):** Short & clear Simplified Chinese.
+**Requirements:**
+1. {w_instr}
+2. {m_instr}
+3. {e_instr}
+4. {r_instr}
+
+**Keys:** `w` (Front), `m` (Meaning), `e` (Examples), `r` (Etymology)
 
 **Example:**
-{{"w": "benevolent", "m": "kind and helpful", "e": "A benevolent smile.", "r": "bene(好)+vol(意愿)"}}
+{{"w": "...", "m": "...", "e": "...", "r": "..."}}
 
-**Start Output:**
+**Start:**
 """
 
 # ==========================================
 # 5. UI 主程序
 # ==========================================
-st.title("⚡️ Vocab Flow Ultra (V17)")
+st.title("⚡️ Vocab Flow Ultra (V18)")
 
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`")
@@ -261,7 +283,7 @@ with tab_extract:
         pasted_text = st.text_area("📄 ...或粘贴文本", height=100)
         
         if st.button("🚀 开始分析", type="primary"):
-            with st.status("正在启动引擎 (首次加载稍慢)...", expanded=True) as status:
+            with st.status("正在启动引擎...", expanded=True) as status:
                 status.write("📂 读取文件...")
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
@@ -310,26 +332,35 @@ with tab_extract:
         st.divider()
         st.markdown(f"### 🎯 待处理: {len(words)} 词")
         
+        # --- V18 新增：自定义设置面板 ---
+        with st.expander("⚙️ **自定义 Prompt 设置 (点击展开)**", expanded=True):
+            col_s1, col_s2 = st.columns(2)
+            front_mode = col_s1.selectbox("正面内容", ["短语搭配 (Phrase)", "单词 (Word)"])
+            def_mode = col_s2.selectbox("背面释义", ["英文", "中文", "中英双语"])
+            
+            col_s3, col_s4 = st.columns(2)
+            ex_count = col_s3.slider("例句数量", 1, 3, 1)
+            need_ety = col_s4.checkbox("包含词源/词根", value=True)
+
         batch_size = st.number_input("AI 分组大小", 10, 200, 100, step=10)
         batches = [words[i:i + batch_size] for i in range(0, len(words), batch_size)]
         
         for idx, batch in enumerate(batches):
             with st.expander(f"📌 第 {idx+1} 组 (共 {len(batch)} 词)", expanded=(idx==0)):
-                prompt_text = get_ai_prompt(batch)
+                # 动态生成 Prompt
+                prompt_text = get_ai_prompt(batch, front_mode, def_mode, ex_count, need_ety)
                 
-                # --- 核心优化：同时提供 代码块 和 文本框 ---
-                st.caption("电脑端复制：")
-                st.code(prompt_text, language="text")
-                
-                st.caption("📱 手机端专用 (长按全选复制，完美兼容鸿蒙/iOS)：")
+                st.caption("📱 全选复制专用：")
                 st.text_area(f"text_area_{idx}", value=prompt_text, height=100, label_visibility="collapsed")
+                st.caption("💻 电脑端：")
+                st.code(prompt_text, language="text")
 
 with tab_anki:
     st.markdown("### 📦 制作 Anki")
     bj_time_str = get_beijing_time_str()
     if 'anki_input_text' not in st.session_state: st.session_state['anki_input_text'] = ""
 
-    st.caption("👇 在此粘贴 AI 回复 (支持多次追加)：")
+    st.caption("👇 粘贴 AI 回复：")
     ai_resp = st.text_area("JSON 输入框", height=300, key="anki_input_text")
     deck_name = st.text_input("牌组名", f"Vocab_{bj_time_str}")
     
@@ -338,8 +369,8 @@ with tab_anki:
         if parsed_data:
             st.success(f"✅ 成功解析 {len(parsed_data)} 条数据")
             df_view = pd.DataFrame(parsed_data)
-            df_view.rename(columns={'front_phrase': '单词', 'meaning': '释义', 'etymology': '词源'}, inplace=True)
-            st.dataframe(df_view[['单词', '释义', '词源']], use_container_width=True, hide_index=True)
+            df_view.rename(columns={'front_phrase': '正面', 'meaning': '背面', 'etymology': '词源'}, inplace=True)
+            st.dataframe(df_view[['正面', '背面', '词源']], use_container_width=True, hide_index=True)
             
             f_path = generate_anki_package(parsed_data, deck_name)
             with open(f_path, "rb") as f:
