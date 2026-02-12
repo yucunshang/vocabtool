@@ -133,7 +133,7 @@ def analyze_logic(text, current_lvl, target_lvl):
 def parse_anki_data(raw_text):
     """
     智能解析：Phrase | IPA | Definition | Examples | Etymology (CN)
-    强制清洗：去除句号，确保正面不是句子。
+    强制清洗：去除句号，首字母小写处理，确保正面更像短语。
     """
     parsed_cards = []
     lines = raw_text.strip().split('\n')
@@ -141,7 +141,6 @@ def parse_anki_data(raw_text):
     for line in lines:
         line = line.strip()
         if not line: continue
-        # 跳过 Markdown 表格分隔线
         if set(line) == {'|', '-'} or '---' in line: continue
         if 'Phrase' in line and 'Definition' in line: continue
 
@@ -151,12 +150,21 @@ def parse_anki_data(raw_text):
         if len(parts) >= 2:
             while len(parts) < 5: parts.append("")
             
-            # --- 核心修复：强制清洗正面 ---
+            # --- 核心修复：强制清洗正面 (暴力去句子化) ---
             front_text = parts[0]
-            # 1. 去除末尾句号/逗号
-            front_text = front_text.rstrip('.,')
-            # 2. 清理多余的星号（Markdown加粗）
-            front_text = front_text.replace('*', '')
+            # 1. 暴力去除标点
+            front_text = front_text.rstrip('.,?!')
+            front_text = front_text.replace('*', '') # 去除 Markdown 加粗符
+            
+            # 2. 首字母处理：如果不是'I'且不是全大写，则强制小写首字母
+            # 这一步是为了视觉上打破"句子"的感觉。例如 "The big dog" -> "the big dog"
+            if front_text and len(front_text) > 1:
+                first_word = front_text.split(' ')[0]
+                # 排除专有名词或 I 的情况（简单判断）
+                if first_word != "I" and not first_word.isupper():
+                    front_text = front_text[0].lower() + front_text[1:]
+
+            # 3. 如果还是以 He/She/It 开头，尝试截断（可选，暂不开启防止误删）
             
             parsed_cards.append({
                 'front_phrase': front_text,
@@ -178,10 +186,11 @@ def generate_anki_package(cards_data, deck_name):
     
     /* 正面：短语 (字体 26px，深蓝色，居中) */
     .phrase { 
-        font-size: 26px; 
+        font-size: 28px; 
         font-weight: 700; 
         color: #0056b3; 
         margin-bottom: 20px; 
+        line-height: 1.3;
     }
     .nightMode .phrase { color: #66b0ff; }
     
@@ -233,7 +242,7 @@ def generate_anki_package(cards_data, deck_name):
         margin-bottom: 5px;
         line-height: 1.4;
     }
-    .etymology b { color: #8b5cf6; } /* 强调词源标题 */
+    .etymology b { color: #8b5cf6; } 
     
     .ipa { color: #999; font-size: 14px; font-family: monospace; margin-top: 5px;}
     
@@ -288,7 +297,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt 生成逻辑 (优化版：中文词源+英文释义)
+# 4. Prompt 生成逻辑 (V3: 强力防止句子版)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
@@ -301,27 +310,28 @@ Task: Convert the provided words into Anki card data.
 **STRICT OUTPUT FORMAT (Pipe Separated):**
 `Phrase | IPA | English Definition | Example Sentences | Etymology (Chinese)`
 
-**CRITICAL RULES:**
-1. **Column 1 (Front - Phrase):** 
-   - Generate a natural, high-frequency **collocation or short phrase** (2-6 words).
-   - **MUST** include the target word.
-   - **NO** full sentences. **NO** periods (.) at the end.
-   - Example: *a benevolent leader* (✅) vs *He is benevolent.* (❌)
+**⚠️ CRITICAL RULE FOR COLUMN 1 (Front Card):**
+1. **MUST BE A FRAGMENT/COLLOCATION.** (Max 5 words).
+2. **NO FULL SENTENCES.** No subjects like "He/She/It/They".
+3. **NO PERIODS (.)** at the end of Column 1.
+4. **LOWERCASE START** is preferred (unless proper noun).
 
-2. **Column 2 (IPA):** US pronunciation (e.g., /wɜrd/).
+**GRAMMAR CONSTRAINTS (Col 1):**
+*   If word is **Verb** → Format: `verb + object` (e.g., "mitigate the risk")
+*   If word is **Adjective** → Format: `adjective + noun` (e.g., "a benevolent leader")
+*   If word is **Noun** → Format: `adjective + noun` or `verb + noun`
 
-3. **Column 3 (Definition):** Concise **English** definition.
+**BAD vs GOOD Examples:**
+❌ *He mitigated the risk.* (Full sentence = BAD)
+✅ *mitigate the risk* (Phrase = GOOD)
+❌ *The house was abandoned.* (SVO structure = BAD)
+✅ *an abandoned house* (Phrase = GOOD)
 
-4. **Column 4 (Examples):** 
-   - 1 or 2 sentences. 
-   - If 2 sentences, separate them with `<br>`.
-
-5. **Column 5 (Etymology - CHINESE):** 
-   - Explain the root/suffix in **Simplified Chinese (简体中文)**.
-   - Format: "词根: ... (含义) + ...".
-
-**Output Example:**
-a benevolent leader | /bəˈnevələnt/ | characterized by or expressing goodwill | The benevolent gentleman left money to the poor.<br>She was a benevolent woman. | 词根: bene (好) + vol (意愿) + ent (形容词后缀) →以此表示“好意的”。
+**Other Columns:**
+*   **Col 2 (IPA):** US pronunciation.
+*   **Col 3 (Definition):** Concise **English** definition.
+*   **Col 4 (Examples):** 1-2 sentences. Separate with `<br>`.
+*   **Col 5 (Etymology):** **Simplified Chinese**. Format: "词根: ... (含义)".
 
 **Begin Output:**
 """
