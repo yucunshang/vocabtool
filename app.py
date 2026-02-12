@@ -48,7 +48,7 @@ ANKI_CSS = """
 @st.cache_resource(show_spinner="正在初始化 NLP 智能引擎...")
 def load_nlp_resources():
     """
-    修复版加载器：显式映射资源名与路径，防止 LookupError
+    修复版加载器：兼容 NLTK 新旧版本资源名
     """
     import nltk
     import lemminflect
@@ -58,28 +58,28 @@ def load_nlp_resources():
     nltk_data_dir = os.path.join(root_dir, 'nltk_data')
     os.makedirs(nltk_data_dir, exist_ok=True)
     
-    # 2. 关键：将本地目录插入到搜索路径的最前面 (Priority 0)
+    # 2. 关键：将本地目录插入到搜索路径的最前面
     if nltk_data_dir not in nltk.data.path:
         nltk.data.path.insert(0, nltk_data_dir)
     
-    # 3. 资源清单映射 { '下载包名': '检查路径(data.find使用)' }
-    required_resources = {
-        'punkt': 'tokenizers/punkt',
-        'punkt_tab': 'tokenizers/punkt_tab', # 新版 NLTK 必须
-        'averaged_perceptron_tagger': 'taggers/averaged_perceptron_tagger',
-        'wordnet': 'corpora/wordnet'
-    }
+    # 3. 资源清单 (包含新旧两个版本的 tagger 名，以防万一)
+    resources_to_check = [
+        ('tokenizers/punkt', 'punkt'),
+        ('tokenizers/punkt_tab', 'punkt_tab'),
+        ('taggers/averaged_perceptron_tagger', 'averaged_perceptron_tagger'),
+        ('taggers/averaged_perceptron_tagger_eng', 'averaged_perceptron_tagger_eng'), # 新版 NLTK 必需
+        ('corpora/wordnet', 'wordnet')
+    ]
     
-    # 4. 逐个检查，缺失则下载
-    for pkg, check_path in required_resources.items():
+    # 4. 逐个检查与下载
+    for check_path, pkg_name in resources_to_check:
         try:
             nltk.data.find(check_path)
         except LookupError:
             try:
-                # print(f"Downloading {pkg}...") 
-                nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
-            except Exception as e:
-                pass # 忽略网络错误，后续会再次报错提示用户
+                nltk.download(pkg_name, download_dir=nltk_data_dir, quiet=True)
+            except Exception:
+                pass 
             
     return nltk, lemminflect
 
@@ -169,8 +169,7 @@ def process_text_logic(text, cfg):
     try:
         tagged_tokens = nltk.pos_tag(raw_tokens)
     except LookupError as e:
-        # 最后的防线：如果 tagger 真的完全下载失败，手动抛出友好错误
-        st.error(f"NLP 资源加载失败。请刷新页面重试，或检查网络连接。Error: {e}")
+        st.error(f"NLP 资源加载失败。请刷新页面重试。Error: {e}")
         return [], 0
     
     # 允许的词性前缀: N(名词), V(动词), J(形容词), R(副词)
