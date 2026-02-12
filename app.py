@@ -8,13 +8,13 @@ import lemminflect
 import nltk
 import genanki
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta, timezone
 
 # --- 文件处理库 ---
 import pypdf
 import docx
 import ebooklib
 from ebooklib import epub
-from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # 0. 页面配置
@@ -85,7 +85,7 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. 核心解析逻辑 (V7 无损解析版)
+# 2. 核心解析逻辑 (V8 修复版)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     text = ""
@@ -129,8 +129,7 @@ def analyze_logic(text, current_lvl, target_lvl):
 
 def parse_anki_data(raw_text):
     """
-    V7 解析器：
-    不使用 filter，而是使用 pop 移除首尾空管，确保保留所有中间列。
+    V8 解析器：修复 '词源' 列丢失的问题
     """
     parsed_cards = []
     # 统一全角符号
@@ -142,35 +141,35 @@ def parse_anki_data(raw_text):
         line = line.strip()
         if not line: continue
         if '---' in line: continue
+        # 跳过表头行
         if 'Phrase' in line and 'Definition' in line: continue
 
         # 1. 原始分割
         segments = line.split('|')
         
-        # 2. 智能去除 Markdown 表格两侧的空字符串
-        # 例如: "| A | B | C |" -> ["", "A", "B", "C", ""]
-        # 我们只移除首尾的空串，保留中间的空串(防止错位)
-        if len(segments) > 1 and segments[0].strip() == "":
-            segments.pop(0)
-        if len(segments) > 0 and segments[-1].strip() == "":
-            segments.pop(-1)
-            
-        # 3. 清洗每一列的内容
+        # 2. 清洗每一列的内容
         parts = [s.strip() for s in segments]
         
-        # 4. 提取数据 (允许容错，最少3列)
+        # 3. 移除 Markdown 表格首尾产生的空字符串
+        # 例如 "| A | B |" -> ["", "A", "B", ""] -> 移除首尾
+        if len(parts) > 0 and parts[0] == "":
+            parts.pop(0)
+        if len(parts) > 0 and parts[-1] == "":
+            parts.pop(-1)
+
+        # 4. 提取数据 (只要有前3列数据即可)
         if len(parts) >= 3:
             front_text = parts[0]
             
             # --- 清洗正面 ---
             front_text = front_text.rstrip('.,?!:; ')
-            front_text = front_text.replace('*', '')
+            front_text = front_text.replace('*', '') # 去除 Markdown 加粗
             
             # 过滤超长句子 (>7单词)
             if len(front_text.split()) > 7:
                 continue
 
-            # 首字母小写
+            # 首字母小写处理
             if front_text:
                 first_word = front_text.split()[0]
                 if first_word != "I" and not first_word.isupper():
@@ -184,8 +183,12 @@ def parse_anki_data(raw_text):
             examples = parts[2]
             
             # --- 关键修复：获取词源 ---
-            # 如果有第4列，取第4列；否则提示缺失
-            etymology = parts[3] if len(parts) >= 4 else "⚠️ 缺失：AI未生成此列"
+            # 只要 parts 长度足够，就取第4个元素（索引3）
+            if len(parts) >= 4:
+                etymology = parts[3]
+            else:
+                # 如果 AI 真的漏生成了，给予默认提示而不是报错
+                etymology = "词源暂缺"
 
             parsed_cards.append({
                 'front_phrase': front_text,
@@ -197,7 +200,7 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 # ==========================================
-# 3. Anki 生成逻辑 (无 IPA, 包含词源)
+# 3. Anki 生成逻辑
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
     CSS = """
@@ -266,7 +269,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt 生成逻辑 (V7 终极版)
+# 4. Prompt 生成逻辑 (V8 终极版)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
@@ -274,17 +277,16 @@ def get_ai_prompt(words):
 Task: Create Anki cards.
 Words: {w_list}
 
-**STRICT OUTPUT FORMAT (4 Columns):**
-`Phrase | English Definition | Example Sentences | Chinese Etymology`
+**STRICT OUTPUT FORMAT (Markdown Table, 4 Columns):**
+`| Phrase | English Definition | Example Sentences | Chinese Etymology |`
 
 **RULES:**
-1. **NO IPA.** 
-2. **Column 1 (Phrase):** Short collocation (2-5 words). NO sentences. Lowercase.
-3. **Column 3 (Examples):** 1-2 sentences. Use `<br>` to separate.
+1. **NO IPA.** 2. **Column 1 (Phrase):** Short collocation (2-5 words). NO sentences. Lowercase.
+3. **Column 3 (Examples):** 1-2 sentences. Use `<br>` to separate lines. **DO NOT use actual newlines.**
 4. **Column 4 (Etymology):** Simplified Chinese only. **MUST NOT BE EMPTY.** If unknown, write "词源暂缺".
 
 **Example:**
-a benevolent leader | characterized by goodwill | The benevolent man helped the poor.<br>She is benevolent. | 词根: bene (好) + vol (意愿)
+| a benevolent leader | characterized by goodwill | The benevolent man helped the poor.<br>She is benevolent. | 词根: bene (好) + vol (意愿) |
 
 **Start Output:**
 """
@@ -295,7 +297,7 @@ a benevolent leader | characterized by goodwill | The benevolent man helped the 
 st.title("⚡️ Vocab Flow Ultra")
 
 if not VOCAB_DICT:
-    st.error("⚠️ 缺失 `coca_cleaned.csv`")
+    st.error("⚠️ 缺失 `coca_cleaned.csv`，请上传文件后刷新")
 
 tab_extract, tab_anki = st.tabs(["1️⃣ 单词提取 & 生成", "2️⃣ 制作 Anki 牌组"])
 
@@ -306,7 +308,7 @@ with tab_extract:
         c1, c2 = st.columns(2)
         curr = c1.number_input("忽略太简单的 (Current Level)", 1000, 20000, 4000, step=500)
         targ = c2.number_input("忽略太难的 (Target Level)", 2000, 50000, 15000, step=500)
-        uploaded_file = st.file_uploader("📂 上传文档 (支持多种格式)")
+        uploaded_file = st.file_uploader("📂 上传文档 (支持 TXT/PDF/DOCX/EPUB)")
         pasted_text = st.text_area("📄 ...或粘贴文本", height=100)
         
         if st.button("🚀 开始分析", type="primary"):
@@ -315,7 +317,7 @@ with tab_extract:
                 final_words, total = analyze_logic(raw_text, curr, targ)
                 st.session_state['gen_words'] = final_words
                 st.session_state['total_count'] = total
-            else: st.warning("内容无效")
+            else: st.warning("内容无效或太短")
         if st.button("🗑️ 清空所有数据", type="secondary", on_click=clear_all_state): pass
 
     with mode_rank:
@@ -373,11 +375,18 @@ with tab_anki:
         if parsed_data:
             st.markdown(f"#### 👁️ 预览 (成功解析 {len(parsed_data)} 条)")
             df_view = pd.DataFrame(parsed_data)
-            df_view.rename(columns={'front_phrase': '正面 (短语)', 'meaning': '英文释义', 'examples': '例句', 'etymology': '中文词源'}, inplace=True)
+            # 调整预览列名，方便检查
+            df_view.rename(columns={
+                'front_phrase': '正面 (短语)', 
+                'meaning': '英文释义', 
+                'examples': '例句', 
+                'etymology': '中文词源'
+            }, inplace=True)
+            
             st.dataframe(df_view, use_container_width=True, hide_index=True)
             
             f_path = generate_anki_package(parsed_data, deck_name)
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 格式解析失败，请检查 AI 内容。")
+            st.warning("⚠️ 格式解析失败，请检查 AI 内容或确认是否包含有效表格。")
