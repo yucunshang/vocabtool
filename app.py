@@ -25,16 +25,12 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stExpander { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
-    
-    /* 指南样式 */
-    .guide-step { background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #0056b3; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .guide-title { font-size: 18px; font-weight: bold; color: #0f172a; margin-bottom: 10px; display: block; }
-    .guide-tip { font-size: 14px; color: #64748b; background: #eef2ff; padding: 8px; border-radius: 4px; margin-top: 8px; }
+    .guide-step { background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #0056b3; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 资源懒加载
+# 1. 资源加载
 # ==========================================
 @st.cache_resource(show_spinner="正在加载 NLP 引擎...")
 def load_nlp_resources():
@@ -90,21 +86,17 @@ def get_beijing_time_str():
     return beijing_now.strftime('%m%d_%H%M')
 
 def clear_all_state():
-    """
-    强制清空所有状态
-    """
     keys_to_drop = ['gen_words', 'raw_count', 'process_time', 'raw_text_preview']
     for k in keys_to_drop:
         if k in st.session_state:
             del st.session_state[k]
     
-    # 重置组件状态
     if 'uploader_key' in st.session_state: st.session_state['uploader_key'] = str(random.random())
     if 'paste_key' in st.session_state: st.session_state['paste_key'] = ""
     if 'anki_input_text' in st.session_state: st.session_state['anki_input_text'] = ""
 
 # ==========================================
-# 2. 核心逻辑 (V28: 严格去重版)
+# 2. 核心逻辑 (V28: 清洗与高级筛选)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -140,60 +132,67 @@ def extract_text_from_file(uploaded_file):
         return f"Error: {e}"
     return text
 
+def is_valid_word(word):
+    """
+    垃圾词清洗过滤器
+    """
+    if len(word) < 2: return False
+    if len(word) > 20: return False # 太长通常是乱码
+    # 检查是否有连续3个相同的字符 (如 aaa, eee)
+    if re.search(r'(.)\1{2,}', word): return False
+    # 检查是否包含元音 (排除 brrr, hmm 等非单词)
+    if not re.search(r'[aeiouy]', word): return False
+    return True
+
 def analyze_logic(text, current_lvl, target_lvl, include_unknown, mode="smart"):
+    """
+    mode="smart": 合并词形 (went->go)，去重，筛选
+    mode="direct": 保留原词 (went)，去重，筛选
+    """
+    nltk, lemminflect = load_nlp_resources()
+    def get_lemma_local(word):
+        try: return lemminflect.getLemma(word, upos='VERB')[0]
+        except: return word
+
     # 1. 宽松分词
     raw_tokens = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", text)
     total_words = len(raw_tokens)
     
-    # 2. 预处理：转小写 + 长度过滤
-    tokens = [t.lower() for t in raw_tokens if len(t) >= 2]
-    
-    # 3. 严格去重 (Set Deduplication)
-    # 此时 'Apple' 和 'apple' 都变成了 'apple'，set 会自动去除重复
+    # 2. 预处理：转小写 -> 垃圾清洗 -> 集合去重
+    tokens = [t.lower() for t in raw_tokens if is_valid_word(t.lower())]
     unique_tokens = sorted(list(set(tokens)))
     
-    final_list = []
+    target_words = []
+    seen_lemmas = set()
     
-    if mode == "direct":
-        # === 直通模式：严格去重，不还原，不过滤 ===
-        # 此时 unique_tokens 已经是去重后的结果了
-        # 例如: 原文有 "Go, go, WENT, went"，这里只有 "go, went"
-        final_list = unique_tokens
-    else:
-        # === 智能模式：词形还原 + 过滤 ===
-        nltk, lemminflect = load_nlp_resources()
-        def get_lemma_local(word):
-            try: return lemminflect.getLemma(word, upos='VERB')[0]
-            except: return word
-            
-        target_words = []
-        seen_lemmas = set()
+    for w in unique_tokens:
+        # 为了查排名，无论什么模式，都需要先计算 lemma
+        lemma_for_rank = get_lemma_local(w)
+        rank = VOCAB_DICT.get(lemma_for_rank, 99999)
         
-        for w in unique_tokens:
-            lemma = get_lemma_local(w)
-            
-            # 词根级去重 (防止 go 和 went 同时出现)
-            if lemma in seen_lemmas: continue
-            
-            rank = VOCAB_DICT.get(lemma, 99999)
-            is_in_range = (rank >= current_lvl and rank <= target_lvl)
-            is_unknown_included = (rank == 99999 and include_unknown)
-            
-            if is_in_range or is_unknown_included:
-                target_words.append((lemma, rank))
-                seen_lemmas.add(lemma)
+        # 3. 筛选逻辑 (所有模式都生效)
+        is_in_range = (rank >= current_lvl and rank <= target_lvl)
+        is_unknown_included = (rank == 99999 and include_unknown)
         
-        target_words.sort(key=lambda x: x[1])
-        final_list = [x[0] for x in target_words]
-        
-    return final_list, total_words
+        if is_in_range or is_unknown_included:
+            if mode == "direct":
+                # 直通模式：直接添加原词 (w)，不进行 lemma 去重
+                # 但为了不让 'Apple' 和 'apple' 重复，unique_tokens 已经做了处理
+                target_words.append((w, rank))
+            else:
+                # 智能模式：添加 lemma，并进行 lemma 去重
+                if lemma_for_rank not in seen_lemmas:
+                    target_words.append((lemma_for_rank, rank))
+                    seen_lemmas.add(lemma_for_rank)
+    
+    # 排序：生僻词(99999)放最后，其他按频率
+    target_words.sort(key=lambda x: x[1])
+    return [x[0] for x in target_words], total_words
 
 def parse_anki_data(raw_text):
     parsed_cards = []
     text = raw_text.replace("```json", "").replace("```", "").strip()
     matches = re.finditer(r'\{.*?\}', text, re.DOTALL)
-    
-    # 关键修复：使用 set 存储小写形式，防止 AI 生成重复词
     seen_phrases_lower = set()
 
     for match in matches:
@@ -212,7 +211,7 @@ def parse_anki_data(raw_text):
             
             front_text = front_text.replace('**', '')
             
-            # --- 严格去重检查 ---
+            # 输出端去重
             if front_text.lower() in seen_phrases_lower: 
                 continue
             seen_phrases_lower.add(front_text.lower())
@@ -328,6 +327,9 @@ tab_guide, tab_extract, tab_anki = st.tabs(["📖 使用指南", "1️⃣ 单词
 with tab_guide:
     st.markdown("""
     ### 👋 欢迎使用 Vocab Flow Ultra
+    这是一个**从阅读材料中提取生词**，并利用 **AI** 自动生成 **Anki 卡片**的效率工具。
+    
+    ---
     
     <div class="guide-step">
     <span class="guide-title">Step 1: 提取生词 (Extract)</span>
@@ -335,34 +337,43 @@ with tab_guide:
     <strong>1. 选择模式 (必选)</strong><br>
     <ul>
         <li><strong>📖 智能分析 (Smart)</strong>：适合小说/文章。会自动合并词形（如 went -> go），并支持词频过滤。</li>
-        <li><strong>📋 直通模式 (Direct)</strong>：适合生词本/单词表。<strong>严格去重，但不还原词形</strong>（保留 went），不过滤词频，原样提取。</li>
+        <li><strong>📋 直通模式 (Direct)</strong>：适合生词本/单词表。<strong>严格去重，但不还原词形</strong>（保留 went），但<strong>同样支持词频过滤</strong>（过滤太简单的词）。</li>
     </ul>
     <br>
     <strong>2. 上传文件</strong><br>
-    支持 PDF, TXT, EPUB, DOCX。直通模式下建议上传 TXT 单词表。<br>
+    支持 <code>.pdf</code>, <code>.txt</code>, <code>.epub</code>, <code>.docx</code>，或者直接粘贴文本。<br>
+    <div class="guide-tip">💡 系统会自动过滤掉 <code>aaaa...</code> 等乱码垃圾词。</div>
     <br>
-    <strong>3. 点击 🚀 开始分析</strong><br>
-    系统会自动进行<strong>严格去重</strong>处理（Apple = apple）。
+    <strong>3. 设置过滤范围</strong><br>
+    推荐设置：忽略排名前 2000，忽略排名后 20000。
     </div>
 
     <div class="guide-step">
     <span class="guide-title">Step 2: 获取 Prompt (AI Generation)</span>
-    分析完成后：<br><br>
+    分析完成后，你会看到生成的单词列表。<br><br>
     <strong>1. 自定义设置</strong><br>
     点击 <code>⚙️ 自定义 Prompt 设置</code>，选择正面是单词还是短语，释义语言等。<br>
     <br>
     <strong>2. 复制 Prompt</strong><br>
-    系统会自动分组。使用下方的“纯文本框”或 Copy 按钮复制代码。
+    系统会自动将单词分组（防止 AI 长度溢出）。
+    <ul>
+        <li>📱 <strong>手机/鸿蒙端</strong>：使用下方的“纯文本框”，长按全选 -> 复制。</li>
+        <li>💻 <strong>电脑端</strong>：点击代码块右上角的 Copy 📄 图标。</li>
+    </ul>
     <br>
     <strong>3. 发送给 AI</strong><br>
-    将代码发送给 ChatGPT / Claude / Gemini。
+    将复制的内容发送给 ChatGPT / Claude / Gemini / DeepSeek。AI 会返回一串 JSON 数据。
     </div>
 
     <div class="guide-step">
     <span class="guide-title">Step 3: 制作 Anki 牌组 (Create Deck)</span>
     在 <code>2️⃣ Anki 制作</code> 标签页：<br><br>
-    <strong>1. 粘贴 & 下载</strong><br>
-    将 AI 回复粘贴到输入框，点击下载 .apkg 文件。<br>
+    <strong>1. 粘贴 AI 回复</strong><br>
+    将 AI 生成的 JSON 内容粘贴到输入框中。<br>
+    <div class="guide-tip">💡 <strong>支持追加粘贴</strong>：如果你有 5 组单词，可以把 AI 的 5 次回复依次粘贴在同一个框里，不需要分批下载。</div>
+    <br>
+    <strong>2. 下载与导入</strong><br>
+    点击 <strong>📥 下载 .apkg</strong>，然后双击该文件，它会自动导入到你的 Anki 软件中。
     </div>
     """, unsafe_allow_html=True)
 
@@ -376,19 +387,19 @@ with tab_extract:
             ["📖 智能分析 (文章/小说)", "📋 直通模式 (单词表/生词本)"], 
             horizontal=True,
             label_visibility="collapsed",
-            help="智能分析：自动合并变形词(go=went)并过滤。\n直通模式：严格去重，不还原词形，不过滤。"
+            help="智能分析：自动合并变形词(go=went)。\n直通模式：保留原词(went)，严格去重。"
         )
         
         is_smart_mode = ("智能" in proc_mode)
         
-        if is_smart_mode:
-            c1, c2 = st.columns(2)
-            curr = c1.number_input("忽略排名前 N 的词", 1, 20000, 100, step=100)
-            targ = c2.number_input("忽略排名后 N 的词", 2000, 50000, 20000, step=500)
-            include_unknown = st.checkbox("🔓 包含生僻词/人名", value=False)
-        else:
-            st.info("ℹ️ **直通模式已开启**：系统将对上传内容进行**严格去重**（忽略大小写），保留原词形（不还原），不过滤。适合处理单词表。")
-            curr, targ, include_unknown = 0, 999999, True
+        # V28 修改：直通模式也显示筛选器
+        c1, c2 = st.columns(2)
+        curr = c1.number_input("忽略排名前 N 的词", 1, 20000, 100, step=100)
+        targ = c2.number_input("忽略排名后 N 的词", 2000, 50000, 20000, step=500)
+        include_unknown = st.checkbox("🔓 包含生僻词/人名 (Rank > 20000)", value=False)
+        
+        if not is_smart_mode:
+            st.info("ℹ️ **直通模式**：将保留单词原形（不还原词根），进行严格去重。**上述筛选器依然有效**（系统会计算原词的词根排名来进行筛选）。")
 
         uploaded_file = st.file_uploader("📂 上传文档 (TXT/PDF/DOCX/EPUB)", key="uploader_key")
         pasted_text = st.text_area("📄 ...或粘贴文本", height=100, key="paste_key")
@@ -396,7 +407,7 @@ with tab_extract:
         if st.button("🚀 开始分析", type="primary"):
             with st.status("正在处理...", expanded=True) as status:
                 start_time = time.time()
-                status.write("📂 读取文件...")
+                status.write("📂 读取文件并清洗垃圾词...")
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
                 if len(raw_text) > 2:
