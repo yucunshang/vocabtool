@@ -22,19 +22,13 @@ st.markdown("""
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     [data-testid="stSidebarCollapsedControl"] {display: none;}
     
-    /* 大按钮 */
     .stButton>button {
         width: 100%; border-radius: 10px; height: 3.2em; font-weight: bold; font-size: 16px !important;
         margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    /* 文本框优化 */
     .stTextArea textarea { font-size: 15px !important; border-radius: 10px; font-family: monospace; }
-    
-    /* 折叠栏样式 */
     [data-testid="stExpander"] { border-radius: 10px; border: 1px solid #e0e0e0; margin-bottom: 10px; }
-    
-    /* 复制提示 */
     .copy-tip { font-size: 12px; color: #888; margin-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
@@ -72,8 +66,7 @@ def load_data():
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
             df = df.dropna(subset=[r_col])
             
-            # 【关键修复】先按排名排序(升序)，然后去重保留第一个
-            # 这样保证 say (rank 19) 优先于 say (rank 11771)
+            # 【逻辑保持】先升序排，再去重保留第一个，确保常用义优先
             df = df.sort_values(r_col, ascending=True)
             df_unique = df.drop_duplicates(subset=[w_col], keep='first')
             
@@ -109,50 +102,43 @@ def analyze_text(text, current_lvl, target_lvl):
     df = pd.DataFrame(data_list)
     return df
 
-def generate_prompt(word_list):
-    """
-    使用用户指定的特定格式生成 Prompt
-    """
+def generate_prompt(word_list, settings):
     word_str = ", ".join(word_list)
+    fmt = settings.get("format", "CSV")
+    ex_count = settings.get("example_count", 1)
+    lang = settings.get("lang", "Chinese")
+    
+    # 【Prompt 修正】
+    # 1. HTML Layout: 使用 <br> <br> 增加空行
+    # 2. Example Style: 明确 NO italics (无斜体)
     
     prompt = f"""Role: High-Efficiency Anki Card Creator
-Task: Convert the provided word list into a strict CSV/TXT code block.
+Task: Convert the provided word list into a strict {fmt} data block.
 
 --- OUTPUT FORMAT RULES ---
-
-1. Structure: 2 Columns only. Comma-separated. All fields double-quoted.
+1. Structure: {'2 Columns (Front, Back)' if fmt=='CSV' else 'Custom Text Format'}.
    Format: "Front","Back"
+   Header: **Do NOT output a header row.**
 
 2. Column 1 (Front):
-   - Content: A natural, short English phrase or collocation containing the target word.
-   - Style: Plain text (NO bolding, NO extra symbols).
+   - Content: A natural, short English phrase/collocation.
+   - Style: **ALL LOWERCASE**.
 
 3. Column 2 (Back):
-   - Content: Definition + Example + Etymology.
-   - HTML Layout: Definition<br><em>Example Sentence</em><br>【源】Etymology
-   - Constraints:
-     - Use single <br> tag for line breaks (to save tokens).
-     - Example sentence must be wrapped in <em> tags (Italics).
-     - Definition: Concise English.
+   - Content: Definition + {ex_count} Example(s) + Etymology.
+   - HTML Layout: Definition <br> <br> Example <br> <br> 【源】Etymology
+   - Spacing Rules: 
+     - Use double <br> tags ( <br> <br> ) to create empty lines between sections.
+   - Example Style: Plain text (NO italics). **Start with UPPERCASE**.
+   - Definition: {lang} concise.
 
-4. Etymology Style (Crucial):
-   - Language: CHINESE (中文).
-   - Style: Logic-based, extremely concise. Use arrows (→). No narrative filler.
-   - Format: 【源】Root/Origin (Meaning) → Result/Logic.
-   - Example: 【源】Lat. 'vigere' (活跃) → 精力/活力
+4. Etymology Style:
+   - Only explain roots/affixes in {lang}.
+   - Format: 【源】Root (Meaning) + Affix (Meaning)
 
-5. Atomicity Principle (Strict):
-   - If a word has distinct meanings (e.g., Noun vs. Verb, Literal vs. Metaphorical), generate SEPARATE rows for each. Do not combine them.
+5. Atomicity: Separate rows for distinct meanings.
 
-6. Output Requirement:
-   - Output the Code Block ONLY. No conversational text before or after.
-
---- EXAMPLE OUTPUT ---
-"limestone quarry","deep pit for extracting stone<br><em>The company owns a granite quarry.</em><br>【源】古法语 quarriere (方石) → 切石场"
-"hunter's quarry","animal pursued by a hunter<br><em>The eagle spotted its quarry.</em><br>【源】古法语 cuir (皮革) → 放皮上的内脏赏赐 → 猎物"
-"stiffen with cold","make or become rigid<br><em>His muscles began to stiffen.</em><br>【源】stiff (僵硬) + -en (使动)"
-
---- MY WORD LIST ---
+--- WORD LIST ({len(word_list)} words) ---
 {word_str}
 """
     return prompt
@@ -165,6 +151,17 @@ st.title("⚡️ Vocab Master")
 if FULL_DF is None:
     st.error("⚠️ 缺少词频文件")
 else:
+    # --- 顶栏设置 ---
+    with st.expander("⚙️ Prompt 设置", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            set_format = st.selectbox("格式", ["CSV", "TXT"], index=0)
+            set_lang = st.selectbox("语言", ["Chinese", "English"], index=0)
+        with c2:
+            set_ex_count = st.number_input("例句数", 1, 3, 1)
+            
+    settings = {"format": set_format, "lang": set_lang, "example_count": set_ex_count}
+
     # --- 模式选择 ---
     mode = st.radio("模式", ["📖 文本提取", "🔢 词频刷词", "🛠️ 格式转换"], horizontal=True, label_visibility="collapsed")
     st.divider()
@@ -175,7 +172,6 @@ else:
     if mode == "📖 文本提取":
         st.caption("分析文章，筛选重点词")
         
-        # 1. 输入
         c_a, c_b = st.columns(2)
         with c_a: curr_lvl = st.number_input("当前水平", 4000, step=500)
         with c_b: targ_lvl = st.number_input("目标水平", 8000, step=500)
@@ -196,7 +192,6 @@ else:
                         user_text = " ".join([p.extract_text() for p in r.pages])
                 except: st.error("读取失败")
 
-        # 2. 分析按钮
         if user_text and st.button("🔍 开始分析", type="primary"):
             with st.spinner("分析中..."):
                 t0 = time.time()
@@ -204,11 +199,10 @@ else:
                 st.session_state['analysis_df'] = df_res
                 st.session_state['analysis_time'] = time.time() - t0
         
-        # 3. 结果展示
         if 'analysis_df' in st.session_state:
             df = st.session_state['analysis_df']
             
-            # 排序逻辑：重点词按 Rank 降序 (难->易)
+            # 排序：重点词按 Rank 降序 (难->易)
             df_target = df[df['Category'] == 'Target'].sort_values(by="Rank", ascending=False)
             df_mastered = df[df['Category'] == 'Mastered'].sort_values(by="Rank")
             df_beyond = df[df['Category'] == 'Beyond'].sort_values(by="Rank")
@@ -225,19 +219,17 @@ else:
             with t1:
                 default_target_str = ", ".join(df_target["Word"].tolist())
                 
-                # 编辑区
                 with st.expander("📝 编辑重点词 (可折叠)", expanded=True):
                     st.caption("👇 在此修改列表：")
                     edited_target_str = st.text_area("Target List", value=default_target_str, height=150, key="ta_target")
                 
-                # 纯单词列表一键复制
                 st.markdown("<p class='copy-tip'>👇 纯单词列表 (点击右上角复制)</p>", unsafe_allow_html=True)
                 st.code(edited_target_str, language="text")
 
                 final_words = [w.strip() for w in edited_target_str.split(',') if w.strip()]
                 
                 if final_words:
-                    # 🟢 分批逻辑 (100个一组)
+                    # 分批逻辑：100个一组
                     BATCH_SIZE = 100
                     total = len(final_words)
                     
@@ -256,14 +248,14 @@ else:
                         batch_words = final_words[start : start + BATCH_SIZE]
                         
                         if st.button(f"🚀 生成 Prompt (第 {sel_batch} 批)", type="primary"):
-                            prompt = generate_prompt(batch_words)
+                            prompt = generate_prompt(batch_words, settings)
                             st.code(prompt, language="markdown")
-                            st.success("👆 点击代码块右上角复制，发送给 AI")
+                            st.success("👆 点击代码块右上角复制")
                     else:
                         if st.button("🚀 生成 Prompt (全部)", type="primary"):
-                            prompt = generate_prompt(final_words)
+                            prompt = generate_prompt(final_words, settings)
                             st.code(prompt, language="markdown")
-                            st.success("👆 点击代码块右上角复制，发送给 AI")
+                            st.success("👆 点击代码块右上角复制")
 
             # --- 已掌握 Tab ---
             with t2:
@@ -299,7 +291,7 @@ else:
             words = [w.strip() for w in edited_range_str.split(',') if w.strip()]
             
             if st.button("🚀 生成 Prompt", type="primary"):
-                prompt = generate_prompt(words)
+                prompt = generate_prompt(words, settings)
                 st.code(prompt, language="markdown")
 
     # ------------------------------------------------
@@ -311,6 +303,6 @@ else:
         txt = st.text_area("粘贴内容", height=200)
         
         if txt:
-            # 简单的清洗，确保 AI 没带 Markdown 代码块标记
+            # 清洗 AI 可能带的代码块标记
             clean_txt = txt.replace("```csv", "").replace("```", "").strip()
             st.download_button("📥 下载 .csv", clean_txt.encode("utf-8"), "anki.csv", "text/csv", type="primary")
