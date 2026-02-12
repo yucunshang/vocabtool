@@ -123,8 +123,7 @@ def clear_all_state():
     
     if 'paste_key' in st.session_state:
         st.session_state['paste_key'] = ""
-    if 'anki_input_text' in st.session_state:
-        st.session_state['anki_input_text'] = ""
+    # 注意：anki_input_text 现在由 tab_anki 内部逻辑管理，这里只重置提取部分的输入
 
 # ==========================================
 # 2. 核心逻辑 (V29: 融合算法)
@@ -491,7 +490,10 @@ with tab_guide:
     将 AI 生成的 JSON 内容粘贴到输入框中。<br>
     <div class="guide-tip">💡 <strong>支持追加粘贴</strong>：如果你有 5 组单词，可以把 AI 的 5 次回复依次粘贴在同一个框里，不需要分批下载。</div>
     <br>
-    <strong>2. 下载与导入</strong><br>
+    <strong>2. 点击“开始生成”</strong><br>
+    粘贴完所有内容后，点击生成按钮，系统将解析 JSON 并生成文件。
+    <br>
+    <strong>3. 下载与导入</strong><br>
     点击 <strong>📥 下载 .apkg</strong>，然后双击该文件，它会自动导入到你的 Anki 软件中。
     </div>
     """, unsafe_allow_html=True)
@@ -619,24 +621,97 @@ with tab_extract:
                 st.code(prompt_text, language="text")
 
 with tab_anki:
-    st.markdown("### 📦 制作 Anki")
-    bj_time_str = get_beijing_time_str()
-    if 'anki_input_text' not in st.session_state: st.session_state['anki_input_text'] = ""
-
-    st.caption("👇 粘贴 AI 回复：")
-    ai_resp = st.text_area("JSON 输入框", height=300, key="anki_input_text")
-    deck_name = st.text_input("牌组名", f"Vocab_{bj_time_str}")
+    st.markdown("### 📦 制作 Anki 牌组")
     
-    if ai_resp.strip():
-        parsed_data = parse_anki_data(ai_resp)
-        if parsed_data:
-            st.success(f"✅ 成功解析 {len(parsed_data)} 条数据")
-            df_view = pd.DataFrame(parsed_data)
-            df_view.rename(columns={'front_phrase': '正面', 'meaning': '背面', 'etymology': '词源'}, inplace=True)
-            st.dataframe(df_view[['正面', '背面', '词源']], use_container_width=True, hide_index=True)
+    # --- 状态初始化 ---
+    if 'anki_cards_cache' not in st.session_state:
+        st.session_state['anki_cards_cache'] = None
+    
+    def reset_anki_state():
+        st.session_state['anki_cards_cache'] = None
+        if 'anki_input_text' in st.session_state:
+             st.session_state['anki_input_text'] = ""
+
+    # --- 1. 设置区域 ---
+    col_input, col_act = st.columns([3, 1])
+    
+    with col_input:
+        bj_time_str = get_beijing_time_str()
+        deck_name = st.text_input("🏷️ 牌组名称 (Deck Name)", f"Vocab_{bj_time_str}", help="导入 Anki 后显示的牌组名字")
+    
+    st.caption("👇 **在此粘贴 AI 回复的 JSON 数据** (支持多次追加粘贴，粘贴完所有内容后点击生成)：")
+    
+    # 绑定 session_state key，这样输入内容不会轻易丢失
+    ai_resp = st.text_area(
+        "JSON 输入框", 
+        height=300, 
+        key="anki_input_text",
+        placeholder='''[
+  {"w": "serendipity", "m": "意外发现珍奇事物的本领", "e": "It was pure serendipity...", "r": "coined by Horace Walpole"},
+  ...
+]'''
+    )
+
+    # --- 2. 操作按钮区 ---
+    c_btn1, c_btn2 = st.columns([1, 4])
+    with c_btn1:
+        # 核心改动：只有点击这个按钮才开始解析
+        start_gen = st.button("🚀 开始生成", type="primary", use_container_width=True)
+    with c_btn2:
+        if st.button("🗑️ 清空重置", type="secondary"):
+            reset_anki_state()
+            st.rerun()
+
+    # --- 3. 逻辑处理 ---
+    # 如果点击了生成按钮，或者缓存里已经有数据（处理下载按钮刷新问题）
+    if start_gen or st.session_state['anki_cards_cache'] is not None:
+        
+        # 如果是点击了按钮，进行解析
+        if start_gen:
+            if not ai_resp.strip():
+                st.warning("⚠️ 输入框为空，请先粘贴 AI 生成的 JSON 内容。")
+            else:
+                with st.spinner("正在解析 JSON 并构建卡片..."):
+                    parsed_data = parse_anki_data(ai_resp)
+                    if parsed_data:
+                        st.session_state['anki_cards_cache'] = parsed_data
+                        st.success(f"✅ 成功提取 {len(parsed_data)} 张卡片！")
+                    else:
+                        st.error("❌ 解析失败：未找到有效的 JSON 数据。请检查是否包含了完整的 `{...}` 结构。")
+                        st.session_state['anki_cards_cache'] = None
+
+        # --- 4. 结果展示与下载 ---
+        # 只要缓存有数据就显示，独立于按钮点击状态
+        if st.session_state['anki_cards_cache']:
+            cards = st.session_state['anki_cards_cache']
             
-            f_path = generate_anki_package(parsed_data, deck_name)
-            with open(f_path, "rb") as f:
-                st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
-        else:
-            st.warning("⚠️ 解析失败：请检查内容是否为 JSON。建议只粘贴 AI 回复的代码块部分。")
+            # 预览表格
+            with st.expander("👀 预览卡片内容 (Top 50)", expanded=True):
+                df_view = pd.DataFrame(cards)
+                # 简单重命名以便预览友好
+                df_preview = df_view.rename(columns={
+                    'front_phrase': '正面 (Front)', 
+                    'meaning': '背面 (Back)', 
+                    'examples': '例句', 
+                    'etymology': '词源'
+                })
+                st.dataframe(df_preview, use_container_width=True, hide_index=True)
+
+            # 生成文件 (每次渲染时生成，确保 Deck Name 是最新的)
+            try:
+                f_path = generate_anki_package(cards, deck_name)
+                
+                # 下载按钮
+                with open(f_path, "rb") as f:
+                    file_data = f.read()
+                    
+                st.download_button(
+                    label=f"📥 下载 {deck_name}.apkg",
+                    data=file_data,
+                    file_name=f"{deck_name}.apkg",
+                    mime="application/octet-stream",
+                    type="primary",
+                    help="点击下载后，双击文件即可导入 Anki"
+                )
+            except Exception as e:
+                st.error(f"生成 .apkg 文件时发生错误: {e}")
