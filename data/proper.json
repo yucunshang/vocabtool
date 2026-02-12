@@ -18,6 +18,7 @@
     "chicago": "Chicago", "seattle": "Seattle", "boston": "Boston", "houston": "Houston",
     "washington": "Washington", "miami": "Miami", "toronto": "Toronto", "vancouver": "Vancouver",
     "moscow": "Moscow", "cairo": "Cairo", "dubai": "Dubai", "mumbai": "Mumbai", "seoul": "Seoul",
+    "bangkok": "Bangkok", "bali": "Bali", "phuket": "Phuket", "jakarta": "Jakarta", "manila": "Manila",
     "africa": "Africa", "asia": "Asia", "europe": "Europe", "antarctica": "Antarctica", "oceania": "Oceania",
     "monday": "Monday", "tuesday": "Tuesday", "wednesday": "Wednesday", "thursday": "Thursday",
     "friday": "Friday", "saturday": "Saturday", "sunday": "Sunday",
@@ -33,6 +34,11 @@
     "samsung": "Samsung", "sony": "Sony", "ibm": "IBM", "intel": "Intel", "oracle": "Oracle",
     "cisco": "Cisco", "adobe": "Adobe", "nvidia": "Nvidia", "amd": "AMD", "uber": "Uber",
     "airbnb": "Airbnb", "spacex": "SpaceX", "openai": "OpenAI", "chatgpt": "ChatGPT",
+    "meta": "Meta", "bytedance": "ByteDance", "tencent": "Tencent", "alibaba": "Alibaba",
+    "salesforce": "Salesforce", "shopify": "Shopify", "stripe": "Stripe", "slack": "Slack",
+    "reddit": "Reddit", "pinterest": "Pinterest", "linkedin": "LinkedIn", "snapchat": "Snapchat",
+    "starbucks": "Starbucks", "mcdonalds": "McDonald's", "nike": "Nike", "adidas": "Adidas",
+    "gucci": "Gucci", "chanel": "Chanel", "louis vuitton": "Louis Vuitton", "hermes": "Hermès",
     "iphone": "iPhone", "ipad": "iPad", "mac": "Mac", "windows": "Windows", "android": "Android",
     "mr": "Mr.", "mrs": "Mrs.", "ms": "Ms.", "dr": "Dr.", "prof": "Prof.",
     "phd": "PhD", "mba": "MBA", "ceo": "CEO", "cfo": "CFO", "cto": "CTO", "vip": "VIP",
@@ -49,5 +55,6 @@
     "peter": "Peter", "kyle": "Kyle", "walter": "Walter", "ethan": "Ethan", "jeremy": "Jeremy",
     "christian": "Christian", "sean": "Sean", "austin": "Austin", "carl": "Carl", "arthur": "Arthur",
     "dylan": "Dylan", "jesse": "Jesse", "bryan": "Bryan", "billy": "Billy", "joe": "Joe",
-    "bruce": "Bruce", "gabriel": "Gabriel", "logan": "Logan", "albert": "Albert", "alan": "Alan"
+    "bruce": "Bruce", "gabriel": "Gabriel", "logan": "Logan", "albert": "Albert", "alan": "Alan",
+    "elon": "Elon", "jeff": "Jeff", "bill": "Bill", "mark": "Mark", "tim": "Tim", "satya": "Satya", "sundar": "Sundar"
 }

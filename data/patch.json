@@ -21,5 +21,10 @@
     "logout": 2000, "download": 1500, "upload": 2000, "offline": 2000, 
     "update": 1500, "upgrade": 2000, "install": 1500, "uninstall": 2000, 
     "dashboard": 3000, "widget": 4000, "crypto": 3000, "blockchain": 3500, 
-    "bitcoin": 3000, "wifi": 1500, "internet": 1000
+    "bitcoin": 3000, "wifi": 1500, "internet": 1000,
+    "dm": 2000, "notification": 2000, "follower": 2000, "influencer": 2500, "trending": 2500,
+    "remote": 1500, "hybrid": 2000, "meeting": 1000, "schedule": 1500, "deadline": 2000,
+    "streaming": 2000, "subscription": 2000, "delivery": 1500, "organic": 2000, "sustainable": 2500,
+    "lol": 3000, "omg": 3000, "btw": 3000, "fyi": 3000, "diy": 3000, "faq": 2500,
+    "feedback": 2000, "review": 1500, "rating": 2000, "comment": 1000, "like": 1000
 }
