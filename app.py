@@ -86,7 +86,7 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. Core Parsing Logic (V12: JSON Parser)
+# 2. Core Parsing Logic (V13: Stream Parser)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     text = ""
@@ -130,48 +130,44 @@ def analyze_logic(text, current_lvl, target_lvl):
 
 def parse_anki_data(raw_text):
     """
-    V12 Parser: NDJSON (Newline Delimited JSON)
-    This is the most robust method. It ignores formatting noise and parses strictly structured data.
+    V13 Parser: Regex Stream Parsing
+    修复了 JSON 中包含换行符导致解析失败的问题。
     """
     parsed_cards = []
     
-    # 1. Clean Markdown Code Blocks
-    raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+    # 1. 清理 Markdown 标记
+    text = raw_text.replace("```json", "").replace("```", "").strip()
     
-    # 2. Split by lines
-    lines = raw_text.split('\n')
+    # 2. 使用正则表达式提取所有 JSON 对象 {...}
+    # re.DOTALL 让 . 匹配换行符，从而支持跨行 JSON
+    # re.finditer 会找到所有的匹配项
+    matches = re.finditer(r'\{.*?\}', text, re.DOTALL)
+    
     seen_phrases = set()
 
-    for line in lines:
-        line = line.strip()
-        if not line: continue
-        
-        # Try to parse the line as JSON
+    for match in matches:
+        json_str = match.group()
         try:
-            # Skip non-JSON lines (like headers if AI hallucinates them)
-            if not line.startswith("{"): continue
+            # strict=False 允许字符串中包含控制字符（如实际的换行符）
+            data = json.loads(json_str, strict=False)
             
-            data = json.loads(line)
-            
-            # Extract fields using short keys defined in Prompt
-            # w=word/phrase, m=meaning, e=examples, r=root/etymology
+            # 提取字段 (w, m, e, r)
             front_text = data.get("w", "").strip()
             meaning = data.get("m", "").strip()
             examples = data.get("e", "").strip()
             
-            # --- Robust Etymology Extraction ---
-            # Default to "Unknown" if missing or empty
+            # 处理词源
             etymology = data.get("r", "").strip()
             if not etymology or etymology.lower() == "none":
                 etymology = "🔍 词源暂缺"
 
-            # --- Validation ---
+            # 简单验证
             if not front_text or not meaning: continue
 
-            # Clean formatting
+            # 格式清洗
             front_text = front_text.replace('**', '')
             
-            # Deduplication
+            # 去重
             if front_text in seen_phrases: continue
             seen_phrases.add(front_text)
 
@@ -183,7 +179,9 @@ def parse_anki_data(raw_text):
             })
 
         except json.JSONDecodeError:
-            # Just skip lines that aren't valid JSON
+            # 如果这一块 JSON 真的坏了，就跳过
+            continue
+        except Exception:
             continue
             
     return parsed_cards
@@ -258,7 +256,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt Logic (V12: JSON Format)
+# 4. Prompt Logic (V13: Robust JSON)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
@@ -267,8 +265,8 @@ Task: Create Anki cards.
 Words: {w_list}
 
 **STRICT OUTPUT FORMAT:**
-Output **Newline Delimited JSON (NDJSON)**. One valid JSON object per line.
-Do NOT output a list `[...]`. Do NOT output markdown tables.
+Output **JSON Objects**. One object per word.
+You can output them one per line, or in a block.
 
 **JSON keys:**
 `w`: Phrase (lowercase, 2-5 words)
@@ -286,7 +284,7 @@ Do NOT output a list `[...]`. Do NOT output markdown tables.
 # ==========================================
 # 5. UI
 # ==========================================
-st.title("⚡️ Vocab Flow Ultra (V12)")
+st.title("⚡️ Vocab Flow Ultra (V13)")
 
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`，请上传文件后刷新")
@@ -362,8 +360,7 @@ with tab_anki:
     ai_resp = st.text_area("在此粘贴 AI 回复", height=200, key="anki_input_text")
     deck_name = st.text_input("牌组名称", f"Vocab_{bj_time_str}")
     
-    # 增加调试预览，让用户确认 AI 是否真的生成了数据
-    with st.expander("🔍 Debug: 查看原始输入内容"):
+    with st.expander("🔍 Debug: 查看 AI 原始内容"):
         st.text(ai_resp)
 
     if ai_resp.strip():
@@ -393,4 +390,4 @@ with tab_anki:
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 未检测到有效数据。请确保 AI 返回的是 JSON 格式（例如：`{\"w\": \"word\", ...}`）。")
+            st.warning("⚠️ 未检测到有效数据，请确保粘贴内容包含 JSON 格式 `{...}`。")
