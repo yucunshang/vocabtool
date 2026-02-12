@@ -33,6 +33,9 @@ st.markdown("""
     
     /* 折叠栏样式 */
     [data-testid="stExpander"] { border-radius: 10px; border: 1px solid #e0e0e0; margin-bottom: 10px; }
+    
+    /* 复制提示 */
+    .copy-tip { font-size: 12px; color: #888; margin-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -69,8 +72,8 @@ def load_data():
             df[r_col] = pd.to_numeric(df[r_col], errors='coerce')
             df = df.dropna(subset=[r_col])
             
-            # 【关键修复】先按排名排序，然后去重保留第一个（即保留Rank最小的那个）
-            # 这解决了 "say" 被识别为 11771 而不是 19 的问题
+            # 【关键修复】先按排名排序(升序)，然后去重保留第一个
+            # 这样保证 say (rank 19) 优先于 say (rank 11771)
             df = df.sort_values(r_col, ascending=True)
             df_unique = df.drop_duplicates(subset=[w_col], keep='first')
             
@@ -107,7 +110,6 @@ def analyze_text(text, current_lvl, target_lvl):
     return df
 
 def generate_prompt(word_list, settings):
-    # 这里的 word_list 已经是纯单词列表，不包含 rank
     word_str = ", ".join(word_list)
     fmt = settings.get("format", "CSV")
     ex_count = settings.get("example_count", 1)
@@ -206,40 +208,42 @@ else:
         if 'analysis_df' in st.session_state:
             df = st.session_state['analysis_df']
             
-            # 排序：重点词按 Rank 降序(难->易)，其他按升序
+            # 排序逻辑
             df_target = df[df['Category'] == 'Target'].sort_values(by="Rank", ascending=False)
             df_mastered = df[df['Category'] == 'Mastered'].sort_values(by="Rank")
             df_beyond = df[df['Category'] == 'Beyond'].sort_values(by="Rank")
             
             st.success(f"共 {len(df)} 词 (耗时 {st.session_state['analysis_time']:.2f}s)")
             
-            # 使用 Tabs 分类
             t1, t2, t3 = st.tabs([
                 f"🎯 重点 ({len(df_target)})", 
                 f"✅ 已掌握 ({len(df_mastered)})", 
                 f"🚀 超纲 ({len(df_beyond)})"
             ])
             
-            # --- 重点词 Tab (可编辑文本框) ---
+            # --- 重点词 Tab ---
             with t1:
-                # 默认生成的文本：用逗号分隔
                 default_target_str = ", ".join(df_target["Word"].tolist())
                 
-                # 🟢 需求2：可折叠、可编辑的文本列表 (不再是表格)
-                with st.expander("📝 编辑单词列表 (Target Words)", expanded=True):
-                    st.caption("👇 您可以在此直接增删改单词，然后点击下方生成按钮。")
-                    edited_target_str = st.text_area("Target List", value=default_target_str, height=200, key="ta_target")
+                # 编辑区
+                with st.expander("📝 编辑单词列表 (可展开)", expanded=True):
+                    st.caption("👇 在此文本框内直接修改，然后生成 Prompt。")
+                    edited_target_str = st.text_area("Target List", value=default_target_str, height=150, key="ta_target")
                 
-                # 处理文本框内容
+                # 纯单词列表一键复制
+                st.markdown("<p class='copy-tip'>👇 纯单词列表 (点击右上角复制)</p>", unsafe_allow_html=True)
+                st.code(edited_target_str, language="text")
+
+                # 处理逻辑
                 final_words = [w.strip() for w in edited_target_str.split(',') if w.strip()]
                 
                 if final_words:
-                    # 🟢 分批逻辑 (200个一组)
-                    BATCH_SIZE = 200
+                    # 🟢 分批逻辑 (100个一组)
+                    BATCH_SIZE = 100
                     total = len(final_words)
                     
                     if total > BATCH_SIZE:
-                        st.warning(f"单词较多 ({total})，已自动分批 (每批 {BATCH_SIZE})")
+                        st.warning(f"单词较多 ({total})，已自动分批 (每批 {BATCH_SIZE}) 以确保 AI 输出完整。")
                         num_batches = (total // BATCH_SIZE) + (1 if total % BATCH_SIZE != 0 else 0)
                         
                         sel_batch = st.radio(
@@ -255,22 +259,24 @@ else:
                         if st.button(f"🚀 生成 Prompt (第 {sel_batch} 批)", type="primary"):
                             prompt = generate_prompt(batch_words, settings)
                             st.code(prompt, language="markdown")
+                            st.success("👆 点击代码块右上角复制，发送给 AI")
                     else:
                         if st.button("🚀 生成 Prompt (全部)", type="primary"):
                             prompt = generate_prompt(final_words, settings)
                             st.code(prompt, language="markdown")
+                            st.success("👆 点击代码块右上角复制，发送给 AI")
 
             # --- 已掌握 Tab ---
             with t2:
-                default_mastered_str = ", ".join(df_mastered["Word"].tolist())
-                with st.expander("👀 查看列表", expanded=False):
-                    st.text_area("Mastered List", value=default_mastered_str, height=150)
+                words_m = ", ".join(df_mastered["Word"].tolist())
+                st.caption("👇 点击右上角图标一键复制")
+                st.code(words_m, language="text")
             
             # --- 超纲 Tab ---
             with t3:
-                default_beyond_str = ", ".join(df_beyond["Word"].tolist())
-                with st.expander("👀 查看列表", expanded=False):
-                    st.text_area("Beyond List", value=default_beyond_str, height=150)
+                words_b = ", ".join(df_beyond["Word"].tolist())
+                st.caption("👇 点击右上角图标一键复制")
+                st.code(words_b, language="text")
 
     # ------------------------------------------------
     # 模式 B: 刷词
@@ -282,13 +288,15 @@ else:
         
         if st.button("提取"):
             res = FULL_DF[FULL_DF[RANK_COL] >= s_r].sort_values(RANK_COL).head(cnt)
-            # 生成默认字符串
             w_str = ", ".join(res[WORD_COL].tolist())
             st.session_state['range_str'] = w_str
             
         if 'range_str' in st.session_state:
             with st.expander("📝 编辑列表", expanded=True):
                 edited_range_str = st.text_area("List", value=st.session_state['range_str'], height=150)
+            
+            # 纯单词复制区
+            st.code(edited_range_str, language="text")
             
             words = [w.strip() for w in edited_range_str.split(',') if w.strip()]
             
