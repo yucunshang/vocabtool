@@ -128,11 +128,15 @@ def analyze_logic(text, current_lvl, target_lvl):
     unique_tokens = set(raw_tokens)
     target_words = []
     for w in unique_tokens:
-        if len(w) < 3: continue 
+        # 这里保留 <3 过滤，因为 'a', 'I' 等单字母通常不需要背，但你可以根据需求移除
+        if len(w) < 2: continue 
+        
         lemma = get_lemma_local(w)
         rank = VOCAB_DICT.get(lemma, 99999)
-        if rank > current_lvl and rank <= target_lvl:
+        # 核心逻辑：只要rank大于 current_lvl 且 小于 target_lvl
+        if rank >= current_lvl and rank <= target_lvl:
             target_words.append((lemma, rank))
+            
     target_words.sort(key=lambda x: x[1])
     return [x[0] for x in target_words], total_words
 
@@ -151,9 +155,8 @@ def parse_anki_data(raw_text):
             examples = data.get("e", "").strip()
             etymology = data.get("r", "").strip()
             
-            # 处理选填项
             if not etymology or etymology.lower() == "none" or etymology == "":
-                etymology = "" # 如果为空，就留空，Anki 模板会处理
+                etymology = "" 
 
             if not front_text or not meaning: continue
             front_text = front_text.replace('**', '')
@@ -214,7 +217,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt Logic (V18: 高度自定义)
+# 4. Prompt Logic
 # ==========================================
 def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     w_list = ", ".join(words)
@@ -265,7 +268,7 @@ Words: {w_list}
 # ==========================================
 # 5. UI 主程序
 # ==========================================
-st.title("⚡️ Vocab Flow Ultra (V18)")
+st.title("⚡️ Vocab Flow Ultra (V19)")
 
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`")
@@ -277,8 +280,9 @@ with tab_extract:
     
     with mode_context:
         c1, c2 = st.columns(2)
-        curr = c1.number_input("忽略简单的", 1000, 20000, 4000, step=500)
-        targ = c2.number_input("忽略太难的", 2000, 50000, 15000, step=500)
+        # --- 核心修改：最小值改为 1 ---
+        curr = c1.number_input("忽略排名前 N 的词", 1, 20000, 1000, step=100)
+        targ = c2.number_input("忽略排名后 N 的词", 2000, 50000, 15000, step=500)
         uploaded_file = st.file_uploader("📂 上传文档 (TXT/PDF/DOCX/EPUB)")
         pasted_text = st.text_area("📄 ...或粘贴文本", height=100)
         
@@ -302,7 +306,8 @@ with tab_extract:
         gen_type = st.radio("模式", ["🔢 顺序", "🔀 随机"], horizontal=True)
         if "顺序" in gen_type:
             c_a, c_b = st.columns(2)
-            s_rank = c_a.number_input("起始排名", 1, 20000, 8000, step=100)
+            # --- 核心修改：最小值改为 1 ---
+            s_rank = c_a.number_input("起始排名", 1, 20000, 1000, step=100)
             count = c_b.number_input("数量", 10, 500, 50, step=10)
             if st.button("🚀 生成"):
                 if FULL_DF is not None:
@@ -313,8 +318,9 @@ with tab_extract:
                     st.session_state['total_count'] = count
         else:
             c_min, c_max, c_cnt = st.columns([1,1,1])
-            min_r = c_min.number_input("Min Rank", 1, 20000, 6000, step=500)
-            max_r = c_max.number_input("Max Rank", 1, 25000, 8000, step=500)
+            # --- 核心修改：最小值改为 1 ---
+            min_r = c_min.number_input("Min Rank", 1, 20000, 1, step=100)
+            max_r = c_max.number_input("Max Rank", 1, 25000, 5000, step=100)
             r_count = c_cnt.number_input("Count", 10, 200, 50, step=10)
             if st.button("🎲 抽取"):
                 if FULL_DF is not None:
@@ -332,7 +338,6 @@ with tab_extract:
         st.divider()
         st.markdown(f"### 🎯 待处理: {len(words)} 词")
         
-        # --- V18 新增：自定义设置面板 ---
         with st.expander("⚙️ **自定义 Prompt 设置 (点击展开)**", expanded=True):
             col_s1, col_s2 = st.columns(2)
             front_mode = col_s1.selectbox("正面内容", ["短语搭配 (Phrase)", "单词 (Word)"])
@@ -347,7 +352,6 @@ with tab_extract:
         
         for idx, batch in enumerate(batches):
             with st.expander(f"📌 第 {idx+1} 组 (共 {len(batch)} 词)", expanded=(idx==0)):
-                # 动态生成 Prompt
                 prompt_text = get_ai_prompt(batch, front_mode, def_mode, ex_count, need_ety)
                 
                 st.caption("📱 全选复制专用：")
