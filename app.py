@@ -22,19 +22,13 @@ st.markdown("""
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     [data-testid="stSidebarCollapsedControl"] {display: none;}
     
-    /* 大按钮 */
     .stButton>button {
         width: 100%; border-radius: 10px; height: 3.2em; font-weight: bold; font-size: 16px !important;
         margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
-    /* 文本框优化 */
     .stTextArea textarea { font-size: 15px !important; border-radius: 10px; font-family: monospace; }
-    
-    /* 折叠栏样式 */
     [data-testid="stExpander"] { border-radius: 10px; border: 1px solid #e0e0e0; margin-bottom: 10px; }
-    
-    /* 复制提示 */
     .copy-tip { font-size: 12px; color: #888; margin-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
@@ -114,10 +108,10 @@ def generate_prompt(word_list, settings):
     ex_count = settings.get("example_count", 1)
     lang = settings.get("lang", "Chinese")
     
-    # 【Prompt 更新】
-    # 1. 使用您提供的 latitude/detainee/moose 示例
-    # 2. 保持 <br> <br> 空行格式
-    # 3. 保持无斜体格式
+    # 【Prompt 保持最新格式】
+    # 1. 包含您的 latitude/detainee/moose 示例
+    # 2. 保持 <br> <br> 空行
+    # 3. 保持无斜体
     
     prompt = f"""Role: High-Efficiency Anki Card Creator
 Task: Convert the provided word list into a strict {fmt} data block.
@@ -286,8 +280,9 @@ else:
     # ------------------------------------------------
     elif mode == "🔢 词频刷词":
         c1, c2 = st.columns(2)
-        with c1: s_r = st.number_input("Start", 8000, step=50)
-        with c2: cnt = st.number_input("Count", 50, step=10)
+        # 【修改】Start 步长 100，Count 步长 10
+        with c1: s_r = st.number_input("起始排名 (Start)", value=8000, step=100)
+        with c2: cnt = st.number_input("生成数量 (Count)", value=50, step=10)
         
         if st.button("提取"):
             res = FULL_DF[FULL_DF[RANK_COL] >= s_r].sort_values(RANK_COL).head(cnt)
