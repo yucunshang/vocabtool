@@ -7,17 +7,18 @@ import tempfile
 import lemminflect
 import nltk
 import genanki
+import json
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-# --- 文件处理库 ---
+# --- Document Processing Libraries ---
 import pypdf
 import docx
 import ebooklib
 from ebooklib import epub
 
 # ==========================================
-# 0. 页面配置
+# 0. Page Configuration
 # ==========================================
 st.set_page_config(
     page_title="Vocab Flow Ultra", 
@@ -37,7 +38,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 资源加载
+# 1. Resource Loading
 # ==========================================
 @st.cache_resource
 def setup_nltk():
@@ -85,7 +86,7 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. 核心解析逻辑
+# 2. Core Parsing Logic (V12: JSON Parser)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     text = ""
@@ -129,72 +130,66 @@ def analyze_logic(text, current_lvl, target_lvl):
 
 def parse_anki_data(raw_text):
     """
-    V11 容错解析器：使用正则分割，容忍空格差异
+    V12 Parser: NDJSON (Newline Delimited JSON)
+    This is the most robust method. It ignores formatting noise and parses strictly structured data.
     """
     parsed_cards = []
     
-    # 清理代码块标记
-    raw_text = raw_text.replace("```markdown", "").replace("```", "")
+    # 1. Clean Markdown Code Blocks
+    raw_text = raw_text.replace("```json", "").replace("```", "").strip()
     
-    lines = raw_text.strip().split('\n')
+    # 2. Split by lines
+    lines = raw_text.split('\n')
     seen_phrases = set()
 
     for line in lines:
         line = line.strip()
         if not line: continue
         
-        # 必须包含分隔符才处理
-        if "#" not in line: # 弱检查，防止 |#| 被写错
+        # Try to parse the line as JSON
+        try:
+            # Skip non-JSON lines (like headers if AI hallucinates them)
+            if not line.startswith("{"): continue
+            
+            data = json.loads(line)
+            
+            # Extract fields using short keys defined in Prompt
+            # w=word/phrase, m=meaning, e=examples, r=root/etymology
+            front_text = data.get("w", "").strip()
+            meaning = data.get("m", "").strip()
+            examples = data.get("e", "").strip()
+            
+            # --- Robust Etymology Extraction ---
+            # Default to "Unknown" if missing or empty
+            etymology = data.get("r", "").strip()
+            if not etymology or etymology.lower() == "none":
+                etymology = "🔍 词源暂缺"
+
+            # --- Validation ---
+            if not front_text or not meaning: continue
+
+            # Clean formatting
+            front_text = front_text.replace('**', '')
+            
+            # Deduplication
+            if front_text in seen_phrases: continue
+            seen_phrases.add(front_text)
+
+            parsed_cards.append({
+                'front_phrase': front_text,
+                'meaning': meaning,
+                'examples': examples,
+                'etymology': etymology
+            })
+
+        except json.JSONDecodeError:
+            # Just skip lines that aren't valid JSON
             continue
-
-        # --- 核心修复：使用正则表达式分割 ---
-        # 允许 |#| 前后有任意数量的空格
-        # 也能识别 | # | 或 |# | 等变体
-        parts = re.split(r'\s*\|\#\|\s*', line)
-        
-        # 清除空白项（防止 split 产生首尾空串）
-        parts = [p.strip() for p in parts if p.strip()]
-
-        # 只要列数 >= 3 就能救
-        if len(parts) >= 3:
-            try:
-                front_text = parts[0]
-                meaning = parts[1]
-                examples = parts[2]
-                
-                # --- 强力获取词源 ---
-                if len(parts) >= 4:
-                    etymology = parts[3]
-                else:
-                    etymology = "⚠️ AI未生成 (Missing)"
-                
-                # --- 内容清洗 ---
-                front_text = front_text.replace('**', '').replace('__', '').strip()
-                if not front_text: continue 
-
-                # 首字母处理
-                first_word = front_text.split()[0]
-                if first_word != "I" and not first_word.isupper():
-                    front_text = front_text[0].lower() + front_text[1:]
-
-                # 去重
-                if front_text in seen_phrases:
-                    continue
-                seen_phrases.add(front_text)
-
-                parsed_cards.append({
-                    'front_phrase': front_text,
-                    'meaning': meaning,
-                    'examples': examples,
-                    'etymology': etymology
-                })
-            except Exception as e:
-                continue
             
     return parsed_cards
 
 # ==========================================
-# 3. Anki 生成逻辑
+# 3. Anki Generation Logic
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
     CSS = """
@@ -223,7 +218,7 @@ def generate_anki_package(cards_data, deck_name):
     model_id = random.randrange(1 << 30, 1 << 31)
     model = genanki.Model(
         model_id, 
-        f'VocabFlow NoIPA Model {model_id}',
+        f'VocabFlow JSON Model {model_id}',
         fields=[
             {'name': 'FrontPhrase'}, 
             {'name': 'Meaning'}, 
@@ -263,7 +258,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt 生成逻辑 (V11 强化版)
+# 4. Prompt Logic (V12: JSON Format)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
@@ -272,23 +267,26 @@ Task: Create Anki cards.
 Words: {w_list}
 
 **STRICT OUTPUT FORMAT:**
-Use the separator `|#|` between columns.
-Format: `Phrase |#| English Definition |#| Example Sentences |#| Chinese Etymology`
+Output **Newline Delimited JSON (NDJSON)**. One valid JSON object per line.
+Do NOT output a list `[...]`. Do NOT output markdown tables.
 
-**RULES:**
-1. **Column 1:** Phrase (Lowercase, 2-5 words).
-2. **Column 3:** Examples (Use `<br>` for newlines).
-3. **Column 4 (Etymology):** Simplified Chinese. **DO NOT LEAVE EMPTY.** If unknown, write "词源暂缺".
-4. **NO IPA.** 5. **NO Markdown Tables.** Just lines with `|#|`.
+**JSON keys:**
+`w`: Phrase (lowercase, 2-5 words)
+`m`: English Definition
+`e`: Example sentences (use `<br>` for newlines)
+`r`: Chinese Etymology/Root (Simplified Chinese). **MUST NOT BE EMPTY.**
 
-**Example:**
-a benevolent leader |#| characterized by goodwill |#| He is benevolent.<br>A benevolent smile. |#| 词根: bene (好) + vol (意愿)
+**Example Output:**
+{{"w": "a benevolent leader", "m": "characterized by goodwill", "e": "He is benevolent.<br>A benevolent smile.", "r": "词根: bene (好) + vol (意愿)"}}
+{{"w": "abundant rainfall", "m": "existing in large quantities", "e": "Abundant food.<br>Resources are abundant.", "r": "前缀: ab (离开) + unda (波浪)"}}
+
+**Start Output:**
 """
 
 # ==========================================
-# 5. 主程序 UI
+# 5. UI
 # ==========================================
-st.title("⚡️ Vocab Flow Ultra")
+st.title("⚡️ Vocab Flow Ultra (V12)")
 
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`，请上传文件后刷新")
@@ -354,7 +352,7 @@ with tab_extract:
         
         for idx, batch in enumerate(batches):
             with st.expander(f"第 {idx+1} 组 (复制发给 AI)", expanded=(idx==0)):
-                st.code(get_ai_prompt(batch), language="markdown")
+                st.code(get_ai_prompt(batch), language="text")
 
 with tab_anki:
     st.markdown("### 📦 制作 Anki 牌组")
@@ -364,12 +362,15 @@ with tab_anki:
     ai_resp = st.text_area("在此粘贴 AI 回复", height=200, key="anki_input_text")
     deck_name = st.text_input("牌组名称", f"Vocab_{bj_time_str}")
     
+    # 增加调试预览，让用户确认 AI 是否真的生成了数据
+    with st.expander("🔍 Debug: 查看原始输入内容"):
+        st.text(ai_resp)
+
     if ai_resp.strip():
         parsed_data = parse_anki_data(ai_resp)
         if parsed_data:
             st.markdown(f"#### 👁️ 预览 (成功解析 {len(parsed_data)} 条)")
             
-            # 转换为 DataFrame 并重命名以便预览
             df_view = pd.DataFrame(parsed_data)
             df_view.rename(columns={
                 'front_phrase': '正面 (Phrase)', 
@@ -378,16 +379,13 @@ with tab_anki:
                 'etymology': '中文词源 (Etymology)'
             }, inplace=True)
             
-            # 强制显示所有列
             st.dataframe(
                 df_view, 
                 use_container_width=True, 
                 hide_index=True,
                 column_config={
                     "正面 (Phrase)": st.column_config.TextColumn(width="medium"),
-                    "英文释义 (Meaning)": st.column_config.TextColumn(width="medium"),
-                    "例句 (Examples)": st.column_config.TextColumn(width="large"),
-                    "中文词源 (Etymology)": st.column_config.TextColumn(width="medium"),
+                    "中文词源 (Etymology)": st.column_config.TextColumn(width="large"),
                 }
             )
             
@@ -395,4 +393,4 @@ with tab_anki:
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 未检测到有效数据，请确保 AI 使用了 `|#|` 作为分隔符。")
+            st.warning("⚠️ 未检测到有效数据。请确保 AI 返回的是 JSON 格式（例如：`{\"w\": \"word\", ...}`）。")
