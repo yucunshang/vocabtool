@@ -86,7 +86,7 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. Core Parsing Logic (V14: Progress Feedback)
+# 2. Core Parsing Logic (V16: High Throughput)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     text = ""
@@ -96,7 +96,6 @@ def extract_text_from_file(uploaded_file):
             text = uploaded_file.getvalue().decode("utf-8", errors='ignore')
         elif file_type == 'pdf':
             reader = pypdf.PdfReader(uploaded_file)
-            # 大文件 PDF 逐页提取可能会慢，这里不改逻辑，但在主程序会加状态提示
             text = " ".join([page.extract_text() for page in reader.pages if page.extract_text()])
         elif file_type == 'docx':
             doc = docx.Document(uploaded_file)
@@ -116,30 +115,27 @@ def extract_text_from_file(uploaded_file):
     return text
 
 def analyze_logic(text, current_lvl, target_lvl):
-    # 使用 set 减少重复计算，大幅提升大文件处理速度
     raw_tokens = re.findall(r"[a-z]+", text.lower())
     total_words = len(raw_tokens)
     unique_tokens = set(raw_tokens)
-    
     target_words = []
-    
-    # 这里是计算密集型任务
     for w in unique_tokens:
         if len(w) < 3: continue 
         lemma = get_lemma(w)
         rank = VOCAB_DICT.get(lemma, 99999)
         if rank > current_lvl and rank <= target_lvl:
             target_words.append((lemma, rank))
-            
     target_words.sort(key=lambda x: x[1])
     return [x[0] for x in target_words], total_words
 
 def parse_anki_data(raw_text):
     """
-    V13 Parser: Regex Stream Parsing
+    V16 Parser: Regex Stream Parsing
+    稳健解析，无视格式错误
     """
     parsed_cards = []
     text = raw_text.replace("```json", "").replace("```", "").strip()
+    # 匹配 JSON 对象，支持换行
     matches = re.finditer(r'\{.*?\}', text, re.DOTALL)
     seen_phrases = set()
 
@@ -206,7 +202,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt Logic
+# 4. Prompt Logic (V16: Compact Mode)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
@@ -215,17 +211,22 @@ Task: Create Anki cards.
 Words: {w_list}
 
 **STRICT OUTPUT FORMAT:**
-Output **JSON Objects**. One object per word.
-You can output them one per line, or in a block.
+Output **NDJSON** (Newline Delimited JSON). ONE LINE per object. NO indentation.
 
-**JSON keys:**
-`w`: Phrase (lowercase, 2-5 words)
-`m`: English Definition
-`e`: Example sentences (use `<br>` for newlines)
-`r`: Chinese Etymology/Root (Simplified Chinese). **MUST NOT BE EMPTY.**
+**Token Optimization Rules:**
+1. **Meaning (`m`):** Keep it concise (max 10 words).
+2. **Examples (`e`):** 1-2 short sentences. Use `<br>` for breaks.
+3. **Etymology (`r`):** Short & clear Simplified Chinese.
 
-**Example Output:**
-{{"w": "a benevolent leader", "m": "characterized by goodwill", "e": "He is benevolent.<br>A benevolent smile.", "r": "词根: bene (好) + vol (意愿)"}}
+**Keys:**
+`w`: Phrase (lowercase)
+`m`: Definition
+`e`: Examples
+`r`: Chinese Etymology
+
+**Example:**
+{{"w": "benevolent", "m": "kind and helpful", "e": "A benevolent smile.", "r": "bene(好)+vol(意愿)"}}
+{{"w": "abundant", "m": "plentiful", "e": "Abundant food.", "r": "ab(离)+unda(浪)"}}
 
 **Start Output:**
 """
@@ -233,7 +234,7 @@ You can output them one per line, or in a block.
 # ==========================================
 # 5. UI
 # ==========================================
-st.title("⚡️ Vocab Flow Ultra (V14)")
+st.title("⚡️ Vocab Flow Ultra (V16)")
 
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`，请上传文件后刷新")
@@ -251,23 +252,15 @@ with tab_extract:
         pasted_text = st.text_area("📄 ...或粘贴文本", height=100)
         
         if st.button("🚀 开始分析", type="primary"):
-            # 使用 st.status 提供多步骤反馈
             with st.status("正在启动引擎...", expanded=True) as status:
-                
-                # --- Step 1: 读取 ---
-                status.write("📂 正在读取文件内容 (这可能需要几秒钟)...")
+                status.write("📂 正在读取文件内容...")
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
                 if len(raw_text) > 10:
-                    # --- Step 2: 预处理 ---
-                    status.write(f"🔍 提取成功 (共 {len(raw_text)} 字符)，正在进行 NLP 词形还原...")
-                    
-                    # --- Step 3: 分析 ---
+                    status.write(f"🔍 提取成功 (共 {len(raw_text)} 字符)，正在分析...")
                     final_words, total = analyze_logic(raw_text, curr, targ)
-                    
                     st.session_state['gen_words'] = final_words
                     st.session_state['total_count'] = total
-                    
                     status.update(label=f"✅ 完成! 筛选出 {len(final_words)} 个目标词汇", state="complete", expanded=False)
                 else:
                     status.update(label="⚠️ 内容无效或太短", state="error")
@@ -308,13 +301,17 @@ with tab_extract:
     if 'gen_words' in st.session_state and st.session_state['gen_words']:
         words = st.session_state['gen_words']
         st.divider()
-        st.info(f"🎯 待处理单词: {len(words)} 个")
+        st.markdown(f"### 🎯 待处理单词: {len(words)} 个")
         
-        batch_size = st.number_input("AI 分组大小", 10, 200, 50, step=10)
+        # --- V16 更新：默认 100，最大 200 ---
+        batch_size = st.number_input("AI 分组大小 (建议 50-100)", 10, 200, 100, step=10)
+        
         batches = [words[i:i + batch_size] for i in range(0, len(words), batch_size)]
         
+        st.info(f"💡 共分为 **{len(batches)}** 组。请依次复制发送给 AI。")
+        
         for idx, batch in enumerate(batches):
-            with st.expander(f"第 {idx+1} 组 (复制发给 AI)", expanded=(idx==0)):
+            with st.expander(f"第 {idx+1} 组 (复制) - 共 {len(batch)} 词", expanded=(idx==0)):
                 st.code(get_ai_prompt(batch), language="text")
 
 with tab_anki:
@@ -322,11 +319,11 @@ with tab_anki:
     bj_time_str = get_beijing_time_str()
     if 'anki_input_text' not in st.session_state: st.session_state['anki_input_text'] = ""
 
-    ai_resp = st.text_area("在此粘贴 AI 回复", height=200, key="anki_input_text")
+    st.caption("👇 支持多次追加粘贴：")
+    ai_resp = st.text_area("在此粘贴 AI 回复", height=300, key="anki_input_text")
     deck_name = st.text_input("牌组名称", f"Vocab_{bj_time_str}")
     
-    with st.expander("🔍 Debug: 查看 AI 原始内容"):
-        # 优化：防止大文本卡死浏览器，只显示前 2000 个字符
+    with st.expander("🔍 Debug: 查看前 2000 字符"):
         preview_text = ai_resp[:2000] + "..." if len(ai_resp) > 2000 else ai_resp
         st.text(preview_text)
 
@@ -347,4 +344,4 @@ with tab_anki:
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 未检测到有效数据，请确保粘贴内容包含 JSON 格式 `{...}`。")
+            st.warning("⚠️ 未检测到有效数据，请检查输入。")
