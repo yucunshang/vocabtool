@@ -24,7 +24,7 @@ st.set_page_config(
     page_title="Vocab Flow Ultra", 
     page_icon="⚡️", 
     layout="centered",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed" 
 )
 
 st.markdown("""
@@ -137,6 +137,7 @@ def analyze_logic(text, current_lvl, target_lvl):
 # 3. Anki 生成逻辑
 # ==========================================
 def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
+    # 字体大小调整: Examples -> 20px, Etymology -> 17px
     CSS = """
     .card { font-family: arial; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .nightMode .card { background-color: #2f2f31; color: #f5f5f5; }
@@ -146,9 +147,9 @@ def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
     .def-container { text-align: left; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 10px; }
     .definition { font-weight: bold; color: #444; margin-bottom: 10px; }
     .nightMode .definition { color: #ddd; }
-    .examples { background: #f4f4f4; padding: 10px; border-radius: 5px; color: #555; font-style: italic; font-size: 16px; }
+    .examples { background: #f4f4f4; padding: 10px; border-radius: 5px; color: #555; font-style: italic; font-size: 20px; }
     .nightMode .examples { background: #333; color: #ccc; }
-    .etymology { margin-top: 15px; font-size: 14px; color: #888; border: 1px dashed #ccc; padding: 5px; display: inline-block;}
+    .etymology { margin-top: 15px; font-size: 17px; color: #888; border: 1px dashed #ccc; padding: 5px; display: inline-block;}
     """
     
     model = genanki.Model(
@@ -170,22 +171,29 @@ def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
         return tmp.name
 
 def get_ai_prompt(words):
+    """优化后的 Prompt"""
     w_list = ", ".join(words)
     return f"""
-Act as a Lexicographer. Create Anki card data.
-Words: {w_list}
+You are a strictly compliant dictionary data generator. 
+Convert the provided words into Anki card format using the rules below.
 
-**Strict Output Format (Pipe Separated `|`, NO Header):**
-Word | IPA | Concise English Definition | 2 English Sentences | Etymology (Root+Suffix)
+**Input Words:** {w_list}
 
-**Requirements:**
-1. Definition: Simple English (B2 level).
-2. Examples: 2 sentences separated by `<br>`.
-3. Etymology: Format `root(meaning) + suffix`.
-4. NO Header row.
+**Strict Output Rules:**
+1. **Format:** `Word | IPA | Definition | Examples | Etymology`
+2. **Separator:** Use `|` strictly as the field separator. Do NOT use `|` inside the content text.
+3. **No Fluff:** Output ONLY the raw text lines. NO headers, NO markdown code blocks, NO conversational filler (e.g., "Here is the list").
+4. **Newlines:** Use `<br>` for line breaks inside examples. Do NOT generate actual newlines within a single entry.
 
-**Example:**
-benevolent | /bəˈnevələnt/ | kind and meaningful | He is benevolent.<br>A benevolent fund. | bene(good) + vol(wish)
+**Content Requirements:**
+- **IPA:** US pronunciation.
+- **Definition:** Simple B2/C1 English. Keep it concise (< 12 words).
+- **Examples:** 1 or 2 short, high-context sentences. Separate them with `<br>`. Highlight the keyword in **bold** if possible.
+- **Etymology:** Brief root analysis (e.g., "bene(good) + vol(wish)"). If unknown, leave empty.
+
+**Example Output:**
+benevolent | /bəˈnevələnt/ | kind and helpful | He was a **benevolent** old man.<br>The fund is for **benevolent** purposes. | bene(good) + vol(wish)
+ephemeral | /əˈfemərəl/ | lasting for a very short time | Fashions are **ephemeral**, changing with every season. | epi(on) + hemera(day)
 """
 
 # ==========================================
@@ -196,10 +204,10 @@ st.title("⚡️ Vocab Flow Ultra")
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`")
 
-# 侧边栏：一键重置
-with st.sidebar:
-    st.header("控制台")
-    if st.button("🗑️ 清空所有数据", type="secondary", on_click=clear_all_state):
+# --- 控制台 (移动到顶部 Expander) ---
+with st.expander("🔧 控制台 (Console / Reset)", expanded=False):
+    st.caption("需要重新开始或数据出错时，点击下方按钮清空所有缓存。")
+    if st.button("🗑️ 清空所有数据 (Clear State)", type="secondary", on_click=clear_all_state):
         pass 
 
 # Input Tabs
@@ -212,7 +220,7 @@ with tab_extract:
     # 子 Tab：区分“语境分析”和“纯Rank列表”
     mode_context, mode_rank = st.tabs(["📄 语境分析 (文本/文件)", "🔢 词频列表 (Rank)"])
     
-    # --- A. 语境分析模式 (合并后的界面) ---
+    # --- A. 语境分析模式 ---
     with mode_context:
         st.markdown("#### 1. 设定词汇分级")
         c1, c2 = st.columns(2)
@@ -320,7 +328,10 @@ with tab_anki:
                 line = line.strip()
                 if not line: continue
                 if "|" not in line: continue
-                if "Word | IPA" in line or "---" in line: continue 
+                
+                # 增强过滤逻辑：过滤表头和分割线
+                if "Word" in line and "IPA" in line: continue  
+                if set(line.strip()) == {'-', '|'} or "---" in line: continue 
                 
                 parts = [p.strip() for p in line.split('|')]
                 if len(parts) >= 3:
