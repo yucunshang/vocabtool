@@ -9,26 +9,27 @@ import random
 import tempfile
 
 # ==========================================
-# 0. 页面配置 & 样式优化
+# 0. 页面基础配置
 # ==========================================
 st.set_page_config(
-    page_title="Vocab Flow (Server Ver.)", 
+    page_title="Vocab Flow Pro", 
     page_icon="⚡️", 
     layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# 注入 CSS 美化 Streamlit 界面
+# 注入 CSS：美化界面
 st.markdown("""
 <style>
     .stTextArea textarea { font-family: 'Consolas', monospace; font-size: 14px; }
-    .stButton>button { border-radius: 8px; font-weight: 600; }
-    .instruction { font-size: 0.9em; color: #666; margin-bottom: 10px; }
+    .stButton>button { border-radius: 8px; font-weight: 600; width: 100%; }
+    .success-box { padding: 10px; background-color: #e6fffa; border-radius: 5px; color: #006d5b; margin-bottom: 10px; }
+    .info-text { font-size: 0.9em; color: #555; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 资源加载 (适配云端环境)
+# 1. 资源加载 (适配 Streamlit Cloud)
 # ==========================================
 @st.cache_resource
 def setup_nltk():
@@ -39,20 +40,20 @@ def setup_nltk():
         os.makedirs(nltk_data_dir, exist_ok=True)
         nltk.data.path.append(nltk_data_dir)
         
-        # 仅下载必要的包
         for pkg in ['averaged_perceptron_tagger', 'punkt', 'punkt_tab']:
             try:
                 nltk.data.find(f'tokenizers/{pkg}')
             except LookupError:
                 nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
     except Exception as e:
-        st.warning(f"NLTK Setup Warning: {e}")
+        st.warning(f"NLTK 初始化警告: {e}")
 
 setup_nltk()
 
 @st.cache_data
 def load_vocab_data():
     """加载词频数据，增加容错"""
+    # 请确保你的 github 仓库里有 coca_cleaned.csv
     possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next((f for f in possible_files if os.path.exists(f)), None)
     
@@ -61,7 +62,7 @@ def load_vocab_data():
             df = pd.read_csv(file_path)
             # 简单的列名清洗
             df.columns = [c.strip().lower() for c in df.columns]
-            # 尝试自动寻找 word 和 rank 列
+            # 自动寻找 word 和 rank 列
             w_col = next((c for c in df.columns if 'word' in c), df.columns[0])
             r_col = next((c for c in df.columns if 'rank' in c), df.columns[1])
             
@@ -72,30 +73,62 @@ def load_vocab_data():
             # 去重保留 rank 最小的
             df = df.sort_values(r_col).drop_duplicates(subset=[w_col], keep='first')
             return pd.Series(df[r_col].values, index=df[w_col]).to_dict()
-        except:
+        except Exception as e:
+            st.error(f"词频文件读取失败: {e}")
             return {}
     return {}
 
 VOCAB_DICT = load_vocab_data()
 
 def get_lemma(word):
-    """获取单词原形"""
-    try:
-        return lemminflect.getLemma(word, upos='VERB')[0]
-    except:
-        return word
+    try: return lemminflect.getLemma(word, upos='VERB')[0]
+    except: return word
 
 # ==========================================
-# 2. Anki 高质量模板与打包逻辑
+# 2. 核心分析逻辑 (恢复当前/目标水平筛选)
+# ==========================================
+def analyze_text(text, current_lvl, target_lvl):
+    # 清洗分词
+    raw_words = re.findall(r"[a-z]+", text.lower())
+    unique_words = set(raw_words)
+    
+    target_words = [] # 重点词 (Learning Zone)
+    mastered_count = 0
+    beyond_count = 0
+    
+    for w in unique_words:
+        if len(w) < 2: continue
+        lemma = get_lemma(w)
+        rank = VOCAB_DICT.get(lemma, 99999) # 没在表里的词默认很难
+        
+        # --- 核心筛选逻辑 ---
+        if rank <= current_lvl:
+            # 排名小于当前水平 -> 太简单 (Mastered)
+            mastered_count += 1
+        elif rank <= target_lvl:
+            # 当前 < 排名 <= 目标 -> 学习区 (Target)
+            target_words.append((lemma, rank))
+        else:
+            # 排名 > 目标 -> 太难/超纲 (Beyond)
+            beyond_count += 1
+            
+    # 按词频排序 (越常见越靠前)
+    target_words.sort(key=lambda x: x[1])
+    
+    # 仅返回单词列表
+    final_list = [x[0] for x in target_words]
+    
+    return final_list, mastered_count, beyond_count
+
+# ==========================================
+# 3. Anki 打包逻辑 (生成 .apkg)
 # ==========================================
 def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
     """
-    生成 .apkg 文件并返回二进制数据
-    cards_data: list of dicts
+    生成高质量 Anki 包，内置 CSS 适配 iOS 深色模式
     """
     
-    # --- CSS 样式 (高质量模板核心) ---
-    # 这个样式会自动适配 iOS 的夜间模式
+    # --- 高质量 CSS 模板 ---
     CSS = """
     .card {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -106,22 +139,22 @@ def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
         padding: 20px 10px;
     }
     
-    /* 夜间模式适配 */
+    /* 深色模式适配 (iOS AnkiMobile & Desktop) */
     .nightMode .card { background-color: #2f2f31; color: #f5f5f5; }
     
-    /* 正面 */
+    /* 正面设计 */
     .word { font-size: 38px; font-weight: 700; color: #007AFF; margin-bottom: 8px; }
     .nightMode .word { color: #5FA9FF; }
     .phonetic { font-family: "Lucida Sans Unicode", sans-serif; color: #888; font-size: 18px; }
     
-    /* 背面 */
+    /* 背面设计 */
     .def-container { 
         text-align: left; margin-top: 20px; padding-top: 15px; 
         border-top: 1px solid #eee; 
     }
     .nightMode .def-container { border-top: 1px solid #444; }
     
-    .definition { font-weight: 600; font-size: 18px; color: #444; margin-bottom: 15px; }
+    .definition { font-weight: 600; font-size: 18px; color: #444; margin-bottom: 15px; line-height: 1.4;}
     .nightMode .definition { color: #ddd; }
     
     .example-box {
@@ -139,10 +172,9 @@ def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
     """
 
     # --- Anki Model 定义 ---
-    # 字段：Word, IPA, Meaning, Examples, Etymology
     model = genanki.Model(
         random.randrange(1 << 30, 1 << 31),
-        'Streamlit High-End Model',
+        'VocabFlow High-End Model',
         fields=[
             {'name': 'Word'},
             {'name': 'IPA'},
@@ -176,46 +208,21 @@ def generate_anki_package(cards_data, deck_name="Vocab_Deck"):
                 card['word'],
                 card['ipa'],
                 card['meaning'],
-                card['examples'].replace('\n', '<br>'), # 处理换行
+                card['examples'].replace('\n', '<br>'), # 转换换行为 HTML
                 card['etymology']
             ]
         ))
 
-    # 使用临时文件生成，避免权限问题
+    # 使用临时文件生成，避免云端权限问题
     with tempfile.NamedTemporaryFile(delete=False, suffix='.apkg') as tmp:
         genanki.Package(deck).write_to_file(tmp.name)
         return tmp.name
 
 # ==========================================
-# 3. 核心逻辑：文本分析 & Prompt
+# 4. Prompt 生成器 (管道符格式)
 # ==========================================
-def analyze_text(text, target_lvl):
-    raw_words = re.findall(r"[a-z]+", text.lower())
-    unique_words = set(raw_words)
-    
-    res = []
-    for w in unique_words:
-        if len(w) < 2: continue
-        lemma = get_lemma(w)
-        rank = VOCAB_DICT.get(lemma, 0)
-        
-        # 简单筛选逻辑：如果 rank > 0 且 rank <= target_lvl (或者没有词表时全部输出)
-        if VOCAB_DICT:
-            # 这里你可以自定义逻辑，例如只看 4000-8000 词
-            # 为了演示，我们假设只提取“难词” (Rank > 3000)
-            if rank > 3000 and rank <= target_lvl: 
-                res.append((lemma, rank))
-        else:
-            res.append((lemma, 0))
-            
-    # 按词频排序 (越常见越前，或者反之)
-    res.sort(key=lambda x: x[1])
-    return [x[0] for x in res]
-
 def get_ai_prompt(words):
     w_list = ", ".join(words)
-    # 使用 Markdown 表格或管道符，让 AI 生成结构化数据
-    # 管道符 | 比 CSV 逗号更安全，因为例句里常有逗号
     return f"""
 Act as a Dictionary API. I need Anki card data for these words.
 Words: {w_list}
@@ -228,52 +235,74 @@ Word | IPA | Chinese Definition | 2 English Sentences (Cn translation included) 
 2. Example Sentences: Use `<br>` to separate the two sentences.
 3. Definition: Concise Chinese.
 4. Etymology: Very short root explanation (Chinese).
+5. DO NOT output any header row.
 
 **Example Line:**
 benevolent | /bəˈnevələnt/ | 仁慈的 | He is benevolent.<br>She smiled benevolently. | bene(好) + vol(意愿)
 """
 
 # ==========================================
-# 4. Streamlit UI 主程序
+# 5. 主界面逻辑
 # ==========================================
-st.title("⚡️ Vocab Flow (Cloud)")
-st.caption("Step 1: 提取单词 -> Step 2: AI 生成 -> Step 3: 一键打包 iOS")
+st.title("⚡️ Vocab Flow")
+st.caption("分析文本 -> 筛选学习区单词 -> AI 生成 -> 自动打包 iOS Anki")
 
-# 使用 Tab 分隔步骤，逻辑更清晰
-t1, t2 = st.tabs(["1. 分析 & 提词", "2. 生成 & 下载"])
+if not VOCAB_DICT:
+    st.error("⚠️ 未在目录下检测到 `coca_cleaned.csv`，无法进行词频筛选！")
+    st.info("请确保你的 GitHub 仓库中包含词频文件。")
 
+t1, t2 = st.tabs(["1️⃣ 分析与提词", "2️⃣ 生成 Anki 包"])
+
+# --- Tab 1: 分析 ---
 with t1:
     c1, c2 = st.columns(2)
-    max_rank = c1.number_input("筛选词频上限 (Rank)", 5000, 20000, 10000, step=1000)
+    # 恢复了你的功能需求：Current vs Target
+    curr_lvl = c1.number_input("当前词汇量 (Current)", 1000, 20000, 4000, step=500, help="小于此排名的词会被视为'已掌握'而忽略")
+    targ_lvl = c2.number_input("目标词汇量 (Target)", 1000, 30000, 10000, step=500, help="大于此排名的词会被视为'生僻词'而忽略")
     
-    txt = st.text_area("粘贴英文文本", height=150)
+    txt = st.text_area("在此粘贴英文文本/文章", height=150, placeholder="Paste your text here...")
     
-    if st.button("🔍 分析文本"):
+    if st.button("🔍 开始分析", type="primary"):
         if not txt.strip():
-            st.warning("请先粘贴文本")
+            st.warning("请先输入文本")
+        elif not VOCAB_DICT:
+            st.warning("无词频数据，无法筛选")
         else:
-            final_words = analyze_text(txt, max_rank)
+            final_words, num_m, num_b = analyze_text(txt, curr_lvl, targ_lvl)
             st.session_state['words'] = final_words
-            st.success(f"筛选出 {len(final_words)} 个单词")
+            
+            # 显示分析结果
+            st.markdown(f"""
+            <div class="success-box">
+                <b>🎯 筛选出 {len(final_words)} 个重点词 (Learning Zone)</b><br>
+                <span style='font-size:0.85em; opacity:0.8'>
+                ✅ 已掌握: {num_m} (Rank < {curr_lvl}) &nbsp;|&nbsp; 
+                🚀 超纲/生僻: {num_b} (Rank > {targ_lvl})
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
 
-    if 'words' in st.session_state:
-        # 允许用户二次编辑
-        words_str = st.text_area("确认单词列表 (可手动增删)", ", ".join(st.session_state['words']))
+    if 'words' in st.session_state and st.session_state['words']:
+        # 二次编辑区
+        words_str = st.text_area("确认单词列表 (可手动增删)", ", ".join(st.session_state['words']), height=100)
         
-        if st.button("📋 生成 AI Prompt"):
+        # 生成 Prompt
+        st.markdown("##### 🚀 复制下方 Prompt 发给 AI")
+        if st.button("生成 Prompt"):
             final_list = [w.strip() for w in words_str.split(',') if w.strip()]
             prompt = get_ai_prompt(final_list)
             st.code(prompt, language="markdown")
-            st.info("👆 复制上面代码块发给 ChatGPT/Claude/DeepSeek。然后把它的回复复制下来。")
+            st.info("💡 提示：将 AI 的回复（不含代码块符号）复制，然后去 Tab 2 制作卡片。")
 
+# --- Tab 2: 制作 ---
 with t2:
-    st.markdown("##### 🛠️ 制作 Anki 包")
-    st.markdown("<div class='instruction'>将 AI 回复的管道符格式内容 (不含 ```) 粘贴到下方：</div>", unsafe_allow_html=True)
+    st.markdown("### 🛠️ 制作 iOS 完美适配包")
+    st.markdown("<div class='info-text'>将 AI 回复的管道符内容 (Word | IPA | ...) 粘贴到下方：</div>", unsafe_allow_html=True)
     
-    ai_response = st.text_area("粘贴 AI 回复数据", height=200, placeholder="word | ipa | def | ex | etym")
+    ai_response = st.text_area("粘贴 AI 数据", height=200, placeholder="benevolent | /bə.../ | 仁慈的 | Ex1... | Source...")
     deck_title = st.text_input("牌组名称", "My Vocab Deck")
     
-    if st.button("📦 生成 .apkg (iOS 专用)"):
+    if st.button("📦 生成 .apkg 文件", type="primary"):
         if not ai_response.strip():
             st.error("内容为空")
         else:
@@ -284,6 +313,9 @@ with t2:
             
             for line in lines:
                 if "|" not in line: continue
+                # 简单的表头过滤
+                if "Word | IPA" in line: continue 
+                
                 parts = [p.strip() for p in line.split('|')]
                 if len(parts) >= 3: # 至少要有单词、音标、释义
                     cards.append({
@@ -298,22 +330,27 @@ with t2:
             
             if cards:
                 # 生成文件
-                tmp_file_path = generate_anki_package(cards, deck_title)
-                
-                # 读取二进制数据用于下载
-                with open(tmp_file_path, "rb") as f:
-                    file_data = f.read()
-                
-                st.download_button(
-                    label=f"📥 下载 {deck_title}.apkg",
-                    data=file_data,
-                    file_name=f"{deck_title}.apkg",
-                    mime="application/octet-stream",
-                    type="primary"
-                )
-                
-                st.success(f"成功生成 {len(cards)} 张卡片！(iOS上下载后选择用Anki打开即可)")
-                if err_cnt > 0:
-                    st.warning(f"跳过了 {err_cnt} 行格式错误的行")
+                try:
+                    tmp_file_path = generate_anki_package(cards, deck_title)
+                    
+                    # 读取为二进制
+                    with open(tmp_file_path, "rb") as f:
+                        file_data = f.read()
+                    
+                    st.download_button(
+                        label=f"📥 点击下载 {deck_title}.apkg",
+                        data=file_data,
+                        file_name=f"{deck_title}.apkg",
+                        mime="application/octet-stream",
+                        type="primary"
+                    )
+                    
+                    st.success(f"成功打包 {len(cards)} 张卡片！")
+                    st.caption("iOS 用户：下载后点击文件，选择'在 Anki 中打开'即可，无乱码。")
+                    
+                    if err_cnt > 0:
+                        st.warning(f"跳过了 {err_cnt} 行格式不符的数据")
+                except Exception as e:
+                    st.error(f"打包出错: {e}")
             else:
-                st.error("未能识别有效数据，请检查分隔符是否为 |")
+                st.error("未识别到有效数据，请检查分隔符是否为 |")
