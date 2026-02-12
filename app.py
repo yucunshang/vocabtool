@@ -33,7 +33,7 @@ st.markdown("""
     .stButton>button { border-radius: 8px; font-weight: 600; width: 100%; margin-top: 5px; }
     .stat-box { padding: 15px; background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; text-align: center; color: #166534; margin-bottom: 20px; }
     .preview-table { font-size: 12px; }
-    /* 隐藏部分不需要的 Streamlit 元素 */
+    /* 隐藏不需要的元素 */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
 </style>
@@ -57,7 +57,6 @@ setup_nltk()
 
 @st.cache_data
 def load_vocab_data():
-    """加载词频数据库"""
     possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next((f for f in possible_files if os.path.exists(f)), None)
     if file_path:
@@ -81,7 +80,6 @@ def get_lemma(word):
     except: return word
 
 def get_beijing_time_str():
-    """获取北京时间字符串用于文件名"""
     utc_now = datetime.now(timezone.utc)
     beijing_now = utc_now + timedelta(hours=8)
     return beijing_now.strftime('%m%d_%H%M')
@@ -90,7 +88,7 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. 核心解析逻辑
+# 2. 核心解析逻辑 (包含自动清洗)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     text = ""
@@ -135,6 +133,7 @@ def analyze_logic(text, current_lvl, target_lvl):
 def parse_anki_data(raw_text):
     """
     智能解析：Phrase | IPA | Definition | Examples | Etymology
+    强制清洗：去除句号，确保正面不是句子。
     """
     parsed_cards = []
     lines = raw_text.strip().split('\n')
@@ -142,19 +141,24 @@ def parse_anki_data(raw_text):
     for line in lines:
         line = line.strip()
         if not line: continue
-        # 过滤 Markdown 分割线和表头
         if set(line) == {'|', '-'} or '---' in line: continue
         if 'Phrase' in line and 'Definition' in line: continue
 
-        # 清洗行首行尾的管道符
         clean_line = line.strip('|')
         parts = [p.strip() for p in clean_line.split('|')]
         
-        # 至少要有短语和释义，不够的列自动补全
         if len(parts) >= 2:
             while len(parts) < 5: parts.append("")
+            
+            # --- 核心修复：强制清洗正面 ---
+            front_text = parts[0]
+            # 1. 去除末尾句号
+            front_text = front_text.rstrip('.')
+            # 2. 如果首字母是大写，尝试转小写（除非是专有名词，但这里简单处理防止句子感）
+            # front_text = front_text[0].lower() + front_text[1:] if front_text else ""
+            
             parsed_cards.append({
-                'front_phrase': parts[0],
+                'front_phrase': front_text,
                 'ipa': parts[1],
                 'meaning': parts[2],
                 'examples': parts[3],
@@ -164,43 +168,38 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 # ==========================================
-# 3. Anki 生成逻辑 (核心修改：样式与模板)
+# 3. Anki 生成逻辑 (样式完全匹配您的要求)
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
-    # CSS 样式重构
     CSS = """
     .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .nightMode .card { background-color: #2e2e2e; color: #f0f0f0; }
     
-    /* 正面：短语 (字体调整为 26px，深蓝色) */
+    /* 正面：短语 (字体 26px，深蓝色，居中) */
     .phrase { 
         font-size: 26px; 
         font-weight: 700; 
         color: #0056b3; 
         margin-bottom: 20px; 
-        line-height: 1.3;
     }
     .nightMode .phrase { color: #66b0ff; }
     
     /* 分割线 */
     hr { border: 0; height: 1px; background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0)); margin-bottom: 15px; }
-    .nightMode hr { background-image: linear-gradient(to right, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0)); }
 
-    /* 背面元素 */
-    .ipa { color: #888; font-size: 16px; font-family: 'Lucida Sans Unicode', sans-serif; margin-bottom: 10px; }
+    /* 背面布局：释义 -> 例句 -> 词源 */
     
-    .def-container { text-align: left; margin-top: 10px; }
-    
-    /* 释义 */
+    /* 1. 英文释义 */
     .definition { 
         font-weight: bold; 
         color: #222; 
-        margin-bottom: 12px; 
-        font-size: 20px; 
+        margin-bottom: 15px; 
+        font-size: 20px;
+        text-align: left;
     }
     .nightMode .definition { color: #e0e0e0; }
     
-    /* 例句容器 */
+    /* 2. 例句 */
     .examples { 
         background: #f7f9fa; 
         padding: 12px; 
@@ -211,21 +210,30 @@ def generate_anki_package(cards_data, deck_name):
         font-size: 18px; 
         line-height: 1.5; 
         margin-bottom: 15px; 
+        text-align: left;
     }
     .nightMode .examples { background: #383838; color: #ccc; border-left-color: #66b0ff; }
     
-    /* 词源 */
-    .etymology { 
-        display: block; 
-        font-size: 15px; 
-        color: #666; 
-        border: 1px dashed #bbb; 
-        padding: 8px 12px; 
-        border-radius: 6px; 
-        background-color: #fffdf5; 
+    /* 3. 词源 (包含音标辅助显示) */
+    .footer-info {
+        margin-top: 20px;
+        border-top: 1px dashed #ccc;
+        padding-top: 10px;
         text-align: left;
     }
-    .nightMode .etymology { background-color: #333; color: #aaa; border-color: #555; }
+    
+    .etymology { 
+        display: block; 
+        font-size: 16px; 
+        color: #666; 
+        background-color: #fffdf5; 
+        padding: 5px 10px;
+        border-radius: 4px;
+        margin-bottom: 5px;
+    }
+    .ipa { color: #999; font-size: 14px; font-family: monospace; }
+    
+    .nightMode .etymology { background-color: #333; color: #aaa; }
     """
     
     model_id = random.randrange(1 << 30, 1 << 31)
@@ -241,17 +249,16 @@ def generate_anki_package(cards_data, deck_name):
         ],
         templates=[{
             'name': 'Phrase Card',
-            # 正面：仅显示短语
             'qfmt': '<div class="phrase">{{FrontPhrase}}</div>', 
-            # 背面：正面短语 + 音标 + 释义 + 例句 + 词源
             'afmt': '''
             {{FrontSide}}
             <hr>
-            <div class="ipa">{{IPA}}</div>
-            <div class="def-container">
-                <div class="definition">{{Meaning}}</div>
-                <div class="examples">{{Examples}}</div>
+            <div class="definition">{{Meaning}}</div>
+            <div class="examples">{{Examples}}</div>
+            
+            <div class="footer-info">
                 <div class="etymology">🌱 <b>Etymology:</b> {{Etymology}}</div>
+                <div class="ipa">IPA: {{IPA}}</div>
             </div>
             ''',
         }], css=CSS
@@ -276,32 +283,40 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt 生成逻辑 (核心修改：强制短语)
+# 4. Prompt 生成逻辑 (超强约束版)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
     return f"""
 Act as a Dictionary Data Generator.
-Convert the following words into Anki card data.
+Task: Convert words into Anki card data.
 
 **Target Words:** {w_list}
 
-**STRICT OUTPUT FORMAT (Pipe Separated, No Headers):**
-`Natural Phrase | IPA | Definition | Examples | Etymology`
+**CRITICAL RULE FOR FRONT CARD (Column 1):**
+* **MUST BE A SHORT PHRASE (2-6 words).**
+* **ABSOLUTELY NO FULL SENTENCES.** * **NO** periods (.) at the end of the first column.
+* **NO** Subject-Verb-Object structures that look like a sentence.
 
-**CRITICAL INSTRUCTIONS:**
-1. **COLUMN 1 (Front):** - MUST be a **collocation** or **short phrase** (2-5 words) that uses the target word naturally.
-   - ❌ **NO** single words (e.g., NOT "abandon").
-   - ❌ **NO** full sentences (e.g., NOT "He decided to abandon the project.").
-   - ✅ **YES**: "abandon the project", "a subtle difference", "relentless pursuit".
-2. **COLUMN 2 (IPA):** US pronunciation of the *target word* only.
-3. **COLUMN 3 (Definition):** Concise English meaning of the target word.
-4. **COLUMN 4 (Examples):** 2 complete sentences containing the word, separated by `<br>`.
-5. **COLUMN 5 (Etymology):** Brief root + suffix analysis (e.g., "bene(good)+vol(wish)").
+**Strict Output Format (Pipe Separated):**
+`Phrase | IPA | Definition | Examples | Etymology`
 
-**Example Output:**
-a benevolent leader | /bəˈnevələnt/ | kind and helpful | He is **benevolent**.<br>A **benevolent** fund. | bene(good) + vol(wish)
-subtle difference | /'sʌt(ə)l/ | not obvious | The nuance is **subtle**.<br>A **subtle** hint. | sub(under) + tex(web)
+**Examples of CORRECT vs WRONG:**
+* ❌ WRONG: The abandoned house was empty. (Too long, is a sentence)
+* ✅ RIGHT: **an abandoned house**
+* ❌ WRONG: He made a subtle change. (Sentence)
+* ✅ RIGHT: **a subtle change**
+* ❌ WRONG: benevolent (Single word)
+* ✅ RIGHT: **a benevolent leader**
+
+**Requirements:**
+1. **Phrase:** Natural collocation.
+2. **IPA:** US pronunciation.
+3. **Definition:** Concise English definition.
+4. **Examples:** 2 sentences, separated by `<br>`.
+5. **Etymology:** Root + Suffix (MANDATORY).
+
+**Begin Output:**
 """
 
 # ==========================================
@@ -388,17 +403,14 @@ with tab_anki:
     if ai_resp.strip():
         parsed_data = parse_anki_data(ai_resp)
         if parsed_data:
-            st.markdown("#### 👁️ 预览 (确认数据格式)")
-            # 预览表格列名重命名，方便用户确认
+            st.markdown("#### 👁️ 预览 (确认正面为短语)")
             df_view = pd.DataFrame(parsed_data)
             df_view.rename(columns={'front_phrase': '正面 (短语)', 'ipa': 'IPA', 'meaning': '释义', 'examples': '例句', 'etymology': '词源'}, inplace=True)
             st.dataframe(df_view, use_container_width=True, hide_index=True)
             
             st.success(f"✅ 解析成功: {len(parsed_data)} 条")
-            
-            # 生成按钮
             f_path = generate_anki_package(parsed_data, deck_name)
             with open(f_path, "rb") as f:
                 st.download_button(f"📥 下载 {deck_name}.apkg", f, file_name=f"{deck_name}.apkg", mime="application/octet-stream", type="primary")
         else:
-            st.warning("⚠️ 格式无法解析，请检查是否使用了 '|' 分隔符")
+            st.warning("⚠️ 格式无法解析")
