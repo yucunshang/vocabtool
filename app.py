@@ -17,6 +17,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# 初始化动态 Key (用于强制重置文件上传器)
+if 'uploader_id' not in st.session_state:
+    st.session_state['uploader_id'] = "1000"
+
 st.markdown("""
 <style>
     .stTextArea textarea { font-family: 'Consolas', monospace; font-size: 14px; }
@@ -25,12 +29,16 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stExpander { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
-    .guide-step { background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #0056b3; }
+    
+    /* 指南样式 */
+    .guide-step { background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #0056b3; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .guide-title { font-size: 18px; font-weight: bold; color: #0f172a; margin-bottom: 10px; display: block; }
+    .guide-tip { font-size: 14px; color: #64748b; background: #eef2ff; padding: 8px; border-radius: 4px; margin-top: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 资源加载
+# 1. 资源懒加载
 # ==========================================
 @st.cache_resource(show_spinner="正在加载 NLP 引擎...")
 def load_nlp_resources():
@@ -86,17 +94,27 @@ def get_beijing_time_str():
     return beijing_now.strftime('%m%d_%H%M')
 
 def clear_all_state():
+    """
+    V29 修复版清空逻辑：
+    使用动态 Key 轮换技术来重置文件上传器，避免赋值错误。
+    """
+    # 1. 清除分析数据
     keys_to_drop = ['gen_words', 'raw_count', 'process_time', 'raw_text_preview']
     for k in keys_to_drop:
         if k in st.session_state:
             del st.session_state[k]
     
-    if 'uploader_key' in st.session_state: st.session_state['uploader_key'] = str(random.random())
-    if 'paste_key' in st.session_state: st.session_state['paste_key'] = ""
-    if 'anki_input_text' in st.session_state: st.session_state['anki_input_text'] = ""
+    # 2. 重置文件上传器：通过修改 key 的 ID 来强制重新渲染组件
+    st.session_state['uploader_id'] = str(random.randint(100000, 999999))
+    
+    # 3. 重置文本框：文本框允许直接赋值为空字符串
+    if 'paste_key' in st.session_state:
+        st.session_state['paste_key'] = ""
+    if 'anki_input_text' in st.session_state:
+        st.session_state['anki_input_text'] = ""
 
 # ==========================================
-# 2. 核心逻辑 (V28: 清洗与高级筛选)
+# 2. 核心逻辑 (V28逻辑保持不变)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -133,32 +151,21 @@ def extract_text_from_file(uploaded_file):
     return text
 
 def is_valid_word(word):
-    """
-    垃圾词清洗过滤器
-    """
     if len(word) < 2: return False
-    if len(word) > 20: return False # 太长通常是乱码
-    # 检查是否有连续3个相同的字符 (如 aaa, eee)
+    if len(word) > 20: return False 
     if re.search(r'(.)\1{2,}', word): return False
-    # 检查是否包含元音 (排除 brrr, hmm 等非单词)
     if not re.search(r'[aeiouy]', word): return False
     return True
 
 def analyze_logic(text, current_lvl, target_lvl, include_unknown, mode="smart"):
-    """
-    mode="smart": 合并词形 (went->go)，去重，筛选
-    mode="direct": 保留原词 (went)，去重，筛选
-    """
     nltk, lemminflect = load_nlp_resources()
     def get_lemma_local(word):
         try: return lemminflect.getLemma(word, upos='VERB')[0]
         except: return word
 
-    # 1. 宽松分词
     raw_tokens = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", text)
     total_words = len(raw_tokens)
     
-    # 2. 预处理：转小写 -> 垃圾清洗 -> 集合去重
     tokens = [t.lower() for t in raw_tokens if is_valid_word(t.lower())]
     unique_tokens = sorted(list(set(tokens)))
     
@@ -166,26 +173,20 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown, mode="smart"):
     seen_lemmas = set()
     
     for w in unique_tokens:
-        # 为了查排名，无论什么模式，都需要先计算 lemma
         lemma_for_rank = get_lemma_local(w)
         rank = VOCAB_DICT.get(lemma_for_rank, 99999)
         
-        # 3. 筛选逻辑 (所有模式都生效)
         is_in_range = (rank >= current_lvl and rank <= target_lvl)
         is_unknown_included = (rank == 99999 and include_unknown)
         
         if is_in_range or is_unknown_included:
             if mode == "direct":
-                # 直通模式：直接添加原词 (w)，不进行 lemma 去重
-                # 但为了不让 'Apple' 和 'apple' 重复，unique_tokens 已经做了处理
                 target_words.append((w, rank))
             else:
-                # 智能模式：添加 lemma，并进行 lemma 去重
                 if lemma_for_rank not in seen_lemmas:
                     target_words.append((lemma_for_rank, rank))
                     seen_lemmas.add(lemma_for_rank)
     
-    # 排序：生僻词(99999)放最后，其他按频率
     target_words.sort(key=lambda x: x[1])
     return [x[0] for x in target_words], total_words
 
@@ -211,7 +212,6 @@ def parse_anki_data(raw_text):
             
             front_text = front_text.replace('**', '')
             
-            # 输出端去重
             if front_text.lower() in seen_phrases_lower: 
                 continue
             seen_phrases_lower.add(front_text.lower())
@@ -327,9 +327,6 @@ tab_guide, tab_extract, tab_anki = st.tabs(["📖 使用指南", "1️⃣ 单词
 with tab_guide:
     st.markdown("""
     ### 👋 欢迎使用 Vocab Flow Ultra
-    这是一个**从阅读材料中提取生词**，并利用 **AI** 自动生成 **Anki 卡片**的效率工具。
-    
-    ---
     
     <div class="guide-step">
     <span class="guide-title">Step 1: 提取生词 (Extract)</span>
@@ -392,7 +389,6 @@ with tab_extract:
         
         is_smart_mode = ("智能" in proc_mode)
         
-        # V28 修改：直通模式也显示筛选器
         c1, c2 = st.columns(2)
         curr = c1.number_input("忽略排名前 N 的词", 1, 20000, 100, step=100)
         targ = c2.number_input("忽略排名后 N 的词", 2000, 50000, 20000, step=500)
@@ -401,7 +397,7 @@ with tab_extract:
         if not is_smart_mode:
             st.info("ℹ️ **直通模式**：将保留单词原形（不还原词根），进行严格去重。**上述筛选器依然有效**（系统会计算原词的词根排名来进行筛选）。")
 
-        uploaded_file = st.file_uploader("📂 上传文档 (TXT/PDF/DOCX/EPUB)", key="uploader_key")
+        uploaded_file = st.file_uploader("📂 上传文档 (TXT/PDF/DOCX/EPUB)", key=st.session_state['uploader_id'])
         pasted_text = st.text_area("📄 ...或粘贴文本", height=100, key="paste_key")
         
         if st.button("🚀 开始分析", type="primary"):
