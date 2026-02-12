@@ -80,7 +80,7 @@ def clear_all_state():
     st.session_state.clear()
 
 # ==========================================
-# 2. 核心解析逻辑 (适配新格式)
+# 2. 核心解析逻辑
 # ==========================================
 def extract_text_from_file(uploaded_file):
     text = ""
@@ -142,7 +142,7 @@ def parse_anki_data(raw_text):
         if len(parts) >= 2:
             while len(parts) < 5: parts.append("")
             parsed_cards.append({
-                'front_phrase': parts[0], # 第一列是短语
+                'front_phrase': parts[0],
                 'ipa': parts[1],
                 'meaning': parts[2],
                 'examples': parts[3],
@@ -152,25 +152,33 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 # ==========================================
-# 3. Anki 生成逻辑 (正面=短语)
+# 3. Anki 生成逻辑 (样式微调)
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
+    # CSS 样式重构
     CSS = """
     .card { font-family: arial; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .nightMode .card { background-color: #2f2f31; color: #f5f5f5; }
     
-    /* 正面样式：短语 */
-    .phrase { font-size: 36px; font-weight: bold; color: #007AFF; margin-bottom: 20px; }
+    /* 正面：短语 (字体调小到 28px) */
+    .phrase { font-size: 28px; font-weight: bold; color: #007AFF; margin-bottom: 0px; }
     .nightMode .phrase { color: #5FA9FF; }
     
-    /* 背面样式 */
-    .ipa { color: #888; font-size: 18px; font-family: sans-serif; margin-bottom: 10px; }
+    /* 背面结构 */
+    .ipa { color: #888; font-size: 16px; font-family: sans-serif; margin-bottom: 15px; margin-top: 5px; }
+    
     .def-container { text-align: left; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 15px; }
-    .definition { font-weight: bold; color: #222; margin-bottom: 15px; font-size: 22px; }
+    
+    /* 英文释义 */
+    .definition { font-weight: bold; color: #222; margin-bottom: 15px; font-size: 20px; }
     .nightMode .definition { color: #ddd; }
-    .examples { background: #f4f4f4; padding: 15px; border-radius: 8px; color: #444; font-style: italic; font-size: 20px; line-height: 1.5; margin-bottom: 15px; }
+    
+    /* 例句 */
+    .examples { background: #f4f4f4; padding: 15px; border-radius: 8px; color: #444; font-style: italic; font-size: 18px; line-height: 1.5; margin-bottom: 15px; }
     .nightMode .examples { background: #383838; color: #ccc; }
-    .etymology { display: block; font-size: 17px; color: #555; border: 1px dashed #bbb; padding: 8px 12px; border-radius: 6px; background-color: #fffaf0; }
+    
+    /* 词源 */
+    .etymology { display: block; font-size: 16px; color: #666; border: 1px dashed #bbb; padding: 8px 12px; border-radius: 6px; background-color: #fffaf0; }
     .nightMode .etymology { background-color: #333; color: #aaa; border-color: #555; }
     """
     
@@ -179,7 +187,7 @@ def generate_anki_package(cards_data, deck_name):
         model_id, 
         f'VocabFlow Phrase Model {model_id}',
         fields=[
-            {'name': 'FrontPhrase'}, # 核心变化：正面是短语
+            {'name': 'FrontPhrase'}, 
             {'name': 'IPA'}, 
             {'name': 'Meaning'}, 
             {'name': 'Examples'}, 
@@ -190,7 +198,6 @@ def generate_anki_package(cards_data, deck_name):
             'qfmt': '<div class="phrase">{{FrontPhrase}}</div>', # 正面只显示短语
             'afmt': '''
             {{FrontSide}}
-            <hr>
             <div class="ipa">{{IPA}}</div>
             <div class="def-container">
                 <div class="definition">{{Meaning}}</div>
@@ -222,7 +229,7 @@ def generate_anki_package(cards_data, deck_name):
 def get_ai_prompt(words):
     w_list = ", ".join(words)
     return f"""
-Act as a Dictionary API. Convert these words into Anki cards.
+Act as a Dictionary API. Convert these words into Anki cards data.
 
 **Words:** {w_list}
 
@@ -230,19 +237,19 @@ Act as a Dictionary API. Convert these words into Anki cards.
 `Natural Phrase | IPA | Definition | Examples | Etymology`
 
 **CRITICAL RULES:**
-1. **COLUMN 1 (Front):** MUST be a **natural short phrase or collocation** containing the word. DO NOT output just the single word. 
-   - *Bad:* benevolent
-   - *Good:* a benevolent leader
-   - *Bad:* subtle
-   - *Good:* a subtle difference
-2. **COLUMN 2-5 (Back):** - **IPA:** US pronunciation.
-   - **Definition:** English definition (<12 words).
-   - **Examples:** 2 sentences separated by `<br>`.
-   - **Etymology:** Root + Suffix analysis.
+1. **COLUMN 1 (Front):** MUST be a **natural short phrase or collocation** (2-5 words).
+   - **NO Full Sentences.** NO periods at the end.
+   - *Bad:* He made a subtle change. (Too long, is a sentence)
+   - *Good:* a subtle change
+   - *Good:* abandon the project
+2. **COLUMN 2 (IPA):** US pronunciation.
+3. **COLUMN 3 (Definition):** Concise English definition.
+4. **COLUMN 4 (Examples):** 2 example sentences containing the word, separated by `<br>`.
+5. **COLUMN 5 (Etymology):** Root + Suffix analysis. REQUIRED.
 
 **Example Output:**
 a benevolent leader | /bəˈnevələnt/ | kind and helpful | He is **benevolent**.<br>A **benevolent** fund. | bene(good) + vol(wish)
-a subtle difference | /'sʌt(ə)l/ | not obvious | The nuance is **subtle**.<br>A **subtle** hint. | sub(under) + tex(web)
+subtle difference | /'sʌt(ə)l/ | not obvious | The nuance is **subtle**.<br>A **subtle** hint. | sub(under) + tex(web)
 """
 
 # ==========================================
@@ -329,8 +336,8 @@ with tab_anki:
     if ai_resp.strip():
         parsed_data = parse_anki_data(ai_resp)
         if parsed_data:
-            st.markdown("#### 👁️ 预览 (检查正面是否为短语)")
-            # 预览表格列名重命名，方便用户确认
+            st.markdown("#### 👁️ 预览 (正面=短语/搭配)")
+            # 预览表格列名重命名
             df_view = pd.DataFrame(parsed_data)
             df_view.rename(columns={'front_phrase': '正面 (短语)', 'ipa': 'IPA', 'meaning': '释义', 'examples': '例句', 'etymology': '词源'}, inplace=True)
             st.dataframe(df_view, use_container_width=True, hide_index=True)
