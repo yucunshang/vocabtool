@@ -24,6 +24,7 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stExpander { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
+    .guide-step { background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 5px solid #0056b3; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -128,15 +129,11 @@ def analyze_logic(text, current_lvl, target_lvl):
     unique_tokens = set(raw_tokens)
     target_words = []
     for w in unique_tokens:
-        # 这里保留 <3 过滤，因为 'a', 'I' 等单字母通常不需要背，但你可以根据需求移除
         if len(w) < 2: continue 
-        
         lemma = get_lemma_local(w)
         rank = VOCAB_DICT.get(lemma, 99999)
-        # 核心逻辑：只要rank大于 current_lvl 且 小于 target_lvl
         if rank >= current_lvl and rank <= target_lvl:
             target_words.append((lemma, rank))
-            
     target_words.sort(key=lambda x: x[1])
     return [x[0] for x in target_words], total_words
 
@@ -156,7 +153,7 @@ def parse_anki_data(raw_text):
             etymology = data.get("r", "").strip()
             
             if not etymology or etymology.lower() == "none" or etymology == "":
-                etymology = "" 
+                etymology = ""
 
             if not front_text or not meaning: continue
             front_text = front_text.replace('**', '')
@@ -222,13 +219,11 @@ def generate_anki_package(cards_data, deck_name):
 def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     w_list = ", ".join(words)
     
-    # 1. 正面设定
     if front_mode == "单词 (Word)":
         w_instr = "Key `w`: The word itself (lowercase)."
     else:
         w_instr = "Key `w`: A short practical collocation/phrase (2-5 words)."
 
-    # 2. 释义设定
     if def_mode == "中文":
         m_instr = "Key `m`: Concise Chinese definition (max 10 chars)."
     elif def_mode == "中英双语":
@@ -236,10 +231,8 @@ def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     else:
         m_instr = "Key `m`: English definition (concise)."
 
-    # 3. 例句设定
     e_instr = f"Key `e`: {ex_count} example sentence(s). Use `<br>` to separate if multiple."
 
-    # 4. 词源设定
     if need_ety:
         r_instr = "Key `r`: Simplified Chinese Etymology (Root/Prefix)."
     else:
@@ -268,19 +261,60 @@ Words: {w_list}
 # ==========================================
 # 5. UI 主程序
 # ==========================================
-st.title("⚡️ Vocab Flow Ultra (V19)")
+st.title("⚡️ Vocab Flow Ultra")
 
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv`")
 
-tab_extract, tab_anki = st.tabs(["1️⃣ 单词提取 & 生成", "2️⃣ 制作 Anki 牌组"])
+# --- 新增：文档标签页 ---
+tab_guide, tab_extract, tab_anki = st.tabs(["📖 使用指南", "1️⃣ 单词提取", "2️⃣ Anki 制作"])
+
+with tab_guide:
+    st.markdown("""
+    ### 👋 欢迎使用 Vocab Flow Ultra
+    这是一个**从阅读材料中提取生词**，并利用 **AI** 自动生成 **Anki 卡片**的效率工具。
+    
+    ---
+    
+    #### 🚀 快速上手流程
+    
+    <div class="guide-step">
+    <strong>Step 1: 提取生词 (Extract)</strong><br>
+    在 <code>1️⃣ 单词提取</code> 标签页：<br>
+    1. <strong>上传文件</strong>：支持 PDF, TXT, EPUB, DOCX，或者直接粘贴文本。<br>
+    2. <strong>设置过滤</strong>：
+       - <em>忽略排名前 N</em>：比如设为 2000，就会过滤掉 `the, is, you` 等最简单的词。<br>
+       - <em>忽略排名后 N</em>：比如设为 15000，就会过滤掉极其生僻的词。<br>
+    3. 点击 <strong>🚀 开始分析</strong>，系统会自动提取并还原词形（如 `went` -> `go`）。
+    </div>
+
+    <div class="guide-step">
+    <strong>Step 2: 生成 Prompt (AI Generation)</strong><br>
+    分析完成后：<br>
+    1. 展开 <strong>⚙️ 自定义 Prompt 设置</strong>：选择你要背单词还是短语，释义要中文还是英文。<br>
+    2. 设置 <strong>AI 分组大小</strong>（建议 50-100）。<br>
+    3. 系统会生成多组 Prompt。<br>
+    4. <strong>复制 Prompt</strong>：
+       - 📱 <strong>手机/鸿蒙</strong>：使用下方的“文本框”长按全选复制。<br>
+       - 💻 <strong>电脑</strong>：点击代码块右上角的 Copy 按钮。<br>
+    5. 发送给 ChatGPT / Claude / Gemini 等 AI 模型。
+    </div>
+
+    <div class="guide-step">
+    <strong>Step 3: 制作 Anki 牌组 (Create Deck)</strong><br>
+    在 <code>2️⃣ Anki 制作</code> 标签页：<br>
+    1. 将 AI 回复的 JSON 内容<strong>粘贴</strong>到输入框中。<br>
+       - 💡 <em>支持多次追加：如果有 3 组单词，你可以把 AI 的 3 次回复依次粘贴在同一个框里。</em><br>
+    2. 点击 <strong>📥 下载 .apkg</strong>。<br>
+    3. 双击文件导入 Anki 即可背诵！
+    </div>
+    """, unsafe_allow_html=True)
 
 with tab_extract:
     mode_context, mode_rank = st.tabs(["📄 语境分析", "🔢 词频列表"])
     
     with mode_context:
         c1, c2 = st.columns(2)
-        # --- 核心修改：最小值改为 1 ---
         curr = c1.number_input("忽略排名前 N 的词", 1, 20000, 1000, step=100)
         targ = c2.number_input("忽略排名后 N 的词", 2000, 50000, 15000, step=500)
         uploaded_file = st.file_uploader("📂 上传文档 (TXT/PDF/DOCX/EPUB)")
@@ -306,7 +340,6 @@ with tab_extract:
         gen_type = st.radio("模式", ["🔢 顺序", "🔀 随机"], horizontal=True)
         if "顺序" in gen_type:
             c_a, c_b = st.columns(2)
-            # --- 核心修改：最小值改为 1 ---
             s_rank = c_a.number_input("起始排名", 1, 20000, 1000, step=100)
             count = c_b.number_input("数量", 10, 500, 50, step=10)
             if st.button("🚀 生成"):
@@ -318,7 +351,6 @@ with tab_extract:
                     st.session_state['total_count'] = count
         else:
             c_min, c_max, c_cnt = st.columns([1,1,1])
-            # --- 核心修改：最小值改为 1 ---
             min_r = c_min.number_input("Min Rank", 1, 20000, 1, step=100)
             max_r = c_max.number_input("Max Rank", 1, 25000, 5000, step=100)
             r_count = c_cnt.number_input("Count", 10, 200, 50, step=10)
