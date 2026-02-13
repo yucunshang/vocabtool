@@ -329,31 +329,54 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# Prompt 逻辑 - 优化版 (低 Token & 自然搭配)
+# Prompt 逻辑 - 使用您指定的高级模板
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
     
-    # 修改点：在 Content Rules 中明确要求 "Natural phrases or collocations"
-    return f"""Task: Anki Cards (Pipe Separated)
-Input: {w_list}
+    # 替换为您的定制化 Prompt
+    return f"""
+# Role
+You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
 
-Format Rules:
-1. Output strictly inside a ```text code block.
-2. One line per word.
-3. Separator: |||
-4. Structure: Phrase ||| Definition (Eng) ||| Example ||| Roots/Etymology (Simplified Chinese)
+# Input Data
+{w_list}
 
-Content Rules:
-- Phrase: Must be Natural phrases or collocations (e.g. "heavy rain", not just "rain").
-- Def: Concise English explanation of the phrase.
-- Roots: Analyze roots (e.g. re- + turn). No definitions here.
+# Output Format Guidelines
+1. **Output Container**: Strictly inside a single ```text code block.
+2. **Layout**: One entry per line.
+3. **Separator**: Use `|||` as the delimiter.
+4. **Target Structure**:
+   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
 
-Example:
-altruism ||| selfless concern for others ||| Motivated by altruism. ||| alter (其他) + -ism (主义)
+# Field Constraints (Strict)
+1. **Field 1: Phrase (CRITICAL)**
+   - DO NOT output the single target word.
+   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
+   - Example: If input is "rain", output "heavy rain" or "torrential rain".
+   
+2. **Field 2: Definition (English)**
+   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
 
+3. **Field 3: Example**
+   - A short, authentic sentence containing the phrase.
+
+4. **Field 4: Roots/Etymology (Simplified Chinese)**
+   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
+   - If no classical roots exist, explain the origin briefly in Chinese.
+   - Use Simplified Chinese for meanings.
+
+# Valid Example (Follow this logic strictly)
+Input: altruism
 Output:
-```text
+motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
+
+Input: hectic
+Output:
+a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
+
+# Task
+Process the provided input list strictly adhering to the format above.
 """
 
 # ==========================================
@@ -376,9 +399,9 @@ with tab_guide:
     3. **制作**：将 AI 返回的代码块 (```text ...) 粘贴回来，生成 Anki 包。
     
     **PRO 优化**：
-    * **低 Token 消耗**：Prompt 经过极致精简，支持一次处理更多单词。
-    * **自然语境**：自动生成自然短语搭配 (Collocations) 而非孤立单词。
-    * **代码块输出**：AI 结果自带格式，复制更精准。
+    * **专家级 Prompt**：专注于**自然搭配 (Collocations)** 和 **词源拆解**。
+    * **格式标准化**：严格的结构化输出，确保 100% 解析成功率。
+    * **代码块支持**：AI 输出结果直接复制，无需手动清洗。
     """)
 
 with tab_extract:
@@ -478,7 +501,7 @@ with tab_extract:
 
         st.divider()
         st.subheader("🤖 AI 提示词 (一键复制)")
-        st.caption("提示：Prompt已极致压缩。建议分组大小设为 100，可有效防止AI输出中断。")
+        st.caption("提示：使用最新专家级 Prompt，专注于生成自然搭配和精准词源。")
         
         batch_size = st.number_input("AI 分组大小 (Batch Size)", 50, 500, 100, step=50)
         batches = [words_only[i:i + batch_size] for i in range(0, len(words_only), batch_size)]
@@ -513,7 +536,7 @@ with tab_anki:
         "输入框", 
         height=300, 
         key="anki_input_text",
-        placeholder='```text\naltruism ||| selfless concern... ||| ...\n```'
+        placeholder='```text\nmotivated by altruism ||| acting out of... ||| ...\n```'
     )
 
     c_btn1, c_btn2 = st.columns([1, 4])
