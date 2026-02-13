@@ -7,6 +7,8 @@ import json
 import time
 import zlib
 import sqlite3
+import asyncio
+import edge_tts
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -45,21 +47,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 资源懒加载
+# 1. 资源懒加载 (适配云端路径)
 # ==========================================
 @st.cache_resource(show_spinner="正在加载 NLP 引擎...")
 def load_nlp_resources():
     import nltk
     import lemminflect
     try:
+        # 在云端环境中，使用当前目录下的 nltk_data 文件夹，避免权限问题
         root_dir = os.path.dirname(os.path.abspath(__file__))
         nltk_data_dir = os.path.join(root_dir, 'nltk_data')
         os.makedirs(nltk_data_dir, exist_ok=True)
         nltk.data.path.append(nltk_data_dir)
+        
+        # 依次检查并下载所需资源
         for pkg in ['averaged_perceptron_tagger', 'punkt', 'punkt_tab']:
-            try: nltk.data.find(f'tokenizers/{pkg}')
-            except LookupError: nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
-    except: pass
+            try: 
+                nltk.data.find(f'tokenizers/{pkg}')
+            except LookupError: 
+                nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
+    except Exception as e:
+        st.error(f"NLP 资源加载失败: {e}")
     return nltk, lemminflect
 
 def get_file_parsers():
@@ -77,6 +85,7 @@ def get_genanki():
 
 @st.cache_data
 def load_vocab_data():
+    """加载 COCA 词频表"""
     possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next((f for f in possible_files if os.path.exists(f)), None)
     if file_path:
@@ -279,10 +288,32 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 # ==========================================
+# TTS 语音生成逻辑 (云端适配版)
+# ==========================================
+async def generate_audio(text, output_file):
+    """使用 Edge TTS 生成语音文件"""
+    voice = "en-US-JennyNeural" 
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(output_file)
+
+def run_async_task(task):
+    """
+    在 Streamlit/云端环境中运行异步任务。
+    每次创建新的 loop 以避免 Streamlit 线程冲突。
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(task)
+    finally:
+        loop.close()
+
+# ==========================================
 # Anki 生成逻辑
 # ==========================================
-def generate_anki_package(cards_data, deck_name):
+def generate_anki_package(cards_data, deck_name, enable_tts=False):
     genanki, tempfile = get_genanki()
+    media_files = [] 
     
     CSS = """
     .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
@@ -305,16 +336,21 @@ def generate_anki_package(cards_data, deck_name):
         'VocabFlow Phrase Model',
         fields=[
             {'name': 'Phrase'}, {'name': 'Meaning'},
-            {'name': 'Example'}, {'name': 'Etymology'}
+            {'name': 'Example'}, {'name': 'Etymology'},
+            {'name': 'Audio_Phrase'}, {'name': 'Audio_Example'}
         ],
         templates=[{
             'name': 'Phrase Card',
-            'qfmt': '<div class="phrase">{{Phrase}}</div>', 
+            'qfmt': '''
+                <div class="phrase">{{Phrase}}</div>
+                <div>{{Audio_Phrase}}</div>
+            ''', 
             'afmt': '''
             {{FrontSide}}
             <hr>
             <div class="meaning">{{Meaning}}</div>
             <div class="example">🗣️ {{Example}}</div>
+            <div>{{Audio_Example}}</div>
             {{#Etymology}}
             <div class="etymology">🌱 词源: {{Etymology}}</div>
             {{/Etymology}}
@@ -324,17 +360,70 @@ def generate_anki_package(cards_data, deck_name):
     
     deck = genanki.Deck(DECK_ID, deck_name)
     
-    for c in cards_data:
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    total_cards = len(cards_data)
+
+    # 临时目录 (兼容 Cloud)
+    tmp_dir = tempfile.gettempdir()
+
+    for idx, c in enumerate(cards_data):
+        phrase = str(c.get('w', ''))
+        meaning = str(c.get('m', ''))
+        example = str(c.get('e', ''))
+        etym = str(c.get('r', ''))
+        
+        audio_phrase_field = ""
+        audio_example_field = ""
+
+        if enable_tts and phrase:
+            try:
+                safe_phrase = re.sub(r'[^a-zA-Z0-9]', '_', phrase)[:20]
+                unique_id = int(time.time() * 1000) + random.randint(0, 9999)
+                
+                f_phrase_name = f"tts_{safe_phrase}_{unique_id}_p.mp3"
+                f_example_name = f"tts_{safe_phrase}_{unique_id}_e.mp3"
+                
+                path_phrase = os.path.join(tmp_dir, f_phrase_name)
+                path_example = os.path.join(tmp_dir, f_example_name)
+                
+                # 同步调用异步任务
+                run_async_task(generate_audio(phrase, path_phrase))
+                if os.path.exists(path_phrase):
+                    media_files.append(path_phrase)
+                    audio_phrase_field = f"[sound:{f_phrase_name}]"
+                
+                if example and len(example) > 3:
+                    run_async_task(generate_audio(example, path_example))
+                    if os.path.exists(path_example):
+                        media_files.append(path_example)
+                        audio_example_field = f"[sound:{f_example_name}]"
+                
+                status_text.text(f"正在生成语音 ({idx+1}/{total_cards}): {phrase}")
+            except Exception as e:
+                print(f"TTS Error for {phrase}: {e}")
+
         deck.add_note(genanki.Note(
             model=model, 
-            fields=[
-                str(c.get('w', '')), str(c.get('m', '')), 
-                str(c.get('e', '')), str(c.get('r', ''))
-            ]
+            fields=[phrase, meaning, example, etym, audio_phrase_field, audio_example_field]
         ))
         
+        progress_bar.progress((idx + 1) / total_cards)
+
+    status_text.empty()
+    progress_bar.empty()
+    
+    package = genanki.Package(deck)
+    package.media_files = media_files
+    
     with tempfile.NamedTemporaryFile(delete=False, suffix='.apkg') as tmp:
-        genanki.Package(deck).write_to_file(tmp.name)
+        package.write_to_file(tmp.name)
+        
+        # 严格清理临时音频文件
+        for f in media_files:
+            try: os.remove(f)
+            except: pass
+            
         return tmp.name
 
 # ==========================================
@@ -576,6 +665,9 @@ with tab_anki:
         key="anki_input_text",
         placeholder='```text\nmotivated by altruism ||| acting out of... ||| ...\n```'
     )
+    
+    # === 修改：默认 value=False ===
+    enable_audio = st.checkbox("🔊 启用 AI 语音合成 (推荐开启，会增加生成时间)", value=False)
 
     c_btn1, c_btn2 = st.columns([1, 4])
     with c_btn1:
@@ -602,11 +694,11 @@ with tab_anki:
             
             with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
                 df_view = pd.DataFrame(cards)
-                df_view.columns = ["正面(短语)", "英文释义", "英文例句", "中文词源"]
+                df_view.columns = ["正面(短语)", "英文释义", "英文例句", "中文词源", "音频(正)", "音频(反)"]
                 st.dataframe(df_view, use_container_width=True, hide_index=True)
 
             try:
-                f_path = generate_anki_package(cards, deck_name)
+                f_path = generate_anki_package(cards, deck_name, enable_tts=enable_audio)
                 with open(f_path, "rb") as f:
                     file_data = f.read()
                     
