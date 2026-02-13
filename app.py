@@ -12,6 +12,12 @@ import edge_tts
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+# 尝试导入 OpenAI，防止未安装报错
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
 # ==========================================
 # 0. 页面配置
 # ==========================================
@@ -24,6 +30,10 @@ st.set_page_config(
 
 if 'uploader_id' not in st.session_state:
     st.session_state['uploader_id'] = "1000"
+
+# 初始化跨 Tab 共享的数据
+if 'anki_input_text' not in st.session_state:
+    st.session_state['anki_input_text'] = ""
 
 st.markdown("""
 <style>
@@ -47,25 +57,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 资源懒加载 (适配云端路径)
+# 1. 资源懒加载
 # ==========================================
 @st.cache_resource(show_spinner="正在加载 NLP 引擎...")
 def load_nlp_resources():
     import nltk
     import lemminflect
     try:
-        # 在云端环境中，使用当前目录下的 nltk_data 文件夹，避免权限问题
         root_dir = os.path.dirname(os.path.abspath(__file__))
         nltk_data_dir = os.path.join(root_dir, 'nltk_data')
         os.makedirs(nltk_data_dir, exist_ok=True)
         nltk.data.path.append(nltk_data_dir)
         
-        # 依次检查并下载所需资源
         for pkg in ['averaged_perceptron_tagger', 'punkt', 'punkt_tab']:
-            try: 
-                nltk.data.find(f'tokenizers/{pkg}')
-            except LookupError: 
-                nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
+            try: nltk.data.find(f'tokenizers/{pkg}')
+            except LookupError: nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
     except Exception as e:
         st.error(f"NLP 资源加载失败: {e}")
     return nltk, lemminflect
@@ -85,7 +91,6 @@ def get_genanki():
 
 @st.cache_data
 def load_vocab_data():
-    """加载 COCA 词频表"""
     possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next((f for f in possible_files if os.path.exists(f)), None)
     if file_path:
@@ -158,7 +163,6 @@ def extract_text_from_file(uploaded_file):
             with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp_db:
                 tmp_db.write(uploaded_file.getvalue())
                 tmp_db_path = tmp_db.name
-            
             try:
                 conn = sqlite3.connect(tmp_db_path)
                 cursor = conn.cursor()
@@ -248,12 +252,61 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# 数据解析逻辑
+# 3. AI 调用逻辑 (新增)
+# ==========================================
+def call_ai_generation(words_list):
+    """调用内置 AI 生成 Prompt 结果"""
+    if not OpenAI:
+        st.error("❌ 未安装 OpenAI 库，无法使用内置 AI 功能。请在 requirements.txt 中添加 `openai`。")
+        return None
+        
+    api_key = st.secrets.get("OPENAI_API_KEY")
+    if not api_key:
+        st.error("❌ 未找到 OPENAI_API_KEY。请在 .streamlit/secrets.toml 中配置。")
+        return None
+        
+    base_url = st.secrets.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    model_name = st.secrets.get("OPENAI_MODEL", "gpt-3.5-turbo")
+    
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    
+    # 构建用户指定的 Prompt
+    words_str = "\n".join(words_list)
+    system_prompt = "You are a helpful assistant."
+    user_prompt = f"""
+Task: Convert words to Collocations for Anki.
+Format: Phrase ||| Definition ||| Sentence
+Rule: NEVER output single words. Use natural chunks.
+
+Example:
+Input: hectic
+Output: a hectic schedule ||| full of frantic activity ||| She has a hectic schedule today.
+
+Input:
+{words_str}
+"""
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"AI 调用失败: {e}")
+        return None
+
+# ==========================================
+# 4. 数据解析与 TTS (更新：支持男/女声)
 # ==========================================
 def parse_anki_data(raw_text):
     parsed_cards = []
     text = raw_text.strip()
     
+    # 清理 markdown 代码块
     code_block = re.search(r'```(?:text|csv)?\s*(.*?)\s*```', text, re.DOTALL)
     if code_block:
         text = code_block.group(1)
@@ -275,6 +328,7 @@ def parse_anki_data(raw_text):
         w = parts[0].strip()
         m = parts[1].strip()
         e = parts[2].strip() if len(parts) > 2 else ""
+        # 兼容旧 prompt 可能存在的第4个字段，虽然新 prompt 只要3个
         r = parts[3].strip() if len(parts) > 3 else ""
 
         if w.lower() in seen_phrases: 
@@ -287,20 +341,14 @@ def parse_anki_data(raw_text):
 
     return parsed_cards
 
-# ==========================================
-# TTS 语音生成逻辑 (云端适配版)
-# ==========================================
-async def generate_audio(text, output_file):
-    """使用 Edge TTS 生成语音文件"""
-    voice = "en-US-JennyNeural" 
+async def generate_audio(text, output_file, voice_name):
+    """使用 Edge TTS 生成语音文件，支持选定声音"""
+    # 默认使用女声，如果传入特定声音则使用该声音
+    voice = voice_name if voice_name else "en-US-JennyNeural"
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(output_file)
 
 def run_async_task(task):
-    """
-    在 Streamlit/云端环境中运行异步任务。
-    每次创建新的 loop 以避免 Streamlit 线程冲突。
-    """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -308,10 +356,7 @@ def run_async_task(task):
     finally:
         loop.close()
 
-# ==========================================
-# Anki 生成逻辑
-# ==========================================
-def generate_anki_package(cards_data, deck_name, enable_tts=False):
+def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en-US-JennyNeural"):
     genanki, tempfile = get_genanki()
     media_files = [] 
     
@@ -363,8 +408,6 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False):
     progress_bar = st.progress(0)
     status_text = st.empty()
     total_cards = len(cards_data)
-
-    # 临时目录 (兼容 Cloud)
     tmp_dir = tempfile.gettempdir()
 
     for idx, c in enumerate(cards_data):
@@ -387,14 +430,14 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False):
                 path_phrase = os.path.join(tmp_dir, f_phrase_name)
                 path_example = os.path.join(tmp_dir, f_example_name)
                 
-                # 同步调用异步任务
-                run_async_task(generate_audio(phrase, path_phrase))
+                # 传入选择的 tts_voice
+                run_async_task(generate_audio(phrase, path_phrase, tts_voice))
                 if os.path.exists(path_phrase):
                     media_files.append(path_phrase)
                     audio_phrase_field = f"[sound:{f_phrase_name}]"
                 
                 if example and len(example) > 3:
-                    run_async_task(generate_audio(example, path_example))
+                    run_async_task(generate_audio(example, path_example, tts_voice))
                     if os.path.exists(path_example):
                         media_files.append(path_example)
                         audio_example_field = f"[sound:{f_example_name}]"
@@ -418,63 +461,10 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False):
     
     with tempfile.NamedTemporaryFile(delete=False, suffix='.apkg') as tmp:
         package.write_to_file(tmp.name)
-        
-        # 严格清理临时音频文件
         for f in media_files:
             try: os.remove(f)
             except: pass
-            
         return tmp.name
-
-# ==========================================
-# Prompt 逻辑
-# ==========================================
-def get_ai_prompt(words):
-    w_list = ", ".join(words)
-    return f"""
-# Role
-You are an expert English Lexicographer and Anki Card Designer.
- Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
-Make sure to process everything in one go, without missing anything.
-# Input Data
-{w_list}
-
-# Output Format Guidelines
-1. **Output Container**: Strictly inside a single ```text code block.
-2. **Layout**: One entry per line.
-3. **Separator**: Use `|||` as the delimiter.
-4. **Target Structure**:
-   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
-
-# Field Constraints (Strict)
-1. **Field 1: Phrase (CRITICAL)**
-   - DO NOT output the single target word.
-   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
-   - Example: If input is "rain", output "heavy rain" or "torrential rain".
-   
-2. **Field 2: Definition (English)**
-   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
-
-3. **Field 3: Example**
-   - A short, authentic sentence containing the phrase.
-
-4. **Field 4: Roots/Etymology (Simplified Chinese)**
-   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
-   - If no classical roots exist, explain the origin briefly in Chinese.
-   - Use Simplified Chinese for meanings.
-
-# Valid Example (Follow this logic strictly)
-Input: altruism
-Output:
-motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
-
-Input: hectic
-Output:
-a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
-
-# Task
-Process the provided input list strictly adhering to the format above.
-"""
 
 # ==========================================
 # 5. UI 主程序
@@ -484,22 +474,17 @@ st.title("⚡️ Vocab Flow Ultra")
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv` 文件，请检查目录。")
 
-# --- 使用指南 (折叠栏) ---
 with st.expander("📖 使用指南 & 支持格式"):
     st.markdown("""
     **🚀 极速工作流**
     1. **提取**：在“单词提取”页上传文件或粘贴文本。
-    2. **生成**：复制生成的 AI 提示词发送给 ChatGPT/Claude。
-    3. **制作**：将 AI 返回的代码块粘贴回“卡片制作”页，下载 `.apkg`。
-    
-    **📂 支持格式**
-    * **Kindle**: `vocab.db` (若删除文件请务必重启Kindle)
-    * **电子书**: `.epub`
-    * **文档**: `.pdf`, `.docx`, `.txt`
+    2. **生成**：点击“使用内置 AI 生成”或手动复制 Prompt。
+    3. **制作**：生成的卡片内容会自动填入“卡片制作”页，下载 `.apkg`。
     """)
 
 tab_extract, tab_anki = st.tabs(["1️⃣ 单词提取", "2️⃣ 卡片制作"])
 
+# ----------------- Tab 1: 提取与 AI 生成 -----------------
 with tab_extract:
     mode_context, mode_direct, mode_rank = st.tabs(["📄 语境分析", "📝 直接输入", "🔢 词频列表"])
     
@@ -509,58 +494,47 @@ with tab_extract:
         curr = c1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100)
         targ = c2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
         
-        # 合并上传与粘贴
         st.markdown("#### 📥 导入内容")
-        uploaded_file = st.file_uploader("直接上传文件 (支持 .db, .pdf, .epub, .txt)", key=st.session_state['uploader_id'], label_visibility="collapsed")
+        uploaded_file = st.file_uploader("直接上传文件", key=st.session_state['uploader_id'], label_visibility="collapsed")
         pasted_text = st.text_area("或在此粘贴文本", height=100, key="paste_key", placeholder="支持直接粘贴文章内容...")
         
         if st.button("🚀 开始分析", type="primary"):
             with st.status("正在处理中...", expanded=True) as status:
                 start_time = time.time()
-                
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
                 if len(raw_text) > 2:
                     status.write("🔍 正在分析...")
-                    # include_unknown 强制为 False
                     final_data, raw_count, stats_info = analyze_logic(raw_text, curr, targ, False)
                     
                     st.session_state['gen_words_data'] = final_data
                     st.session_state['raw_count'] = raw_count
                     st.session_state['stats_info'] = stats_info
                     st.session_state['process_time'] = time.time() - start_time
-                    
                     status.update(label="✅ 分析完成", state="complete", expanded=False)
                 else:
                     status.update(label="⚠️ 内容为空或太短", state="error")
     
     # 模式2：直接输入
     with mode_direct:
-        st.info("💡 **直接模式**：直接为列表生成 Prompt，不过滤词频。")
         raw_input = st.text_area("✍️ 粘贴单词列表 (每行一个 或 逗号分隔)", height=200, placeholder="altruism\nhectic\nserendipity")
-        
         if st.button("🚀 生成列表", key="btn_direct", type="primary"):
             if raw_input.strip():
                 words = [w.strip() for w in re.split(r'[,\n\t]+', raw_input) if w.strip()]
-                seen = set()
                 unique_words = []
+                seen = set()
                 for w in words:
                     if w.lower() not in seen:
                         seen.add(w.lower())
                         unique_words.append(w)
                 
-                data_list = []
-                for w in unique_words:
-                    rank = VOCAB_DICT.get(w.lower(), 99999) 
-                    data_list.append((w, rank))
-                
+                data_list = [(w, VOCAB_DICT.get(w.lower(), 99999)) for w in unique_words]
                 st.session_state['gen_words_data'] = data_list
                 st.session_state['raw_count'] = len(unique_words)
                 st.session_state['stats_info'] = None 
-                
                 st.success(f"✅ 已加载 {len(unique_words)} 个单词")
             else:
-                st.warning("⚠️ 内容为空，请先粘贴单词。")
+                st.warning("⚠️ 内容为空。")
 
     # 模式3：词频列表
     with mode_rank:
@@ -574,8 +548,7 @@ with tab_extract:
                      r_col = next(c for c in FULL_DF.columns if 'rank' in c)
                      w_col = next(c for c in FULL_DF.columns if 'word' in c)
                      subset = FULL_DF[FULL_DF[r_col] >= s_rank].sort_values(r_col).head(count)
-                     data_list = list(zip(subset[w_col], subset[r_col]))
-                     st.session_state['gen_words_data'] = data_list
+                     st.session_state['gen_words_data'] = list(zip(subset[w_col], subset[r_col]))
                      st.session_state['raw_count'] = 0
                      st.session_state['stats_info'] = None
         else:
@@ -591,92 +564,113 @@ with tab_extract:
                      candidates = FULL_DF[mask]
                      if len(candidates) > 0:
                          subset = candidates.sample(n=min(r_count, len(candidates))).sort_values(r_col)
-                         data_list = list(zip(subset[w_col], subset[r_col]))
-                         st.session_state['gen_words_data'] = data_list
+                         st.session_state['gen_words_data'] = list(zip(subset[w_col], subset[r_col]))
                          st.session_state['raw_count'] = 0
                          st.session_state['stats_info'] = None
-    
-    # 清空按钮
+
     if st.button("🗑️ 清空重置", type="secondary", on_click=clear_all_state, key="btn_clear_extract"): pass
 
-    # ==========================================
-    # 结果展示区
-    # ==========================================
+    # --- 结果展示与 AI 生成区 ---
     if 'gen_words_data' in st.session_state and st.session_state['gen_words_data']:
         data_pairs = st.session_state['gen_words_data']
         words_only = [p[0] for p in data_pairs]
         
         st.divider()
         st.markdown("### 📊 分析报告")
-        
         k1, k2, k3, k4 = st.columns(4)
         raw_c = st.session_state.get('raw_count', 0)
         stats = st.session_state.get('stats_info', {})
-        
         k1.metric("总词数", f"{raw_c:,}")
-        if stats:
-            k2.metric("熟词覆盖率", f"{stats.get('coverage', 0):.1%}")
-            k3.metric("生词密度", f"{stats.get('target_density', 0):.1%}")
-        else:
-            k2.metric("熟词覆盖率", "--")
-            k3.metric("生词密度", "--")
-        k4.metric("提取生词数", f"{len(words_only)}")
+        k2.metric("熟词覆盖", f"{stats.get('coverage', 0):.1%}" if stats else "--")
+        k3.metric("生词密度", f"{stats.get('target_density', 0):.1%}" if stats else "--")
+        k4.metric("提取生词", f"{len(words_only)}")
         
-        show_rank = st.checkbox("显示单词排名 (Rank)", value=False)
-        display_text = ", ".join([f"{w}[{r}]" for w, r in data_pairs]) if show_rank else ", ".join(words_only)
-            
-        with st.expander("📋 **预览所有单词**", expanded=False):
-            st.markdown(f'<div class="scrollable-text">{display_text}</div>', unsafe_allow_html=True)
+        display_text = ", ".join(words_only)
+        with st.expander("📋 预览所有单词", expanded=False):
             st.code(display_text, language="text")
 
         st.divider()
-        st.subheader("🤖 AI 提示词 (一键复制)")
-        st.caption("提示：使用最新专家级 Prompt，专注于生成自然搭配和精准词源。")
+        st.subheader("🤖 AI 智能生成")
         
-        batch_size = st.number_input("AI 分组大小 (Batch Size)", 50, 500, 100, step=50)
-        batches = [words_only[i:i + batch_size] for i in range(0, len(words_only), batch_size)]
+        col_ai_btn, col_copy_hint = st.columns([1, 2])
         
-        for idx, batch in enumerate(batches):
-            with st.expander(f"📌 第 {idx+1} 组 (共 {len(batch)} 词)", expanded=(idx==0)):
-                prompt_text = get_ai_prompt(batch)
-                st.markdown("👇 **点击右上角图标复制**")
-                st.code(prompt_text, language="text")
+        # === 新增：内置 AI 按钮 ===
+        with col_ai_btn:
+            if st.button("✨ 使用内置 AI 生成", type="primary", use_container_width=True):
+                with st.spinner("🤖 AI 正在思考中... 请稍候"):
+                    # 限制一次发送的数量，防止 Token 溢出，这里简单截取前 50 个做演示
+                    # 实际使用可分批，但为了简洁，这里取前 50 个
+                    batch_words = words_only[:50] 
+                    if len(words_only) > 50:
+                        st.toast(f"⚠️ 单词较多，仅处理前 50 个用于演示", icon="ℹ️")
+                    
+                    ai_result = call_ai_generation(batch_words)
+                    
+                    if ai_result:
+                        st.session_state['anki_input_text'] = ai_result
+                        st.success("✅ 生成成功！内容已填入“卡片制作”页面。")
+                        st.balloons()
+                    else:
+                        st.error("生成失败，请检查 API 配置。")
 
+        with col_copy_hint:
+            st.info("👈 点击左侧按钮直接调用 AI，或复制下方 Prompt 手动生成。")
+
+        # 备用：手动复制 Prompt
+        with st.expander("📌 手动复制 Prompt (备用)"):
+            prompt_text = f"""Task: Convert words to Collocations for Anki.
+Format: Phrase ||| Definition ||| Sentence
+Rule: NEVER output single words. Use natural chunks.
+
+Example:
+Input: hectic
+Output: a hectic schedule ||| full of frantic activity ||| She has a hectic schedule today.
+
+Input:
+{", ".join(words_only)}
+"""
+            st.code(prompt_text, language="text")
+
+# ----------------- Tab 2: 卡片制作 -----------------
 with tab_anki:
     st.markdown("### 📦 制作 Anki 牌组")
     
-    if 'anki_cards_cache' not in st.session_state:
-        st.session_state['anki_cards_cache'] = None
-    
-    # === 新增：缓存生成好的文件数据，避免重复生成 ===
-    if 'anki_pkg_data' not in st.session_state:
-        st.session_state['anki_pkg_data'] = None
-    if 'anki_pkg_name' not in st.session_state:
-        st.session_state['anki_pkg_name'] = ""
+    # 状态管理
+    if 'anki_cards_cache' not in st.session_state: st.session_state['anki_cards_cache'] = None
+    if 'anki_pkg_data' not in st.session_state: st.session_state['anki_pkg_data'] = None
+    if 'anki_pkg_name' not in st.session_state: st.session_state['anki_pkg_name'] = ""
     
     def reset_anki_state():
         st.session_state['anki_cards_cache'] = None
-        st.session_state['anki_pkg_data'] = None # 同时清空文件缓存
+        st.session_state['anki_pkg_data'] = None
         st.session_state['anki_pkg_name'] = ""
-        if 'anki_input_text' in st.session_state:
-             st.session_state['anki_input_text'] = ""
+        st.session_state['anki_input_text'] = ""
 
     col_input, col_act = st.columns([3, 1])
     with col_input:
         bj_time_str = get_beijing_time_str()
         deck_name = st.text_input("🏷️ 牌组名称", f"Vocab_{bj_time_str}")
     
-    st.caption("👇 **在此粘贴 AI 返回的内容 (包含 ```text 代码块也没问题)：**")
-    
+    # 输入框绑定到 session_state，以便 AI 生成后自动填充
     ai_resp = st.text_area(
-        "输入框", 
+        "粘贴 AI 返回内容 (如果使用了内置 AI，此处会自动填充)", 
         height=300, 
         key="anki_input_text",
-        placeholder='```text\nmotivated by altruism ||| acting out of... ||| ...\n```'
+        placeholder='a hectic schedule ||| full of frantic activity ||| She has a hectic schedule today.'
     )
     
-    # === 修改：默认 value=True ===
-    enable_audio = st.checkbox("🔊 启用 AI 语音合成 (推荐开启，会增加生成时间)", value=True)
+    # === 新增：语音选择与开关 ===
+    col_voice_sw, col_voice_sel = st.columns(2)
+    with col_voice_sw:
+        enable_audio = st.checkbox("🔊 启用 AI 语音合成 (推荐)", value=True)
+    with col_voice_sel:
+        # 映射显示名称到 Edge-TTS 内部代号
+        voice_map = {
+            "👩 女声 (Jenny - 美式)": "en-US-JennyNeural",
+            "👨 男声 (Christopher - 美式)": "en-US-ChristopherNeural"
+        }
+        selected_voice_label = st.selectbox("🎙️ 选择发音人", list(voice_map.keys()))
+        selected_voice_code = voice_map[selected_voice_label]
 
     c_btn1, c_btn2 = st.columns([1, 4])
     with c_btn1:
@@ -684,25 +678,26 @@ with tab_anki:
     with c_btn2:
         st.button("🗑️ 清空重置", type="secondary", on_click=reset_anki_state, key="btn_clear_anki")
 
-    # === 逻辑修改：将生成逻辑与展示逻辑完全分离 ===
-    
-    # 1. 只有点击按钮时才执行解析和生成
+    # 生成逻辑
     if start_gen:
         if not ai_resp.strip():
-            st.warning("⚠️ 输入框为空，请先粘贴内容。")
+            st.warning("⚠️ 输入框为空，请先粘贴内容或使用 AI 生成。")
         else:
             with st.spinner("正在解析数据并生成语音..."):
                 parsed_data = parse_anki_data(ai_resp)
                 if parsed_data:
                     st.session_state['anki_cards_cache'] = parsed_data
-                    
-                    # 立即生成并缓存文件，不再等待下一次渲染
                     try:
-                        f_path = generate_anki_package(parsed_data, deck_name, enable_tts=enable_audio)
+                        # 传入选定的声音代码
+                        f_path = generate_anki_package(
+                            parsed_data, 
+                            deck_name, 
+                            enable_tts=enable_audio, 
+                            tts_voice=selected_voice_code
+                        )
                         with open(f_path, "rb") as f:
                             st.session_state['anki_pkg_data'] = f.read()
                         st.session_state['anki_pkg_name'] = f"{deck_name}.apkg"
-                        
                         st.success(f"✅ 成功生成 {len(parsed_data)} 张卡片！")
                     except Exception as e:
                         st.error(f"生成文件出错: {e}")
@@ -710,16 +705,17 @@ with tab_anki:
                     st.error("❌ 解析失败。未检测到有效内容，请检查分隔符是否为 '|||'")
                     st.session_state['anki_cards_cache'] = None
 
-    # 2. 只要有缓存数据，就进行展示和提供下载，不执行任何生成逻辑
+    # 下载与预览逻辑
     if st.session_state['anki_cards_cache']:
         cards = st.session_state['anki_cards_cache']
-        
         with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
             df_view = pd.DataFrame(cards)
-            df_view.columns = ["正面(短语)", "英文释义", "英文例句", "中文词源"]
+            # 动态调整列名显示，适应新 Prompt 只有3列的情况
+            cols = ["正面(短语)", "英文释义", "英文例句"]
+            if len(df_view.columns) > 3: cols.append("中文词源(可选)")
+            df_view.columns = cols[:len(df_view.columns)]
             st.dataframe(df_view, use_container_width=True, hide_index=True)
 
-        # 仅当文件数据存在时显示下载按钮
         if st.session_state.get('anki_pkg_data'):
             st.download_button(
                 label=f"📥 下载 {st.session_state['anki_pkg_name']}",
