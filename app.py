@@ -290,6 +290,7 @@ def generate_anki_package(cards_data, deck_name):
     MODEL_ID = 1842957301 
     DECK_ID = zlib.adler32(deck_name.encode('utf-8'))
 
+    # 修改点：去掉了 afmt 中的 🇬🇧 旗帜符号
     model = genanki.Model(
         MODEL_ID, 
         'VocabFlow Phrase Model',
@@ -303,7 +304,7 @@ def generate_anki_package(cards_data, deck_name):
             'afmt': '''
             {{FrontSide}}
             <hr>
-            <div class="meaning">🇬🇧 {{Meaning}}</div>
+            <div class="meaning">{{Meaning}}</div>
             <div class="example">🗣️ {{Example}}</div>
             {{#Etymology}}
             <div class="etymology">🌱 词源: {{Etymology}}</div>
@@ -328,12 +329,12 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# Prompt 逻辑 - 优化版 (低 Token & 代码块)
+# Prompt 逻辑 - 优化版 (低 Token & 自然搭配)
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
     
-    # 极致压缩 Token，并强制 ```text 格式
+    # 修改点：在 Content Rules 中明确要求 "Natural phrases or collocations"
     return f"""Task: Anki Cards (Pipe Separated)
 Input: {w_list}
 
@@ -344,8 +345,8 @@ Format Rules:
 4. Structure: Phrase ||| Definition (Eng) ||| Example ||| Roots/Etymology (Simplified Chinese)
 
 Content Rules:
-- Phrase: Short collocation (e.g. "heavy rain").
-- Def: Concise English.
+- Phrase: Must be Natural phrases or collocations (e.g. "heavy rain", not just "rain").
+- Def: Concise English explanation of the phrase.
 - Roots: Analyze roots (e.g. re- + turn). No definitions here.
 
 Example:
@@ -376,6 +377,7 @@ with tab_guide:
     
     **PRO 优化**：
     * **低 Token 消耗**：Prompt 经过极致精简，支持一次处理更多单词。
+    * **自然语境**：自动生成自然短语搭配 (Collocations) 而非孤立单词。
     * **代码块输出**：AI 结果自带格式，复制更精准。
     """)
 
@@ -478,7 +480,6 @@ with tab_extract:
         st.subheader("🤖 AI 提示词 (一键复制)")
         st.caption("提示：Prompt已极致压缩。建议分组大小设为 100，可有效防止AI输出中断。")
         
-        # 默认 Batch Size 调整为 100，适应 500 张卡片的需求
         batch_size = st.number_input("AI 分组大小 (Batch Size)", 50, 500, 100, step=50)
         batches = [words_only[i:i + batch_size] for i in range(0, len(words_only), batch_size)]
         
@@ -527,7 +528,6 @@ with tab_anki:
                 st.warning("⚠️ 输入框为空，请先粘贴内容。")
             else:
                 with st.spinner("正在解析数据..."):
-                    # 使用增强版解析函数
                     parsed_data = parse_anki_data(ai_resp)
                     if parsed_data:
                         st.session_state['anki_cards_cache'] = parsed_data
