@@ -38,15 +38,12 @@ if 'anki_pkg_data' not in st.session_state:
 if 'anki_pkg_name' not in st.session_state: 
     st.session_state['anki_pkg_name'] = ""
 
-# 全局发音人映射
+# 发音人映射 (保持经典的横向两个选项)
 VOICE_MAP = {
-    "🇺🇸 女声 (Jenny)": "en-US-JennyNeural",
-    "🇺🇸 男声 (Guy)": "en-US-GuyNeural",
-    "🇬🇧 女声 (Libby)": "en-GB-LibbyNeural",
-    "🇬🇧 男声 (Ryan)": "en-GB-RyanNeural"
+    "👩 女声 (Jenny)": "en-US-JennyNeural",
+    "👨 男声 (Christopher)": "en-US-ChristopherNeural"
 }
 
-# --- CSS 优化：Radio 按钮 2x2 网格布局 ---
 st.markdown("""
 <style>
     .stTextArea textarea { font-family: 'Consolas', monospace; font-size: 14px; }
@@ -58,25 +55,6 @@ st.markdown("""
     
     /* 进度条颜色 */
     .stProgress > div > div > div > div { background-color: #4CAF50; }
-
-    /* === 核心修改：Radio 按钮组强制 2x2 网格布局 === */
-    div[role="radiogroup"] {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-    }
-    div[role="radiogroup"] > label {
-        width: 45% !important;  /* 每个选项占 45% 宽度，从而一行两个 */
-        background-color: #f8f9fa;
-        border: 1px solid #eee;
-        padding: 10px;
-        border-radius: 8px;
-        margin-right: 0px !important;
-    }
-    div[role="radiogroup"] > label:hover {
-        background-color: #e9ecef;
-        border-color: #ccc;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -289,7 +267,7 @@ def process_ai_in_batches(words_list, progress_callback=None):
         return None
         
     base_url = st.secrets.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    model_name = st.secrets.get("OPENAI_MODEL", "gpt-3.5-turbo")
+    model_name = st.secrets.get("OPENAI_MODEL", "deepseek-chat") # 默认尝试使用 deepseek，也可由 secrets 控制
     
     client = OpenAI(api_key=api_key, base_url=base_url)
     
@@ -380,43 +358,37 @@ def parse_anki_data(raw_text):
 
     return parsed_cards
 
-# --- 优化：并发 TTS + 安全限流 ---
+# --- 保持优化：并发 TTS + 安全限流 ---
 async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
     """
     异步并发生成音频。
     tasks: list of dict {'text': str, 'path': str, 'voice': str}
-    concurrency: 降低到 3 以确保安全
+    concurrency: 保持 3 以确保安全
     """
     semaphore = asyncio.Semaphore(concurrency)
-    total = len(tasks)
-    completed = 0
+    total_files = len(tasks)
+    completed_files = 0
 
     async def worker(task):
-        nonlocal completed
+        nonlocal completed_files
         async with semaphore:
             try:
-                # 检查文件是否已存在
                 if not os.path.exists(task['path']):
                     comm = edge_tts.Communicate(task['text'], task['voice'])
                     await comm.save(task['path'])
-                    
-                    # === 安全策略：微小延迟，防止触发 429 封禁 ===
+                    # 安全延时
                     await asyncio.sleep(random.uniform(0.1, 0.4)) 
-                    
             except Exception as e:
                 print(f"TTS Error for {task['text']}: {e}")
             finally:
-                completed += 1
-                # 减少回调频率，避免 UI 疯狂闪烁
-                if progress_callback and (completed % 2 == 0 or completed == total):
-                    progress_callback(completed, total)
+                completed_files += 1
+                if progress_callback:
+                    progress_callback(completed_files, total_files)
 
-    # 创建所有任务
     jobs = [worker(t) for t in tasks]
     await asyncio.gather(*jobs)
 
 def run_async_batch(tasks, concurrency=3, progress_callback=None):
-    """运行异步 batch 的同步包装器"""
     if not tasks:
         return
     
@@ -480,6 +452,9 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
     notes_buffer = []
     audio_tasks = []
     
+    # 获取总单词数，用于进度显示计算
+    total_words_count = len(cards_data)
+    
     for idx, c in enumerate(cards_data):
         phrase = str(c.get('w', ''))
         meaning = str(c.get('m', ''))
@@ -512,15 +487,20 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
         )
         notes_buffer.append(note)
 
-    # 执行并发音频生成
     if audio_tasks:
-        def internal_progress(curr, total):
+        def internal_progress(curr_files, total_files):
             if progress_callback:
                 base_progress = 0.1 
-                # 文案修正：明确显示是“文件”数量，解释为什么是 600
-                progress_callback(base_progress + (curr/total)*0.8, f"🔊 正在生成语音文件 ({curr}/{total})...")
+                # === 核心修改：将文件完成度 映射回 单词完成度 ===
+                # 文件数通常是单词数的2倍左右。我们通过比例计算出当前大概处理到了第几个单词。
+                # 这样用户看到的总数就是单词数 (300)，而不是文件数 (600)。
+                current_word_idx = int((curr_files / total_files) * total_words_count)
+                
+                progress_callback(
+                    base_progress + (curr_files/total_files)*0.8, 
+                    f"🔊 正在生成语音 ({current_word_idx}/{total_words_count})..."
+                )
 
-        # === 核心修改：并发度降为 3 ===
         run_async_batch(audio_tasks, concurrency=3, progress_callback=internal_progress)
 
     for note in notes_buffer:
@@ -551,7 +531,7 @@ with st.expander("📖 使用指南 & 支持格式"):
     st.markdown("""
     **🚀 极速工作流**
     1. **提取**：在“单词提取”页上传文件或粘贴文本。
-    2. **生成**：点击“使用内置 AI 生成”，系统将自动完成文本生成、**并发语音合成**并打包下载。
+    2. **生成**：点击“使用 DeepSeek 生成”，系统将自动完成文本生成、**并发语音合成**并打包下载。
     """)
 
 tab_extract, tab_anki = st.tabs(["1️⃣ 单词提取", "2️⃣ 卡片制作"])
@@ -669,11 +649,12 @@ with tab_extract:
         
         st.write("🎙️ **语音设置**")
         
-        # === UI 修改：使用 Grid CSS 渲染 Radio ===
+        # === UI 修改：恢复横向两个选项，整洁美观 ===
         selected_voice_label = st.radio(
             "选择发音人", 
             options=list(VOICE_MAP.keys()), 
             index=0, 
+            horizontal=True, # 强制横向
             label_visibility="collapsed"
         )
         selected_voice_code = VOICE_MAP[selected_voice_label]
@@ -688,7 +669,8 @@ with tab_extract:
         
         # === 内置 AI 按钮 ===
         with col_ai_btn:
-            if st.button("✨ 使用内置 AI 生成", type="primary", use_container_width=True):
+            # === 修改点 1：按钮文案明确 DeepSeek ===
+            if st.button("✨ 使用 DeepSeek 生成", type="primary", use_container_width=True):
                 MAX_AUTO_LIMIT = 300 
                 target_words = words_only[:MAX_AUTO_LIMIT]
                 
@@ -703,9 +685,9 @@ with tab_extract:
                 def update_ai_progress(current, total):
                     percent = current / total
                     progress_bar.progress(percent)
-                    status_text.markdown(f"🤖 **AI 思考中...** ({current}/{total})")
+                    status_text.markdown(f"🤖 **DeepSeek 思考中...** ({current}/{total})")
 
-                with st.spinner("🤖 AI 正在生成内容..."):
+                with st.spinner("🤖 DeepSeek 正在生成内容..."):
                     ai_result = process_ai_in_batches(target_words, progress_callback=update_ai_progress)
                 
                 if ai_result:
@@ -798,11 +780,12 @@ with tab_anki:
         placeholder='hectic ||| 忙乱的 ||| She has a hectic schedule today.'
     )
     
-    # 同样应用 2x2 Grid 样式
+    # 恢复横向布局
     manual_voice_label = st.radio(
         "🎙️ 发音人", 
         options=list(VOICE_MAP.keys()), 
         index=0, 
+        horizontal=True,
         key="sel_voice_manual"
     )
     manual_voice_code = VOICE_MAP[manual_voice_label]
