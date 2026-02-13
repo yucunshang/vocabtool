@@ -383,7 +383,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt Logic (优化: 语义原子性)
+# 4. Prompt Logic (优化: 严格语言控制 + 核心释义)
 # ==========================================
 def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     w_list = ", ".join(words)
@@ -393,12 +393,13 @@ def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     else:
         w_instr = "Key `w`: A short practical collocation/phrase (2-5 words) that naturally contains the word."
 
+    # 严格语言控制逻辑 & 单一核心释义逻辑
     if def_mode == "中文":
-        m_instr = "Key `m`: Concise Chinese definition of the **word** (max 10 chars). NOT the definition of the phrase."
+        m_instr = "Key `m`: The **SINGLE** core **Chinese ONLY** definition (max 15 chars). **Do NOT list multiple meanings**. **NO English text**."
     elif def_mode == "中英双语":
-        m_instr = "Key `m`: English Definition + Chinese Definition of the **word**."
-    else:
-        m_instr = "Key `m`: English definition of the **word** (concise)."
+        m_instr = "Key `m`: English Core Def + Chinese Core Def. (Ensure they match the same single meaning)."
+    else: # 英文
+        m_instr = "Key `m`: The **SINGLE** core **English ONLY** definition (concise). **Do NOT list multiple meanings**. **NO Chinese text**."
 
     e_instr = f"Key `e`: {ex_count} example sentence(s). Use `<br>` to separate if multiple."
 
@@ -411,10 +412,10 @@ def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
 Task: Create Anki cards.Make sure to process everything at once, without missing anything.
 Words: {w_list}
 
-**CRITICAL: SEMANTIC ATOMICITY**
-1. **Consistency**: The Word/Phrase (`w`), Meaning (`m`), Example (`e`), and Etymology (`r`) MUST all correspond to the **same specific context/meaning**.
-2. **No Mixing**: Do NOT mix definitions. (e.g., If `w` is "bracket" in a tax context, `m` must be "grade/category", `e` must be about taxes. Do NOT give the definition of "punctuation mark").
-3. **Definition Focus**: Even if `w` is a phrase (e.g. "give up"), `m` should explain the core meaning derived from it.
+**CRITICAL: SEMANTIC ATOMICITY & SINGLE DEFINITION**
+1. **Single Meaning**: For `m`, provide ONLY the most common/core definition. Do NOT provide a list of meanings (e.g., NOT "run: 跑, 经营, 竞选", BUT "run: 经营").
+2. **Consistency**: The Word/Phrase (`w`), Meaning (`m`), Example (`e`), and Etymology (`r`) MUST all correspond to that **same single meaning**.
+3. **No Mixing**: Do NOT mix definitions. (e.g., If `w` is "bracket" in a tax context, `m` must be "grade/category", `e` must be about taxes).
 
 **Output Format: NDJSON (One line per object).**
 
@@ -625,8 +626,8 @@ with tab_extract:
             ex_count = col_s3.slider("例句数量", 1, 3, 1)
             need_ety = col_s4.checkbox("包含词源/词根", value=True)
 
-        # 默认 Batch Size 修改为 150
-        batch_size = st.number_input("AI 分组大小", 50, 500, 150, step=10)
+        # 优化：上限调整为 3000
+        batch_size = st.number_input("AI 分组大小", 50, 3000, 150, step=50)
         batches = [words_only[i:i + batch_size] for i in range(0, len(words_only), batch_size)]
         
         for idx, batch in enumerate(batches):
