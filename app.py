@@ -5,7 +5,7 @@ import os
 import random
 import json
 import time
-import zlib  # 用于生成固定的 Deck ID
+import zlib
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 # 0. 页面配置
 # ==========================================
 st.set_page_config(
-    page_title="Vocab Flow Ultra (中文版)", 
+    page_title="Vocab Flow Ultra (Pro)", 
     page_icon="⚡️", 
     layout="centered", 
     initial_sidebar_state="collapsed"
@@ -44,17 +44,13 @@ st.markdown("""
         white-space: pre-wrap;
     }
     
-    /* 指南样式 */
-    .guide-step { background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #0056b3; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .guide-title { font-size: 18px; font-weight: bold; color: #0f172a; margin-bottom: 10px; display: block; }
-    .guide-tip { font-size: 14px; color: #64748b; background: #eef2ff; padding: 8px; border-radius: 4px; margin-top: 8px; }
+    /* 优化 st.code 的显示 */
+    .stCodeBlock { border: 1px solid #d1d5db; border-radius: 8px; }
 
     /* 夜间模式适配 */
     @media (prefers-color-scheme: dark) {
-        .guide-step { background-color: #262730; border-left: 5px solid #4da6ff; box-shadow: none; border: 1px solid #3d3d3d; }
-        .guide-title { color: #e0e0e0; }
-        .guide-tip { background-color: #31333F; color: #b0b0b0; border: 1px solid #444; }
         .scrollable-text { background-color: #262730; border: 1px solid #444; color: #ccc; }
+        .stCodeBlock { border: 1px solid #444; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -227,18 +223,22 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# 数据解析逻辑：适配 Pipe 格式
+# 数据解析逻辑：增强版 (支持代码块)
 # ==========================================
 def parse_anki_data(raw_text):
     """
-    解析 '|||' 分隔的文本流
-    格式: 单词/短语 ||| 英文释义 ||| 英文例句 ||| 中文词源
+    解析 '|||' 分隔的文本流，支持Markdown代码块过滤
     """
     parsed_cards = []
-    
     text = raw_text.strip()
-    text = re.sub(r'^```.*?\n', '', text, flags=re.MULTILINE)
-    text = re.sub(r'\n```$', '', text, flags=re.MULTILINE)
+    
+    # 增强过滤：只提取 ```text 或 ``` 包裹的内容（如果存在）
+    code_block = re.search(r'```(?:text|csv)?\s*(.*?)\s*```', text, re.DOTALL)
+    if code_block:
+        text = code_block.group(1)
+    else:
+        # Fallback: 移除单行的 ``` 标记
+        text = re.sub(r'^```.*$', '', text, flags=re.MULTILINE)
     
     lines = text.split('\n')
     seen_phrases = set()
@@ -249,7 +249,6 @@ def parse_anki_data(raw_text):
             continue
             
         parts = line.split("|||")
-        
         if len(parts) < 2: 
             continue
         
@@ -258,15 +257,13 @@ def parse_anki_data(raw_text):
         e = parts[2].strip() if len(parts) > 2 else ""
         r = parts[3].strip() if len(parts) > 3 else ""
 
+        # 简单去重
         if w.lower() in seen_phrases: 
             continue
         seen_phrases.add(w.lower())
         
         parsed_cards.append({
-            'w': w,
-            'm': m,
-            'e': e,
-            'r': r
+            'w': w, 'm': m, 'e': e, 'r': r
         })
 
     return parsed_cards
@@ -297,10 +294,8 @@ def generate_anki_package(cards_data, deck_name):
         MODEL_ID, 
         'VocabFlow Phrase Model',
         fields=[
-            {'name': 'Phrase'},
-            {'name': 'Meaning'},
-            {'name': 'Example'},
-            {'name': 'Etymology'}
+            {'name': 'Phrase'}, {'name': 'Meaning'},
+            {'name': 'Example'}, {'name': 'Etymology'}
         ],
         templates=[{
             'name': 'Phrase Card',
@@ -323,10 +318,8 @@ def generate_anki_package(cards_data, deck_name):
         deck.add_note(genanki.Note(
             model=model, 
             fields=[
-                str(c.get('w', '')), 
-                str(c.get('m', '')), 
-                str(c.get('e', '')), 
-                str(c.get('r', ''))
+                str(c.get('w', '')), str(c.get('m', '')), 
+                str(c.get('e', '')), str(c.get('r', ''))
             ]
         ))
         
@@ -335,37 +328,31 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# Prompt 逻辑 - 定制化词源要求
+# Prompt 逻辑 - 优化版 (低 Token & 代码块)
 # ==========================================
-def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
+def get_ai_prompt(words):
     w_list = ", ".join(words)
     
-    return f"""
-Act as a professional lexicographer. Create Anki card data for the following words.
+    # 极致压缩 Token，并强制 ```text 格式
+    return f"""Task: Anki Cards (Pipe Separated)
+Input: {w_list}
 
-**Input Words:** {w_list}
+Format Rules:
+1. Output strictly inside a ```text code block.
+2. One line per word.
+3. Separator: |||
+4. Structure: Phrase ||| Definition (Eng) ||| Example ||| Roots/Etymology (Simplified Chinese)
 
-**Strict Output Format (Pipe Separated):**
-1. No JSON. No Markdown tables.
-2. Each line represents one card.
-3. Separator: "|||"
-4. Structure: `Natural Phrase ||| Concise English Explanation ||| Authentic Example ||| Etymology/Roots (Chinese)`
+Content Rules:
+- Phrase: Short collocation (e.g. "heavy rain").
+- Def: Concise English.
+- Roots: Analyze roots (e.g. re- + turn). No definitions here.
 
-**Content Requirements:**
-1. **Front (Phrase)**: Use a common collocation or phrase (e.g., "die-hard fan" instead of just "fan").
-2. **Definition**: Concise, **English only**.
-3. **Example**: Natural, authentic sentence. Join multiple sentences with `<br>`.
-4. **Etymology (CRITICAL)**: 
-   - Must be in **Simplified Chinese**.
-   - **CONTENT RULE**: Analyze the **Roots and Affixes** (e.g., "re- (back) + turn (turn)"). Or state the etymological origin (Latin/Greek).
-   - **PROHIBITION**: Do NOT provide the Chinese definition of the word itself here. Do NOT use unrelated mnemonics. ONLY roots and etymology.
-
-**Example Output:**
-well-trained staff ||| having received good training ||| The dog is well-trained. ||| well (好) + train (训练)
-look horrified ||| filled with horror; shocked ||| She looked horrified. ||| 源自拉丁语 horrere (战栗/竖起)
+Example:
 altruism ||| selfless concern for others ||| Motivated by altruism. ||| alter (其他) + -ism (主义)
 
-**Start generating:**
+Output:
+```text
 """
 
 # ==========================================
@@ -384,13 +371,12 @@ with tab_guide:
     
     **极速工作流：**
     1. **提取**：上传 PDF/TXT 提取生词。
-    2. **生成**：复制提示词给 ChatGPT/Claude。
-    3. **制作**：将 AI 返回的 `|||` 格式文本粘贴回来，生成 Anki 包。
+    2. **生成**：点击“复制代码”发送给 ChatGPT/Claude。
+    3. **制作**：将 AI 返回的代码块 (```text ...) 粘贴回来，生成 Anki 包。
     
-    **新版特性**：
-    * 采用 `|||` 管道符格式，准确率 100%。
-    * 自动锁定牌组 ID，支持增量更新，不丢进度。
-    * **词源增强**：专注于中文词根词源解析。
+    **PRO 优化**：
+    * **低 Token 消耗**：Prompt 经过极致精简，支持一次处理更多单词。
+    * **代码块输出**：AI 结果自带格式，复制更精准。
     """)
 
 with tab_extract:
@@ -426,7 +412,6 @@ with tab_extract:
                 else:
                     status.update(label="⚠️ 内容太短", state="error")
         
-        # 修复点 1：增加 key 参数
         if st.button("🗑️ 清空重置", type="secondary", on_click=clear_all_state, key="btn_clear_extract"): pass
 
     with mode_rank:
@@ -489,13 +474,20 @@ with tab_extract:
             st.markdown(f'<div class="scrollable-text">{display_text}</div>', unsafe_allow_html=True)
             st.code(display_text, language="text")
 
-        st.caption("提示：以下设置仅影响生成的 Prompt 内容")
-        batch_size = st.number_input("AI 分组大小 (Batch Size)", 50, 500, 150, step=10)
+        st.divider()
+        st.subheader("🤖 AI 提示词 (一键复制)")
+        st.caption("提示：Prompt已极致压缩。建议分组大小设为 100，可有效防止AI输出中断。")
+        
+        # 默认 Batch Size 调整为 100，适应 500 张卡片的需求
+        batch_size = st.number_input("AI 分组大小 (Batch Size)", 50, 500, 100, step=50)
         batches = [words_only[i:i + batch_size] for i in range(0, len(words_only), batch_size)]
         
         for idx, batch in enumerate(batches):
             with st.expander(f"📌 第 {idx+1} 组 (共 {len(batch)} 词)", expanded=(idx==0)):
-                prompt_text = get_ai_prompt(batch, "Natural Phrase", "English", 1, True)
+                # 调用新的 Prompt 逻辑
+                prompt_text = get_ai_prompt(batch)
+                st.markdown("👇 **点击右上角图标复制**")
+                # 使用 st.code 替代 text_area，实现自动复制按钮
                 st.code(prompt_text, language="text")
 
 with tab_anki:
@@ -514,20 +506,19 @@ with tab_anki:
         bj_time_str = get_beijing_time_str()
         deck_name = st.text_input("🏷️ 牌组名称", f"Vocab_{bj_time_str}")
     
-    st.caption("👇 **在此粘贴 AI 返回的内容 (格式为 word ||| meaning...)：**")
+    st.caption("👇 **在此粘贴 AI 返回的内容 (包含 ```text 代码块也没问题)：**")
     
     ai_resp = st.text_area(
         "输入框", 
         height=300, 
         key="anki_input_text",
-        placeholder='well-trained staff ||| having received good training ||| The dog is well-trained... ||| well (好) + train (训练)'
+        placeholder='```text\naltruism ||| selfless concern... ||| ...\n```'
     )
 
     c_btn1, c_btn2 = st.columns([1, 4])
     with c_btn1:
         start_gen = st.button("🚀 生成卡片", type="primary", use_container_width=True)
     with c_btn2:
-        # 修复点 2：增加 key 参数
         st.button("🗑️ 清空重置", type="secondary", on_click=reset_anki_state, key="btn_clear_anki")
 
     if start_gen or st.session_state['anki_cards_cache'] is not None:
@@ -536,12 +527,13 @@ with tab_anki:
                 st.warning("⚠️ 输入框为空，请先粘贴内容。")
             else:
                 with st.spinner("正在解析数据..."):
+                    # 使用增强版解析函数
                     parsed_data = parse_anki_data(ai_resp)
                     if parsed_data:
                         st.session_state['anki_cards_cache'] = parsed_data
                         st.success(f"✅ 成功解析 {len(parsed_data)} 张卡片！")
                     else:
-                        st.error("❌ 解析失败。请确认你粘贴了包含 '|||' 分隔符的文本。")
+                        st.error("❌ 解析失败。未检测到有效内容，请检查分隔符是否为 '|||'")
                         st.session_state['anki_cards_cache'] = None
 
         if st.session_state['anki_cards_cache']:
