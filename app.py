@@ -40,12 +40,13 @@ if 'anki_pkg_name' not in st.session_state:
 
 # 全局发音人映射
 VOICE_MAP = {
-    "👩 女声 (Jenny)": "en-US-JennyNeural",
-    "👨 男声 (Christopher)": "en-US-ChristopherNeural",
-    "👩 英音 (Libby)": "en-GB-LibbyNeural",
-    "👨 英音 (Ryan)": "en-GB-RyanNeural"
+    "🇺🇸 女声 (Jenny)": "en-US-JennyNeural",
+    "🇺🇸 男声 (Guy)": "en-US-GuyNeural",
+    "🇬🇧 女声 (Libby)": "en-GB-LibbyNeural",
+    "🇬🇧 男声 (Ryan)": "en-GB-RyanNeural"
 }
 
+# --- CSS 优化：Radio 按钮 2x2 网格布局 ---
 st.markdown("""
 <style>
     .stTextArea textarea { font-family: 'Consolas', monospace; font-size: 14px; }
@@ -54,13 +55,28 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stExpander { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
-    .scrollable-text {
-        max-height: 200px; overflow-y: auto; padding: 10px;
-        border: 1px solid #eee; border-radius: 5px; background-color: #fafafa;
-        font-family: monospace; white-space: pre-wrap;
-    }
-    /* 进度条样式优化 */
+    
+    /* 进度条颜色 */
     .stProgress > div > div > div > div { background-color: #4CAF50; }
+
+    /* === 核心修改：Radio 按钮组强制 2x2 网格布局 === */
+    div[role="radiogroup"] {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    div[role="radiogroup"] > label {
+        width: 45% !important;  /* 每个选项占 45% 宽度，从而一行两个 */
+        background-color: #f8f9fa;
+        border: 1px solid #eee;
+        padding: 10px;
+        border-radius: 8px;
+        margin-right: 0px !important;
+    }
+    div[role="radiogroup"] > label:hover {
+        background-color: #e9ecef;
+        border-color: #ccc;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -325,7 +341,7 @@ Input:
     return "\n".join(full_results)
 
 # ==========================================
-# 4. 数据解析与 异步 TTS (并发优化版)
+# 4. 数据解析与 安全并发 TTS
 # ==========================================
 def parse_anki_data(raw_text):
     parsed_cards = []
@@ -364,11 +380,12 @@ def parse_anki_data(raw_text):
 
     return parsed_cards
 
-# --- 并发 TTS 核心逻辑 ---
-async def _generate_audio_batch(tasks, concurrency=6, progress_callback=None):
+# --- 优化：并发 TTS + 安全限流 ---
+async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
     """
     异步并发生成音频。
     tasks: list of dict {'text': str, 'path': str, 'voice': str}
+    concurrency: 降低到 3 以确保安全
     """
     semaphore = asyncio.Semaphore(concurrency)
     total = len(tasks)
@@ -378,27 +395,31 @@ async def _generate_audio_batch(tasks, concurrency=6, progress_callback=None):
         nonlocal completed
         async with semaphore:
             try:
-                # 检查文件是否已存在（轻量缓存）
+                # 检查文件是否已存在
                 if not os.path.exists(task['path']):
                     comm = edge_tts.Communicate(task['text'], task['voice'])
                     await comm.save(task['path'])
+                    
+                    # === 安全策略：微小延迟，防止触发 429 封禁 ===
+                    await asyncio.sleep(random.uniform(0.1, 0.4)) 
+                    
             except Exception as e:
                 print(f"TTS Error for {task['text']}: {e}")
             finally:
                 completed += 1
-                if progress_callback:
+                # 减少回调频率，避免 UI 疯狂闪烁
+                if progress_callback and (completed % 2 == 0 or completed == total):
                     progress_callback(completed, total)
 
     # 创建所有任务
     jobs = [worker(t) for t in tasks]
     await asyncio.gather(*jobs)
 
-def run_async_batch(tasks, concurrency=6, progress_callback=None):
+def run_async_batch(tasks, concurrency=3, progress_callback=None):
     """运行异步 batch 的同步包装器"""
     if not tasks:
         return
     
-    # 在 Streamlit 中，通常需要创建新的 event loop 避免冲突
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -410,7 +431,6 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
     genanki, tempfile = get_genanki()
     media_files = [] 
     
-    # 样式定义
     CSS = """
     .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .phrase { font-size: 28px; font-weight: 700; color: #0056b3; margin-bottom: 20px; }
@@ -457,7 +477,6 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
     deck = genanki.Deck(DECK_ID, deck_name)
     tmp_dir = tempfile.gettempdir()
     
-    # 1. 预处理：构建 Note 对象并收集音频任务
     notes_buffer = []
     audio_tasks = []
     
@@ -477,53 +496,44 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
             f_phrase_name = f"tts_{safe_phrase}_{unique_id}_p.mp3"
             path_phrase = os.path.join(tmp_dir, f_phrase_name)
             audio_tasks.append({'text': phrase, 'path': path_phrase, 'voice': tts_voice})
+            media_files.append(path_phrase)
+            audio_phrase_field = f"[sound:{f_phrase_name}]"
             
-            f_example_name = ""
             if example and len(example) > 3:
                 f_example_name = f"tts_{safe_phrase}_{unique_id}_e.mp3"
                 path_example = os.path.join(tmp_dir, f_example_name)
                 audio_tasks.append({'text': example, 'path': path_example, 'voice': tts_voice})
-            
-            audio_phrase_field = f"[sound:{f_phrase_name}]"
-            audio_example_field = f"[sound:{f_example_name}]" if f_example_name else ""
-            
-            # 记录需要打包的文件路径
-            media_files.append(path_phrase)
-            if f_example_name: media_files.append(path_example)
+                media_files.append(path_example)
+                audio_example_field = f"[sound:{f_example_name}]"
 
-        # 创建 Note
         note = genanki.Note(
             model=model, 
             fields=[phrase, meaning, example, etym, audio_phrase_field, audio_example_field]
         )
         notes_buffer.append(note)
 
-    # 2. 执行并发音频生成
+    # 执行并发音频生成
     if audio_tasks:
-        # 定义回调函数更新外部进度条
         def internal_progress(curr, total):
             if progress_callback:
-                # 假设音频生成占总进度的 80%
                 base_progress = 0.1 
-                # 显示 "Generating audio (5/100)..."
-                progress_callback(base_progress + (curr/total)*0.8, f"🔊 正在极速生成语音 ({curr}/{total})...")
+                # 文案修正：明确显示是“文件”数量，解释为什么是 600
+                progress_callback(base_progress + (curr/total)*0.8, f"🔊 正在生成语音文件 ({curr}/{total})...")
 
-        run_async_batch(audio_tasks, concurrency=6, progress_callback=internal_progress)
+        # === 核心修改：并发度降为 3 ===
+        run_async_batch(audio_tasks, concurrency=3, progress_callback=internal_progress)
 
-    # 3. 添加 Note 到 Deck
     for note in notes_buffer:
         deck.add_note(note)
     
     if progress_callback:
         progress_callback(0.95, "📦 正在打包 .apkg 文件...")
 
-    # 4. 导出 Package
     package = genanki.Package(deck)
     package.media_files = media_files
     
     with tempfile.NamedTemporaryFile(delete=False, suffix='.apkg') as tmp:
         package.write_to_file(tmp.name)
-        # 清理临时文件
         for f in media_files:
             try: os.remove(f)
             except: pass
@@ -561,7 +571,6 @@ with tab_extract:
         pasted_text = st.text_area("或在此粘贴文本", height=100, key="paste_key", placeholder="支持直接粘贴文章内容...")
         
         if st.button("🚀 开始分析", type="primary"):
-            # 【优化】使用 status 即时反馈
             with st.status("🔍 正在加载资源并分析文本...", expanded=True) as status:
                 start_time = time.time()
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
@@ -582,7 +591,6 @@ with tab_extract:
     with mode_direct:
         raw_input = st.text_area("✍️ 粘贴单词列表 (每行一个 或 逗号分隔)", height=200, placeholder="altruism\nhectic\nserendipity")
         if st.button("🚀 生成列表", key="btn_direct", type="primary"):
-            # 【优化】简单操作用 toast 或 spinner
             with st.spinner("正在解析列表..."):
                 if raw_input.strip():
                     words = [w.strip() for w in re.split(r'[,\n\t]+', raw_input) if w.strip()]
@@ -660,21 +668,22 @@ with tab_extract:
         st.subheader("🤖 一键生成 Anki 牌组")
         
         st.write("🎙️ **语音设置**")
-        c_voice, c_check = st.columns([3, 1])
         
-        with c_voice:
-            selected_voice_label = st.radio(
-                "选择发音人", 
-                options=list(VOICE_MAP.keys()), 
-                index=0, 
-                horizontal=True, 
-                label_visibility="collapsed"
-            )
-            selected_voice_code = VOICE_MAP[selected_voice_label]
-            
-        with c_check:
-            enable_audio_auto = st.checkbox("启用语音", value=True, key="chk_audio_auto")
+        # === UI 修改：使用 Grid CSS 渲染 Radio ===
+        selected_voice_label = st.radio(
+            "选择发音人", 
+            options=list(VOICE_MAP.keys()), 
+            index=0, 
+            label_visibility="collapsed"
+        )
+        selected_voice_code = VOICE_MAP[selected_voice_label]
+        
+        # 语音开关
+        st.write("")
+        enable_audio_auto = st.checkbox("✅ 启用 TTS 语音生成", value=True, key="chk_audio_auto")
 
+        st.write("") # Spacer
+        
         col_ai_btn, col_copy_hint = st.columns([1, 2])
         
         # === 内置 AI 按钮 ===
@@ -686,7 +695,6 @@ with tab_extract:
                 if len(words_only) > MAX_AUTO_LIMIT:
                     st.warning(f"⚠️ 单词过多，自动截取前 {MAX_AUTO_LIMIT} 个进行处理。")
                 
-                # 【优化】UI 容器
                 progress_container = st.container()
                 with progress_container:
                     progress_bar = st.progress(0)
@@ -697,7 +705,6 @@ with tab_extract:
                     progress_bar.progress(percent)
                     status_text.markdown(f"🤖 **AI 思考中...** ({current}/{total})")
 
-                # 调用分批 AI
                 with st.spinner("🤖 AI 正在生成内容..."):
                     ai_result = process_ai_in_batches(target_words, progress_callback=update_ai_progress)
                 
@@ -713,7 +720,6 @@ with tab_extract:
                                 progress_bar.progress(p)
                                 status_text.text(text)
 
-                            # 【优化】调用新版生成逻辑
                             f_path = generate_anki_package(
                                 parsed_data, 
                                 deck_name, 
@@ -792,21 +798,16 @@ with tab_anki:
         placeholder='hectic ||| 忙乱的 ||| She has a hectic schedule today.'
     )
     
-    col_voice_opt, col_voice_sw = st.columns([3, 1])
-    with col_voice_opt:
-        manual_voice_label = st.radio(
-            "🎙️ 发音人", 
-            options=list(VOICE_MAP.keys()), 
-            index=0, 
-            horizontal=True, 
-            key="sel_voice_manual"
-        )
-        manual_voice_code = VOICE_MAP[manual_voice_label]
+    # 同样应用 2x2 Grid 样式
+    manual_voice_label = st.radio(
+        "🎙️ 发音人", 
+        options=list(VOICE_MAP.keys()), 
+        index=0, 
+        key="sel_voice_manual"
+    )
+    manual_voice_code = VOICE_MAP[manual_voice_label]
 
-    with col_voice_sw:
-        st.write("") 
-        st.write("") 
-        enable_audio = st.checkbox("启用语音", value=True, key="chk_audio_manual")
+    enable_audio = st.checkbox("启用语音", value=True, key="chk_audio_manual")
 
     c_btn1, c_btn2 = st.columns([1, 4])
     with c_btn1:
@@ -818,7 +819,6 @@ with tab_anki:
         if not ai_resp.strip():
             st.warning("⚠️ 输入框为空。")
         else:
-            # 【优化】即时反馈容器
             prog_cont = st.container()
             with prog_cont:
                 progress_bar_manual = st.progress(0)
@@ -833,7 +833,6 @@ with tab_anki:
                 if parsed_data:
                     st.session_state['anki_cards_cache'] = parsed_data
                     try:
-                        # 调用新版并发生成函数
                         f_path = generate_anki_package(
                             parsed_data, 
                             deck_name, 
