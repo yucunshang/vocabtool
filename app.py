@@ -5,8 +5,8 @@ import os
 import random
 import json
 import time
-import sqlite3  # 新增：用于解析 Kindle 数据库
-import tempfile # 新增：用于处理上传的临时文件
+import sqlite3
+import tempfile
 import zlib
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -129,7 +129,7 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. 核心逻辑 (新增 Kindle Vocab 支持)
+# 2. 核心逻辑 (修正了 Kindle DB 查询)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -139,7 +139,7 @@ def extract_text_from_file(uploaded_file):
     file_type = file_name.split('.')[-1]
     
     try:
-        # --- 新增功能：Kindle 生词本 (.db) ---
+        # --- Kindle 生词本 (.db) ---
         if file_type == 'db':
             # 需要保存为临时文件才能被 sqlite3 读取
             with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp:
@@ -149,8 +149,13 @@ def extract_text_from_file(uploaded_file):
             try:
                 conn = sqlite3.connect(tmp_path)
                 cursor = conn.cursor()
-                # 从 WORDS 表提取所有英文生词 (lang='en')
-                cursor.execute("SELECT stem FROM WORDS WHERE lang='en'")
+                
+                # 【核心修复】：移除 WHERE lang='en' 限制。
+                # 原因：很多 Kindle 书籍的语言标签是 'en-US', 'en-GB' 或空值，
+                # 严格限制会导致提取结果为空。
+                # 我们提取所有词，反正后续 is_valid_word 会清洗非英文内容。
+                cursor.execute("SELECT stem FROM WORDS")
+                
                 rows = cursor.fetchall()
                 # 拼接成字符串
                 text = " ".join([row[0] for row in rows if row[0]])
@@ -160,26 +165,39 @@ def extract_text_from_file(uploaded_file):
                 if 'conn' in locals(): conn.close()
                 if os.path.exists(tmp_path): os.remove(tmp_path)
 
-        # --- 原有 TXT 处理 ---
+        # --- TXT 处理 ---
         elif file_type == 'txt':
             bytes_data = uploaded_file.getvalue()
+            decoded_text = ""
             for encoding in ['utf-8', 'utf-8-sig', 'gb18030', 'latin-1']:
                 try:
-                    text = bytes_data.decode(encoding)
+                    decoded_text = bytes_data.decode(encoding)
                     break
                 except: continue
+            
+            # 检测是否为 Kindle My Clippings
+            if "==========" in decoded_text:
+                clips = []
+                entries = decoded_text.split("==========")
+                for entry in entries:
+                    lines = [l.strip() for l in entry.split('\n') if l.strip()]
+                    if len(lines) >= 3:
+                        clips.append(lines[-1])
+                text = "\n".join(clips)
+            else:
+                text = decoded_text
 
-        # --- 原有 PDF 处理 ---
+        # --- PDF 处理 ---
         elif file_type == 'pdf':
             reader = pypdf.PdfReader(uploaded_file)
             text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             
-        # --- 原有 DOCX 处理 ---
+        # --- DOCX 处理 ---
         elif file_type == 'docx':
             doc = docx.Document(uploaded_file)
             text = "\n".join([p.text for p in doc.paragraphs])
             
-        # --- 原有 EPUB 处理 ---
+        # --- EPUB 处理 ---
         elif file_type == 'epub':
             genanki, tempfile = get_genanki()
             with tempfile.NamedTemporaryFile(delete=False, suffix='.epub') as tmp:
@@ -472,12 +490,16 @@ with tab_extract:
                     status.write("🔍 智能分析与词频比对...")
                     final_data, raw_count, stats_info = analyze_logic(raw_text, curr, targ, include_unknown)
                     
-                    st.session_state['gen_words_data'] = final_data
-                    st.session_state['raw_count'] = raw_count
-                    st.session_state['stats_info'] = stats_info
-                    st.session_state['process_time'] = time.time() - start_time
-                    
-                    status.update(label="✅ 分析完成", state="complete", expanded=False)
+                    # 关键修改：增加判空提示
+                    if not final_data:
+                        st.warning(f"分析完成，但所有 {raw_count} 个单词都被过滤掉了。请尝试调小'忽略排名前 N 的词'或勾选'包含生僻词'。")
+                        status.update(label="⚠️ 结果为空", state="error")
+                    else:
+                        st.session_state['gen_words_data'] = final_data
+                        st.session_state['raw_count'] = raw_count
+                        st.session_state['stats_info'] = stats_info
+                        st.session_state['process_time'] = time.time() - start_time
+                        status.update(label="✅ 分析完成", state="complete", expanded=False)
                 else:
                     status.update(label="⚠️ 内容太短或解析为空", state="error")
         
