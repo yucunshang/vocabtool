@@ -544,7 +544,8 @@ with tab_extract:
         if "顺序" in gen_type:
              c_a, c_b = st.columns(2)
              s_rank = c_a.number_input("起始排名", 1, 20000, 1000, step=100)
-             count = c_b.number_input("数量", 10, 500, 50, step=10)
+             # V32: 上限调整为 5000
+             count = c_b.number_input("数量", 10, 5000, 50, step=50)
              if st.button("🚀 生成"):
                  start_time = time.time()
                  if FULL_DF is not None:
@@ -560,7 +561,8 @@ with tab_extract:
              c_min, c_max, c_cnt = st.columns([1,1,1])
              min_r = c_min.number_input("Min Rank", 1, 20000, 1, step=100)
              max_r = c_max.number_input("Max Rank", 1, 25000, 5000, step=100)
-             r_count = c_cnt.number_input("Count", 10, 200, 50, step=10)
+             # V32: 上限调整为 5000
+             r_count = c_cnt.number_input("Count", 10, 5000, 50, step=50)
              if st.button("🎲 抽取"):
                  start_time = time.time()
                  if FULL_DF is not None:
