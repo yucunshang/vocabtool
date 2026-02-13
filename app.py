@@ -383,7 +383,7 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# 4. Prompt Logic (优化: 严格语言控制 + 核心释义)
+# 4. Prompt Logic (优化: 语义原子性)
 # ==========================================
 def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     w_list = ", ".join(words)
@@ -393,13 +393,12 @@ def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     else:
         w_instr = "Key `w`: A short practical collocation/phrase (2-5 words) that naturally contains the word."
 
-    # 严格语言控制逻辑 & 单一核心释义逻辑
     if def_mode == "中文":
-        m_instr = "Key `m`: The **SINGLE** core **Chinese ONLY** definition (max 15 chars). **Do NOT list multiple meanings**. **NO English text**."
+        m_instr = "Key `m`: Concise Chinese definition of the **word** (max 10 chars). NOT the definition of the phrase."
     elif def_mode == "中英双语":
-        m_instr = "Key `m`: English Core Def + Chinese Core Def. (Ensure they match the same single meaning)."
-    else: # 英文
-        m_instr = "Key `m`: The **SINGLE** core **English ONLY** definition (concise). **Do NOT list multiple meanings**. **NO Chinese text**."
+        m_instr = "Key `m`: English Definition + Chinese Definition of the **word**."
+    else:
+        m_instr = "Key `m`: English definition of the **word** (concise)."
 
     e_instr = f"Key `e`: {ex_count} example sentence(s). Use `<br>` to separate if multiple."
 
@@ -409,13 +408,13 @@ def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
         r_instr = "Key `r`: Leave this empty string \"\"."
 
     return f"""
-Task: Create Anki cards.Make sure to process everything at once, without missing anything.
+Task: Create Anki cards.
 Words: {w_list}
 
-**CRITICAL: SEMANTIC ATOMICITY & SINGLE DEFINITION**
-1. **Single Meaning**: For `m`, provide ONLY the most common/core definition. Do NOT provide a list of meanings (e.g., NOT "run: 跑, 经营, 竞选", BUT "run: 经营").
-2. **Consistency**: The Word/Phrase (`w`), Meaning (`m`), Example (`e`), and Etymology (`r`) MUST all correspond to that **same single meaning**.
-3. **No Mixing**: Do NOT mix definitions. (e.g., If `w` is "bracket" in a tax context, `m` must be "grade/category", `e` must be about taxes).
+**CRITICAL: SEMANTIC ATOMICITY**
+1. **Consistency**: The Word/Phrase (`w`), Meaning (`m`), Example (`e`), and Etymology (`r`) MUST all correspond to the **same specific context/meaning**.
+2. **No Mixing**: Do NOT mix definitions. (e.g., If `w` is "bracket" in a tax context, `m` must be "grade/category", `e` must be about taxes. Do NOT give the definition of "punctuation mark").
+3. **Definition Focus**: Even if `w` is a phrase (e.g. "give up"), `m` should explain the core meaning derived from it.
 
 **Output Format: NDJSON (One line per object).**
 
@@ -545,8 +544,7 @@ with tab_extract:
         if "顺序" in gen_type:
              c_a, c_b = st.columns(2)
              s_rank = c_a.number_input("起始排名", 1, 20000, 1000, step=100)
-             # V32: 上限调整为 5000
-             count = c_b.number_input("数量", 10, 5000, 50, step=50)
+             count = c_b.number_input("数量", 10, 500, 50, step=10)
              if st.button("🚀 生成"):
                  start_time = time.time()
                  if FULL_DF is not None:
@@ -562,8 +560,7 @@ with tab_extract:
              c_min, c_max, c_cnt = st.columns([1,1,1])
              min_r = c_min.number_input("Min Rank", 1, 20000, 1, step=100)
              max_r = c_max.number_input("Max Rank", 1, 25000, 5000, step=100)
-             # V32: 上限调整为 5000
-             r_count = c_cnt.number_input("Count", 10, 5000, 50, step=50)
+             r_count = c_cnt.number_input("Count", 10, 200, 50, step=10)
              if st.button("🎲 抽取"):
                  start_time = time.time()
                  if FULL_DF is not None:
@@ -626,8 +623,8 @@ with tab_extract:
             ex_count = col_s3.slider("例句数量", 1, 3, 1)
             need_ety = col_s4.checkbox("包含词源/词根", value=True)
 
-        # 优化：上限调整为 3000
-        batch_size = st.number_input("AI 分组大小", 50, 3000, 150, step=50)
+        # 默认 Batch Size 修改为 150
+        batch_size = st.number_input("AI 分组大小", 50, 500, 150, step=10)
         batches = [words_only[i:i + batch_size] for i in range(0, len(words_only), batch_size)]
         
         for idx, batch in enumerate(batches):
