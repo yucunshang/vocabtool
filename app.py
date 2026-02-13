@@ -79,7 +79,8 @@ def get_file_parsers():
     import ebooklib
     from ebooklib import epub
     from bs4 import BeautifulSoup
-    return pypdf, docx, ebooklib, epub, BeautifulSoup
+    import sqlite3 # 新增 sqlite3
+    return pypdf, docx, ebooklib, epub, BeautifulSoup, sqlite3
 
 def get_genanki():
     import genanki
@@ -122,10 +123,14 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. 文本提取逻辑
+# 2. 文本提取逻辑 (已更新 Kindle 支持)
 # ==========================================
 def extract_text_from_file(uploaded_file):
-    pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
+    # 获取解析器
+    pypdf, docx, ebooklib, epub, BeautifulSoup, sqlite3 = get_file_parsers()
+    # 获取 tempfile (用于处理 sqlite 临时文件)
+    _, tempfile = get_genanki() 
+    
     text = ""
     file_type = uploaded_file.name.split('.')[-1].lower()
     
@@ -137,14 +142,16 @@ def extract_text_from_file(uploaded_file):
                     text = bytes_data.decode(encoding)
                     break
                 except: continue
+        
         elif file_type == 'pdf':
             reader = pypdf.PdfReader(uploaded_file)
             text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+        
         elif file_type == 'docx':
             doc = docx.Document(uploaded_file)
             text = "\n".join([p.text for p in doc.paragraphs])
+        
         elif file_type == 'epub':
-            genanki, tempfile = get_genanki()
             with tempfile.NamedTemporaryFile(delete=False, suffix='.epub') as tmp:
                 tmp.write(uploaded_file.getvalue())
                 tmp_path = tmp.name
@@ -154,8 +161,48 @@ def extract_text_from_file(uploaded_file):
                     soup = BeautifulSoup(item.get_content(), 'html.parser')
                     text += soup.get_text(separator=' ', strip=True) + " "
             os.remove(tmp_path)
+            
+        # ==========================================
+        # 新增: Kindle vocab.db 处理逻辑
+        # ==========================================
+        elif file_type in ['db', 'sqlite']:
+            # SQLite 需要本地文件路径，不能直接读流
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp_db:
+                tmp_db.write(uploaded_file.getvalue())
+                tmp_db_path = tmp_db.name
+            
+            try:
+                conn = sqlite3.connect(tmp_db_path)
+                cursor = conn.cursor()
+                
+                # Kindle 的 vocab.db 通常包含 'WORDS' 表
+                # 我们尝试查询 'stem' (词干) 或 'word'
+                try:
+                    cursor.execute("SELECT stem FROM WORDS WHERE stem IS NOT NULL")
+                    rows = cursor.fetchall()
+                    # 将提取到的单词拼接成字符串，以空格分隔
+                    text = " ".join([r[0] for r in rows if r[0]])
+                    
+                    if not text:
+                        # 如果 stem 为空，尝试查询 word
+                        cursor.execute("SELECT word FROM WORDS")
+                        rows = cursor.fetchall()
+                        text = " ".join([r[0] for r in rows if r[0]])
+                        
+                except Exception as db_err:
+                    text = f"Error reading DB schema: {db_err}"
+                
+                conn.close()
+            except Exception as e:
+                text = f"Error connecting to DB: {e}"
+            finally:
+                # 清理临时文件
+                if os.path.exists(tmp_db_path):
+                    os.remove(tmp_db_path)
+
     except Exception as e:
         return f"Error: {e}"
+    
     return text
 
 def is_valid_word(word):
@@ -290,7 +337,6 @@ def generate_anki_package(cards_data, deck_name):
     MODEL_ID = 1842957301 
     DECK_ID = zlib.adler32(deck_name.encode('utf-8'))
 
-    # 修改点：去掉了 afmt 中的 🇬🇧 旗帜符号
     model = genanki.Model(
         MODEL_ID, 
         'VocabFlow Phrase Model',
@@ -394,7 +440,7 @@ with tab_guide:
     ### 👋 欢迎使用
     
     **极速工作流：**
-    1. **提取**：上传 PDF/TXT 提取生词。
+    1. **提取**：上传 PDF/TXT/Kindle DB 提取生词。
     2. **生成**：点击“复制代码”发送给 ChatGPT/Claude。
     3. **制作**：将 AI 返回的代码块 (```text ...) 粘贴回来，生成 Anki 包。
     
@@ -402,14 +448,14 @@ with tab_guide:
     * **专家级 Prompt**：专注于**自然搭配 (Collocations)** 和 **词源拆解**。
     * **格式标准化**：严格的结构化输出，确保 100% 解析成功率。
     * **代码块支持**：AI 输出结果直接复制，无需手动清洗。
-    * **新增：直接输入**：支持粘贴自选单词表，跳过频率筛选直接生成 Prompt。
+    * **支持 Kindle**：直接上传 `vocab.db` 处理 Kindle 生词本。
     """)
 
 with tab_extract:
     # 修改：增加了中间的 "📝 直接输入" Tab
     mode_context, mode_direct, mode_rank = st.tabs(["📄 语境分析", "📝 直接输入", "🔢 词频列表"])
     
-    # 模式1：语境分析 (原功能)
+    # 模式1：语境分析 (原功能 + Kindle)
     with mode_context:
         st.info("💡 **智能模式**：自动进行词形还原、去重和垃圾词清洗。")
         
@@ -418,7 +464,8 @@ with tab_extract:
         targ = c2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
         include_unknown = st.checkbox("🔓 包含生僻词/人名 (Rank > 20000)", value=False)
 
-        uploaded_file = st.file_uploader("📂 上传文件 (TXT/PDF/DOCX/EPUB)", key=st.session_state['uploader_id'])
+        # 更新：支持 DB/SQLITE
+        uploaded_file = st.file_uploader("📂 上传文件 (TXT/PDF/EPUB/DB)", key=st.session_state['uploader_id'])
         pasted_text = st.text_area("📄 ...或在此粘贴文本", height=100, key="paste_key")
         
         if st.button("🚀 开始分析", type="primary"):
@@ -438,9 +485,9 @@ with tab_extract:
                     
                     status.update(label="✅ 分析完成", state="complete", expanded=False)
                 else:
-                    status.update(label="⚠️ 内容太短", state="error")
+                    status.update(label="⚠️ 内容为空或太短", state="error")
     
-    # 模式2：直接输入 (新增功能)
+    # 模式2：直接输入
     with mode_direct:
         st.info("💡 **直接模式**：不进行词频过滤，直接为粘贴的单词生成 Prompt。")
         raw_input = st.text_area("✍️ 粘贴单词列表 (每行一个 或 逗号分隔)", height=200, placeholder="altruism\nhectic\nserendipity")
