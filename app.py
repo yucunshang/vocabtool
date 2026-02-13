@@ -12,7 +12,7 @@ import edge_tts
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-# 尝试导入 OpenAI，防止未安装报错
+# 尝试导入 OpenAI
 try:
     from openai import OpenAI
 except ImportError:
@@ -38,7 +38,7 @@ if 'anki_pkg_data' not in st.session_state:
 if 'anki_pkg_name' not in st.session_state: 
     st.session_state['anki_pkg_name'] = ""
 
-# 发音人映射 (保持经典的横向两个选项)
+# 发音人映射
 VOICE_MAP = {
     "👩 女声 (Jenny)": "en-US-JennyNeural",
     "👨 男声 (Christopher)": "en-US-ChristopherNeural"
@@ -52,8 +52,6 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stExpander { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
-    
-    /* 进度条颜色 */
     .stProgress > div > div > div > div { background-color: #4CAF50; }
 </style>
 """, unsafe_allow_html=True)
@@ -126,7 +124,7 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. 文本提取逻辑
+# 2. 文本提取逻辑 (移除 OCR)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -254,7 +252,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# 3. AI 调用逻辑 (更新：集成词典学家 Prompt)
+# 3. AI 调用逻辑 (内置 AI - 简单模式)
 # ==========================================
 def process_ai_in_batches(words_list, progress_callback=None):
     if not OpenAI:
@@ -275,54 +273,30 @@ def process_ai_in_batches(words_list, progress_callback=None):
     total_words = len(words_list)
     full_results = []
     
-    # 系统提示词简单化，主要逻辑放在 user prompt 中
-    system_prompt = "You are an expert English Lexicographer and Anki Card Designer."
+    # === 关键修改：内置 AI 恢复为“简单卡片模式” ===
+    # Front: Word
+    # Back: Chinese Meaning + Example
+    system_prompt = "You are a helpful assistant for vocabulary learning."
     
     for i in range(0, total_words, BATCH_SIZE):
         batch = words_list[i : i + BATCH_SIZE]
         current_batch_str = "\n".join(batch)
         
-        # === 核心修改：使用用户指定的高级 Prompt ===
         user_prompt = f"""
-# Role
-You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
-Make sure to process everything in one go, without missing anything.
+Task: Convert English words to Anki cards.
+Format: Word ||| Chinese Meaning ||| English Example
+Rules: 
+1. Front must be the Word only (Original).
+2. Definition must be in Simplified Chinese (Concise & Accurate).
+3. Sentence must be in English (Simple & Authentic).
+4. Do NOT add etymology or extra fields.
 
-# Input Data
-{current_batch_str}
-
-# Output Format Guidelines
-1. **Output Container**: Strictly inside a single ```text code block.
-2. **Layout**: One entry per line.
-3. **Separator**: Use `|||` as the delimiter.
-4. **Target Structure**:
-   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
-
-# Field Constraints (Strict)
-1. **Field 1: Phrase (CRITICAL)**
-   - DO NOT output the single target word.
-   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
-   - Example: If input is "rain", output "heavy rain" or "torrential rain".
-   
-2. **Field 2: Definition (English)**
-   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
-
-3. **Field 3: Example**
-   - A short, authentic sentence containing the phrase.
-
-4. **Field 4: Roots/Etymology (Simplified Chinese)**
-   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
-   - If no classical roots exist, explain the origin briefly in Chinese.
-   - Use Simplified Chinese for meanings.
-
-# Valid Example (Follow this logic strictly)
-Input: altruism
-Output:
-motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
-
+Example:
 Input: hectic
-Output:
-a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
+Output: hectic ||| 忙乱的，繁忙的 ||| She has a hectic schedule today.
+
+Input:
+{current_batch_str}
 """
         try:
             response = client.chat.completions.create(
@@ -347,7 +321,7 @@ a hectic schedule ||| a timeline full of frantic activity and very busy ||| She 
     return "\n".join(full_results)
 
 # ==========================================
-# 4. 数据解析与 安全并发 TTS
+# 4. 数据解析与 Anki 打包
 # ==========================================
 def parse_anki_data(raw_text):
     parsed_cards = []
@@ -371,15 +345,13 @@ def parse_anki_data(raw_text):
         if len(parts) < 2: 
             continue
         
-        # 按照新 Prompt 的结构：
-        # parts[0]: Natural Phrase (Front)
-        # parts[1]: Definition (English)
-        # parts[2]: Example
-        # parts[3]: Etymology (Chinese)
+        # === 兼容逻辑 ===
+        # 内置 AI (简单): Word, Meaning, Example (3 parts)
+        # 第三方 AI (复杂): Phrase, Definition, Example, Etymology (4 parts)
         w = parts[0].strip()
         m = parts[1].strip()
         e = parts[2].strip() if len(parts) > 2 else ""
-        r = parts[3].strip() if len(parts) > 3 else ""
+        r = parts[3].strip() if len(parts) > 3 else "" # 内置 AI 此字段为空
 
         if w.lower() in seen_phrases: 
             continue
@@ -391,13 +363,8 @@ def parse_anki_data(raw_text):
 
     return parsed_cards
 
-# --- 保持优化：并发 TTS + 安全限流 ---
 async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
-    """
-    异步并发生成音频。
-    tasks: list of dict {'text': str, 'path': str, 'voice': str}
-    concurrency: 保持 3 以确保安全
-    """
+    """异步并发生成音频，带安全延时"""
     semaphore = asyncio.Semaphore(concurrency)
     total_files = len(tasks)
     completed_files = 0
@@ -409,7 +376,6 @@ async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
                 if not os.path.exists(task['path']):
                     comm = edge_tts.Communicate(task['text'], task['voice'])
                     await comm.save(task['path'])
-                    # 安全延时
                     await asyncio.sleep(random.uniform(0.1, 0.4)) 
             except Exception as e:
                 print(f"TTS Error for {task['text']}: {e}")
@@ -436,6 +402,8 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
     genanki, tempfile = get_genanki()
     media_files = [] 
     
+    # 使用条件渲染模板：{{#Etymology}}...{{/Etymology}}
+    # 这样一套模板可以同时支持简单卡片（隐藏词源）和复杂卡片（显示词源）
     CSS = """
     .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .phrase { font-size: 28px; font-weight: 700; color: #0056b3; margin-bottom: 20px; }
@@ -454,14 +422,14 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
 
     model = genanki.Model(
         MODEL_ID, 
-        'VocabFlow Phrase Model',
+        'VocabFlow Unified Model',
         fields=[
             {'name': 'Phrase'}, {'name': 'Meaning'},
             {'name': 'Example'}, {'name': 'Etymology'},
             {'name': 'Audio_Phrase'}, {'name': 'Audio_Example'}
         ],
         templates=[{
-            'name': 'Phrase Card',
+            'name': 'Vocab Card',
             'qfmt': '''
                 <div class="phrase">{{Phrase}}</div>
                 <div>{{Audio_Phrase}}</div>
@@ -485,7 +453,6 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
     notes_buffer = []
     audio_tasks = []
     
-    # 获取总单词数，用于进度显示计算
     total_words_count = len(cards_data)
     
     for idx, c in enumerate(cards_data):
@@ -524,9 +491,7 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
         def internal_progress(curr_files, total_files):
             if progress_callback:
                 base_progress = 0.1 
-                # 映射回单词进度
                 current_word_idx = int((curr_files / total_files) * total_words_count)
-                
                 progress_callback(
                     base_progress + (curr_files/total_files)*0.8, 
                     f"🔊 正在生成语音 ({current_word_idx}/{total_words_count})..."
@@ -561,7 +526,7 @@ if not VOCAB_DICT:
 with st.expander("📖 使用指南 & 支持格式"):
     st.markdown("""
     **🚀 极速工作流**
-    1. **提取**：在“单词提取”页上传文件或粘贴文本。
+    1. **提取**：支持 PDF, ePub, Docx, txt 等格式。
     2. **生成**：点击“使用 DeepSeek 生成”，系统将自动完成文本生成、**并发语音合成**并打包下载。
     """)
 
@@ -578,7 +543,12 @@ with tab_extract:
         targ = c2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
         
         st.markdown("#### 📥 导入内容")
-        uploaded_file = st.file_uploader("直接上传文件", key=st.session_state['uploader_id'], label_visibility="collapsed")
+        uploaded_file = st.file_uploader(
+            "直接上传文件", 
+            type=['txt', 'pdf', 'docx', 'epub', 'db', 'sqlite'],
+            key=st.session_state['uploader_id'], 
+            label_visibility="collapsed"
+        )
         pasted_text = st.text_area("或在此粘贴文本", height=100, key="paste_key", placeholder="支持直接粘贴文章内容...")
         
         if st.button("🚀 开始分析", type="primary"):
@@ -680,25 +650,22 @@ with tab_extract:
         
         st.write("🎙️ **语音设置**")
         
-        # === UI 修改：恢复横向两个选项，整洁美观 ===
         selected_voice_label = st.radio(
             "选择发音人", 
             options=list(VOICE_MAP.keys()), 
             index=0, 
-            horizontal=True, # 强制横向
+            horizontal=True, 
             label_visibility="collapsed"
         )
         selected_voice_code = VOICE_MAP[selected_voice_label]
         
-        # 语音开关
         st.write("")
         enable_audio_auto = st.checkbox("✅ 启用 TTS 语音生成", value=True, key="chk_audio_auto")
 
-        st.write("") # Spacer
+        st.write("") 
         
         col_ai_btn, col_copy_hint = st.columns([1, 2])
         
-        # === 内置 AI 按钮 ===
         with col_ai_btn:
             if st.button("✨ 使用 DeepSeek 生成", type="primary", use_container_width=True):
                 MAX_AUTO_LIMIT = 300 
@@ -752,7 +719,6 @@ with tab_extract:
                 else:
                     st.error("AI 生成失败，请检查 API Key 或网络连接。")
 
-        # === 下载按钮 ===
         if st.session_state.get('anki_pkg_data'):
             st.download_button(
                 label=f"📥 立即下载 {st.session_state['anki_pkg_name']}",
@@ -766,6 +732,7 @@ with tab_extract:
         with col_copy_hint:
             st.info("👈 点击左侧按钮自动生成。如使用第三方 AI，请复制下方 Prompt。")
 
+        # 保留这个高级 Prompt 供用户复制到第三方使用
         with st.expander("📌 手动复制 Prompt (第三方 AI 用)"):
             prompt_text = f"""# Role
 You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
@@ -802,17 +769,13 @@ Make sure to process everything in one go, without missing anything.
 Input: altruism
 Output:
 motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
-
-Input: hectic
-Output:
-a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
 """
             st.code(prompt_text, language="text")
 
 # ----------------- Tab 2: 卡片制作 (手动模式) -----------------
 with tab_anki:
     st.markdown("### 📦 手动制作 Anki 牌组")
-    st.caption("适用于处理第三方 AI 生成的文本。")
+    st.caption("适用于处理第三方 AI 生成的文本 (支持复杂/简单多种格式)。")
     
     if 'anki_cards_cache' not in st.session_state: st.session_state['anki_cards_cache'] = None
     
@@ -834,7 +797,6 @@ with tab_anki:
         placeholder='hectic ||| 忙乱的 ||| She has a hectic schedule today.'
     )
     
-    # 恢复横向布局
     manual_voice_label = st.radio(
         "🎙️ 发音人", 
         options=list(VOICE_MAP.keys()), 
@@ -891,8 +853,9 @@ with tab_anki:
         cards = st.session_state['anki_cards_cache']
         with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
             df_view = pd.DataFrame(cards)
-            cols = ["正面 (短语)", "英文释义", "英文例句"]
-            if len(df_view.columns) > 3: cols.append("中文词源")
+            # 动态调整预览表头，兼容不同列数
+            cols = ["正面", "中文/英文释义", "例句"]
+            if len(df_view.columns) > 3: cols.append("词源")
             df_view.columns = cols[:len(df_view.columns)]
             st.dataframe(df_view, use_container_width=True, hide_index=True)
 
