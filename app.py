@@ -273,9 +273,9 @@ def process_ai_in_batches(words_list, progress_callback=None):
     total_words = len(words_list)
     full_results = []
     
-    # === 关键修改：内置 AI 恢复为“简单卡片模式” ===
+    # === 内置 AI：简单卡片模式 (无词源字段) ===
     # Front: Word
-    # Back: Chinese Meaning + Example
+    # Back: Meaning + Example
     system_prompt = "You are a helpful assistant for vocabulary learning."
     
     for i in range(0, total_words, BATCH_SIZE):
@@ -402,8 +402,7 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
     genanki, tempfile = get_genanki()
     media_files = [] 
     
-    # 使用条件渲染模板：{{#Etymology}}...{{/Etymology}}
-    # 这样一套模板可以同时支持简单卡片（隐藏词源）和复杂卡片（显示词源）
+    # 动态模板：词源部分仅在有内容时显示
     CSS = """
     .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .phrase { font-size: 28px; font-weight: 700; color: #0056b3; margin-bottom: 20px; }
@@ -595,8 +594,9 @@ with tab_extract:
         gen_type = st.radio("生成模式", ["🔢 顺序生成", "🔀 随机抽取"], horizontal=True)
         if "顺序生成" in gen_type:
              c_a, c_b = st.columns(2)
+             # === 修改点：数量最小改为 10，步长改为 10 ===
              s_rank = c_a.number_input("起始排名", 1, 20000, 8000, step=100)
-             count = c_b.number_input("数量", 10, 5000, 50, step=50)
+             count = c_b.number_input("数量", 10, 5000, 10, step=10)
              if st.button("🚀 生成列表"):
                  with st.spinner("正在提取..."):
                     if FULL_DF is not None:
@@ -610,7 +610,8 @@ with tab_extract:
              c_min, c_max, c_cnt = st.columns([1,1,1])
              min_r = c_min.number_input("最小排名", 1, 20000, 12000, step=100)
              max_r = c_max.number_input("最大排名", 1, 25000, 15000, step=100)
-             r_count = c_cnt.number_input("抽取数量", 10, 5000, 50, step=50)
+             # === 修改点：数量最小改为 10，步长改为 10 ===
+             r_count = c_cnt.number_input("抽取数量", 10, 5000, 10, step=10)
              if st.button("🎲 随机抽取"):
                  with st.spinner("正在抽取..."):
                     if FULL_DF is not None:
