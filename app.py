@@ -433,8 +433,9 @@ def get_ai_prompt(words):
     w_list = ", ".join(words)
     return f"""
 # Role
-You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
-
+You are an expert English Lexicographer and Anki Card Designer.
+ Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
+Make sure to process everything in one go, without missing anything.
 # Input Data
 {w_list}
 
@@ -647,8 +648,16 @@ with tab_anki:
     if 'anki_cards_cache' not in st.session_state:
         st.session_state['anki_cards_cache'] = None
     
+    # === 新增：缓存生成好的文件数据，避免重复生成 ===
+    if 'anki_pkg_data' not in st.session_state:
+        st.session_state['anki_pkg_data'] = None
+    if 'anki_pkg_name' not in st.session_state:
+        st.session_state['anki_pkg_name'] = ""
+    
     def reset_anki_state():
         st.session_state['anki_cards_cache'] = None
+        st.session_state['anki_pkg_data'] = None # 同时清空文件缓存
+        st.session_state['anki_pkg_name'] = ""
         if 'anki_input_text' in st.session_state:
              st.session_state['anki_input_text'] = ""
 
@@ -666,8 +675,8 @@ with tab_anki:
         placeholder='```text\nmotivated by altruism ||| acting out of... ||| ...\n```'
     )
     
-    # === 修改：默认 value=False ===
-    enable_audio = st.checkbox("🔊 启用 AI 语音合成 (推荐开启，会增加生成时间)", value=False)
+    # === 修改：默认 value=True ===
+    enable_audio = st.checkbox("🔊 启用 AI 语音合成 (推荐开启，会增加生成时间)", value=True)
 
     c_btn1, c_btn2 = st.columns([1, 4])
     with c_btn1:
@@ -675,40 +684,47 @@ with tab_anki:
     with c_btn2:
         st.button("🗑️ 清空重置", type="secondary", on_click=reset_anki_state, key="btn_clear_anki")
 
-    if start_gen or st.session_state['anki_cards_cache'] is not None:
-        if start_gen:
-            if not ai_resp.strip():
-                st.warning("⚠️ 输入框为空，请先粘贴内容。")
-            else:
-                with st.spinner("正在解析数据..."):
-                    parsed_data = parse_anki_data(ai_resp)
-                    if parsed_data:
-                        st.session_state['anki_cards_cache'] = parsed_data
-                        st.success(f"✅ 成功解析 {len(parsed_data)} 张卡片！")
-                    else:
-                        st.error("❌ 解析失败。未检测到有效内容，请检查分隔符是否为 '|||'")
-                        st.session_state['anki_cards_cache'] = None
-
-        if st.session_state['anki_cards_cache']:
-            cards = st.session_state['anki_cards_cache']
-            
-            with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
-                df_view = pd.DataFrame(cards)
-                # Fixed: Match column names to the 4 fields in parsed data
-                df_view.columns = ["正面(短语)", "英文释义", "英文例句", "中文词源"]
-                st.dataframe(df_view, use_container_width=True, hide_index=True)
-
-            try:
-                f_path = generate_anki_package(cards, deck_name, enable_tts=enable_audio)
-                with open(f_path, "rb") as f:
-                    file_data = f.read()
+    # === 逻辑修改：将生成逻辑与展示逻辑完全分离 ===
+    
+    # 1. 只有点击按钮时才执行解析和生成
+    if start_gen:
+        if not ai_resp.strip():
+            st.warning("⚠️ 输入框为空，请先粘贴内容。")
+        else:
+            with st.spinner("正在解析数据并生成语音..."):
+                parsed_data = parse_anki_data(ai_resp)
+                if parsed_data:
+                    st.session_state['anki_cards_cache'] = parsed_data
                     
-                st.download_button(
-                    label=f"📥 下载 {deck_name}.apkg",
-                    data=file_data,
-                    file_name=f"{deck_name}.apkg",
-                    mime="application/octet-stream",
-                    type="primary"
-                )
-            except Exception as e:
-                st.error(f"生成文件出错: {e}")
+                    # 立即生成并缓存文件，不再等待下一次渲染
+                    try:
+                        f_path = generate_anki_package(parsed_data, deck_name, enable_tts=enable_audio)
+                        with open(f_path, "rb") as f:
+                            st.session_state['anki_pkg_data'] = f.read()
+                        st.session_state['anki_pkg_name'] = f"{deck_name}.apkg"
+                        
+                        st.success(f"✅ 成功生成 {len(parsed_data)} 张卡片！")
+                    except Exception as e:
+                        st.error(f"生成文件出错: {e}")
+                else:
+                    st.error("❌ 解析失败。未检测到有效内容，请检查分隔符是否为 '|||'")
+                    st.session_state['anki_cards_cache'] = None
+
+    # 2. 只要有缓存数据，就进行展示和提供下载，不执行任何生成逻辑
+    if st.session_state['anki_cards_cache']:
+        cards = st.session_state['anki_cards_cache']
+        
+        with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
+            df_view = pd.DataFrame(cards)
+            df_view.columns = ["正面(短语)", "英文释义", "英文例句", "中文词源"]
+            st.dataframe(df_view, use_container_width=True, hide_index=True)
+
+        # 仅当文件数据存在时显示下载按钮
+        if st.session_state.get('anki_pkg_data'):
+            st.download_button(
+                label=f"📥 下载 {st.session_state['anki_pkg_name']}",
+                data=st.session_state['anki_pkg_data'],
+                file_name=st.session_state['anki_pkg_name'],
+                mime="application/octet-stream",
+                type="primary"
+            )
