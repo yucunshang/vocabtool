@@ -6,6 +6,7 @@ import random
 import json
 import time
 import zlib
+import sqlite3
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -79,8 +80,7 @@ def get_file_parsers():
     import ebooklib
     from ebooklib import epub
     from bs4 import BeautifulSoup
-    import sqlite3 # 新增 sqlite3
-    return pypdf, docx, ebooklib, epub, BeautifulSoup, sqlite3
+    return pypdf, docx, ebooklib, epub, BeautifulSoup
 
 def get_genanki():
     import genanki
@@ -123,12 +123,10 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. 文本提取逻辑 (已更新 Kindle 支持)
+# 2. 文本提取逻辑 (支持 DB 时间过滤)
 # ==========================================
-def extract_text_from_file(uploaded_file):
-    # 获取解析器
-    pypdf, docx, ebooklib, epub, BeautifulSoup, sqlite3 = get_file_parsers()
-    # 获取 tempfile (用于处理 sqlite 临时文件)
+def extract_text_from_file(uploaded_file, min_timestamp=0):
+    pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
     _, tempfile = get_genanki() 
     
     text = ""
@@ -138,9 +136,7 @@ def extract_text_from_file(uploaded_file):
         if file_type == 'txt':
             bytes_data = uploaded_file.getvalue()
             for encoding in ['utf-8', 'gb18030', 'latin-1']:
-                try:
-                    text = bytes_data.decode(encoding)
-                    break
+                try: text = bytes_data.decode(encoding); break
                 except: continue
         
         elif file_type == 'pdf':
@@ -163,10 +159,9 @@ def extract_text_from_file(uploaded_file):
             os.remove(tmp_path)
             
         # ==========================================
-        # 新增: Kindle vocab.db 处理逻辑
+        # Kindle DB 逻辑 (带时间过滤)
         # ==========================================
         elif file_type in ['db', 'sqlite']:
-            # SQLite 需要本地文件路径，不能直接读流
             with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp_db:
                 tmp_db.write(uploaded_file.getvalue())
                 tmp_db_path = tmp_db.name
@@ -175,20 +170,28 @@ def extract_text_from_file(uploaded_file):
                 conn = sqlite3.connect(tmp_db_path)
                 cursor = conn.cursor()
                 
-                # Kindle 的 vocab.db 通常包含 'WORDS' 表
-                # 我们尝试查询 'stem' (词干) 或 'word'
+                # 尝试联合查询时间戳
                 try:
-                    cursor.execute("SELECT stem FROM WORDS WHERE stem IS NOT NULL")
+                    query = """
+                        SELECT DISTINCT w.stem 
+                        FROM WORDS w 
+                        JOIN LOOKUPS l ON w.id = l.word_key 
+                        WHERE l.timestamp >= ?
+                    """
+                    cursor.execute(query, (min_timestamp,))
                     rows = cursor.fetchall()
-                    # 将提取到的单词拼接成字符串，以空格分隔
                     text = " ".join([r[0] for r in rows if r[0]])
                     
-                    if not text:
-                        # 如果 stem 为空，尝试查询 word
-                        cursor.execute("SELECT word FROM WORDS")
-                        rows = cursor.fetchall()
-                        text = " ".join([r[0] for r in rows if r[0]])
-                        
+                    # 兜底：如果没查到且没有时间限制，或表结构不对，尝试全量查询
+                    if not text and min_timestamp == 0:
+                         cursor.execute("SELECT stem FROM WORDS")
+                         rows = cursor.fetchall()
+                         text = " ".join([r[0] for r in rows if r[0]])
+                         if not text: # 再次兜底
+                            cursor.execute("SELECT word FROM WORDS")
+                            rows = cursor.fetchall()
+                            text = " ".join([r[0] for r in rows if r[0]])
+
                 except Exception as db_err:
                     text = f"Error reading DB schema: {db_err}"
                 
@@ -196,9 +199,7 @@ def extract_text_from_file(uploaded_file):
             except Exception as e:
                 text = f"Error connecting to DB: {e}"
             finally:
-                # 清理临时文件
-                if os.path.exists(tmp_db_path):
-                    os.remove(tmp_db_path)
+                if os.path.exists(tmp_db_path): os.remove(tmp_db_path)
 
     except Exception as e:
         return f"Error: {e}"
@@ -270,21 +271,16 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# 数据解析逻辑：增强版 (支持代码块)
+# 数据解析逻辑
 # ==========================================
 def parse_anki_data(raw_text):
-    """
-    解析 '|||' 分隔的文本流，支持Markdown代码块过滤
-    """
     parsed_cards = []
     text = raw_text.strip()
     
-    # 增强过滤：只提取 ```text 或 ``` 包裹的内容（如果存在）
     code_block = re.search(r'```(?:text|csv)?\s*(.*?)\s*```', text, re.DOTALL)
     if code_block:
         text = code_block.group(1)
     else:
-        # Fallback: 移除单行的 ``` 标记
         text = re.sub(r'^```.*$', '', text, flags=re.MULTILINE)
     
     lines = text.split('\n')
@@ -304,7 +300,6 @@ def parse_anki_data(raw_text):
         e = parts[2].strip() if len(parts) > 2 else ""
         r = parts[3].strip() if len(parts) > 3 else ""
 
-        # 简单去重
         if w.lower() in seen_phrases: 
             continue
         seen_phrases.add(w.lower())
@@ -375,12 +370,10 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# Prompt 逻辑 - 使用您指定的高级模板
+# Prompt 逻辑
 # ==========================================
 def get_ai_prompt(words):
     w_list = ", ".join(words)
-    
-    # 替换为您的定制化 Prompt
     return f"""
 # Role
 You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
@@ -437,25 +430,44 @@ tab_guide, tab_extract, tab_anki = st.tabs(["📖 使用指南", "1️⃣ 单词
 
 with tab_guide:
     st.markdown("""
-    ### 👋 欢迎使用
+    ### 👋 欢迎使用 Vocab Flow Ultra
     
-    **极速工作流：**
-    1. **提取**：上传 PDF/TXT/Kindle DB 提取生词。
-    2. **生成**：点击“复制代码”发送给 ChatGPT/Claude。
-    3. **制作**：将 AI 返回的代码块 (```text ...) 粘贴回来，生成 Anki 包。
+    本工具旨在将您的阅读积累转化为永久记忆。支持从各种文档或生词本中提取单词，并利用 AI 生成高质量 Anki 卡片。
     
-    **PRO 优化**：
-    * **专家级 Prompt**：专注于**自然搭配 (Collocations)** 和 **词源拆解**。
-    * **格式标准化**：严格的结构化输出，确保 100% 解析成功率。
-    * **代码块支持**：AI 输出结果直接复制，无需手动清洗。
-    * **支持 Kindle**：直接上传 `vocab.db` 处理 Kindle 生词本。
+    #### 📂 全面支持的文件格式
+    | 类型 | 扩展名 | 说明 |
+    | :--- | :--- | :--- |
+    | **Kindle 生词本** | `.db` / `.sqlite` | 直接上传 `system/vocabulary/vocab.db`，支持**按时间筛选**。 |
+    | **电子书** | `.epub` | 自动解析章节内容，去除 HTML 标签。 |
+    | **文档** | `.pdf` | 支持扫描版以外的标准 PDF 文本提取。 |
+    | **Word** | `.docx` | 提取段落文本，忽略图片和表格。 |
+    | **纯文本** | `.txt` | 支持 UTF-8, GBK 等常见编码。 |
+
+    ---
+
+    #### 💡 Kindle 生词本：删除后的“复活”技巧
+    很多用户习惯定期删除 `vocab.db` 来重置生词本，但删除后 Kindle 往往不再记录新词。
+    
+    **❌ 常见误区**：直接删除文件，然后继续阅读（Kindle 系统进程会丢失文件句柄，导致无法写入）。
+    
+    **✅ 正确做法 (二选一)**：
+    1.  **软重启 (推荐)**：在 Kindle 搜索栏输入 `;restart` 并回车。屏幕闪烁后，系统会重建数据库。
+    2.  **硬重启**：长按电源键 **40秒** 直至屏幕变黑重启。
+    
+    **🚀 最佳实践**：**不要删除文件！** 本工具的 **“📅 Kindle 时间过滤器”** 功能允许您只提取“最近 X 天”的生词。保留 `vocab.db` 可以作为您的永久阅读档案。
+    
+    ---
+    
+    #### ⚡️ 极速工作流
+    1. **提取**：在“单词提取”页上传文件。
+    2. **生成**：点击“复制代码”发送给 AI (ChatGPT/Claude)。
+    3. **制作**：将 AI 返回的代码块粘贴回“卡片制作”页，生成 `.apkg` 包。
     """)
 
 with tab_extract:
-    # 修改：增加了中间的 "📝 直接输入" Tab
     mode_context, mode_direct, mode_rank = st.tabs(["📄 语境分析", "📝 直接输入", "🔢 词频列表"])
     
-    # 模式1：语境分析 (原功能 + Kindle)
+    # 模式1：语境分析
     with mode_context:
         st.info("💡 **智能模式**：自动进行词形还原、去重和垃圾词清洗。")
         
@@ -464,15 +476,45 @@ with tab_extract:
         targ = c2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
         include_unknown = st.checkbox("🔓 包含生僻词/人名 (Rank > 20000)", value=False)
 
-        # 更新：支持 DB/SQLITE
-        uploaded_file = st.file_uploader("📂 上传文件 (TXT/PDF/EPUB/DB)", key=st.session_state['uploader_id'])
+        # === Kindle 时间过滤器 ===
+        st.caption("📅 **Kindle 时间过滤器** (仅针对 .db 文件生效)")
+        filter_mode = st.radio("提取范围", ["📅 所有历史单词", "🆕 仅提取某日期之后的单词"], horizontal=True, label_visibility="collapsed")
+        
+        min_ts = 0
+        if "仅提取" in filter_mode:
+            c_date, _ = st.columns(2)
+            # 默认提取最近 7 天
+            date_picked = c_date.date_input("选择起始日期", value=datetime.now() - timedelta(days=7))
+            min_ts = int(datetime.combine(date_picked, datetime.min.time()).timestamp() * 1000)
+        # =======================
+
+        uploaded_file = st.file_uploader(
+            "📂 上传文件 (支持 .db, .pdf, .docx, .epub, .txt)", 
+            key=st.session_state['uploader_id']
+        )
+        
+        # === Kindle 帮助提示 ===
+        with st.expander("❓ 删除了 vocab.db 导致无法记录生词？"):
+            st.info("""
+            **Kindle 停止记录生词了？**
+            如果您刚删除了 `vocab.db` 文件，Kindle 的后台服务可能卡死了。
+            
+            **解决方法**：
+            1. 打开 Kindle。
+            2. 点击顶部 **搜索栏**。
+            3. 输入代码 `;restart` 并回车（注意前面的分号）。
+            4. 等待界面刷新，生词本功能即可恢复。
+            """)
+        
         pasted_text = st.text_area("📄 ...或在此粘贴文本", height=100, key="paste_key")
         
         if st.button("🚀 开始分析", type="primary"):
             with st.status("正在处理中...", expanded=True) as status:
                 start_time = time.time()
                 status.write("📂 正在读取文件...")
-                raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
+                
+                # 传入 min_ts
+                raw_text = extract_text_from_file(uploaded_file, min_ts) if uploaded_file else pasted_text
                 
                 if len(raw_text) > 2:
                     status.write("🔍 正在分析文本复杂度...")
@@ -494,9 +536,7 @@ with tab_extract:
         
         if st.button("🚀 生成列表", key="btn_direct", type="primary"):
             if raw_input.strip():
-                # 使用正则分割：支持换行、逗号、制表符
                 words = [w.strip() for w in re.split(r'[,\n\t]+', raw_input) if w.strip()]
-                # 去重但保持顺序
                 seen = set()
                 unique_words = []
                 for w in words:
@@ -504,21 +544,20 @@ with tab_extract:
                         seen.add(w.lower())
                         unique_words.append(w)
                 
-                # 构建数据结构，尝试查找排名以便显示，但不进行过滤
                 data_list = []
                 for w in unique_words:
-                    rank = VOCAB_DICT.get(w.lower(), 99999) # 找不到则标记为生僻
+                    rank = VOCAB_DICT.get(w.lower(), 99999) 
                     data_list.append((w, rank))
                 
                 st.session_state['gen_words_data'] = data_list
                 st.session_state['raw_count'] = len(unique_words)
-                st.session_state['stats_info'] = None # 该模式无语境统计
+                st.session_state['stats_info'] = None 
                 
                 st.success(f"✅ 已加载 {len(unique_words)} 个单词")
             else:
                 st.warning("⚠️ 内容为空，请先粘贴单词。")
 
-    # 模式3：词频列表 (原功能)
+    # 模式3：词频列表
     with mode_rank:
         gen_type = st.radio("生成模式", ["🔢 顺序生成", "🔀 随机抽取"], horizontal=True)
         if "顺序生成" in gen_type:
@@ -552,11 +591,11 @@ with tab_extract:
                          st.session_state['raw_count'] = 0
                          st.session_state['stats_info'] = None
     
-    # 清空按钮通用
+    # 清空按钮
     if st.button("🗑️ 清空重置", type="secondary", on_click=clear_all_state, key="btn_clear_extract"): pass
 
     # ==========================================
-    # 结果展示区 (通用于所有模式)
+    # 结果展示区
     # ==========================================
     if 'gen_words_data' in st.session_state and st.session_state['gen_words_data']:
         data_pairs = st.session_state['gen_words_data']
@@ -594,10 +633,8 @@ with tab_extract:
         
         for idx, batch in enumerate(batches):
             with st.expander(f"📌 第 {idx+1} 组 (共 {len(batch)} 词)", expanded=(idx==0)):
-                # 调用新的 Prompt 逻辑
                 prompt_text = get_ai_prompt(batch)
                 st.markdown("👇 **点击右上角图标复制**")
-                # 使用 st.code 替代 text_area，实现自动复制按钮
                 st.code(prompt_text, language="text")
 
 with tab_anki:
