@@ -126,7 +126,7 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. 文本提取逻辑 (保持不变)
+# 2. 文本提取逻辑
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -227,7 +227,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# (重要) 数据解析逻辑：适配 Pipe 格式
+# 数据解析逻辑：适配 Pipe 格式
 # ==========================================
 def parse_anki_data(raw_text):
     """
@@ -236,7 +236,6 @@ def parse_anki_data(raw_text):
     """
     parsed_cards = []
     
-    # 清洗 Markdown 代码块
     text = raw_text.strip()
     text = re.sub(r'^```.*?\n', '', text, flags=re.MULTILINE)
     text = re.sub(r'\n```$', '', text, flags=re.MULTILINE)
@@ -251,17 +250,14 @@ def parse_anki_data(raw_text):
             
         parts = line.split("|||")
         
-        # 至少需要前两个字段
         if len(parts) < 2: 
             continue
         
-        # 提取字段
-        w = parts[0].strip() # 单词/短语
-        m = parts[1].strip() # 英文释义
-        e = parts[2].strip() if len(parts) > 2 else "" # 英文例句
-        r = parts[3].strip() if len(parts) > 3 else "" # 中文词源
+        w = parts[0].strip()
+        m = parts[1].strip()
+        e = parts[2].strip() if len(parts) > 2 else ""
+        r = parts[3].strip() if len(parts) > 3 else ""
 
-        # 去重
         if w.lower() in seen_phrases: 
             continue
         seen_phrases.add(w.lower())
@@ -276,12 +272,11 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 # ==========================================
-# (重要) Anki 生成逻辑
+# Anki 生成逻辑
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
     genanki, tempfile = get_genanki()
     
-    # CSS 样式表
     CSS = """
     .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .phrase { font-size: 28px; font-weight: 700; color: #0056b3; margin-bottom: 20px; }
@@ -295,20 +290,17 @@ def generate_anki_package(cards_data, deck_name):
     .nightMode .etymology { background-color: #333; color: #aaa; border-color: #444; }
     """
     
-    # 固定 Model ID
     MODEL_ID = 1842957301 
-    
-    # 固定 Deck ID (基于名称哈希，防止进度丢失)
     DECK_ID = zlib.adler32(deck_name.encode('utf-8'))
 
     model = genanki.Model(
         MODEL_ID, 
         'VocabFlow Phrase Model',
         fields=[
-            {'name': 'Phrase'},    # w
-            {'name': 'Meaning'},   # m
-            {'name': 'Example'},   # e
-            {'name': 'Etymology'}  # r
+            {'name': 'Phrase'},
+            {'name': 'Meaning'},
+            {'name': 'Example'},
+            {'name': 'Etymology'}
         ],
         templates=[{
             'name': 'Phrase Card',
@@ -343,12 +335,11 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# (重要) Prompt 逻辑 - 定制化词源要求
+# Prompt 逻辑 - 定制化词源要求
 # ==========================================
 def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     w_list = ", ".join(words)
     
-    # Prompt 使用英文以保证 AI 理解的准确性，但会明确要求 Etymology 输出中文
     return f"""
 Act as a professional lexicographer. Create Anki card data for the following words.
 
@@ -435,7 +426,8 @@ with tab_extract:
                 else:
                     status.update(label="⚠️ 内容太短", state="error")
         
-        if st.button("🗑️ 清空重置", type="secondary", on_click=clear_all_state): pass
+        # 修复点 1：增加 key 参数
+        if st.button("🗑️ 清空重置", type="secondary", on_click=clear_all_state, key="btn_clear_extract"): pass
 
     with mode_rank:
         gen_type = st.radio("生成模式", ["🔢 顺序生成", "🔀 随机抽取"], horizontal=True)
@@ -497,15 +489,12 @@ with tab_extract:
             st.markdown(f'<div class="scrollable-text">{display_text}</div>', unsafe_allow_html=True)
             st.code(display_text, language="text")
 
-        # 提示词设置区
         st.caption("提示：以下设置仅影响生成的 Prompt 内容")
-        # 移除了不需要的选项，简化设置
         batch_size = st.number_input("AI 分组大小 (Batch Size)", 50, 500, 150, step=10)
         batches = [words_only[i:i + batch_size] for i in range(0, len(words_only), batch_size)]
         
         for idx, batch in enumerate(batches):
             with st.expander(f"📌 第 {idx+1} 组 (共 {len(batch)} 词)", expanded=(idx==0)):
-                # 固定的 Prompt 逻辑，不再让用户选择混乱的选项
                 prompt_text = get_ai_prompt(batch, "Natural Phrase", "English", 1, True)
                 st.code(prompt_text, language="text")
 
@@ -538,7 +527,8 @@ with tab_anki:
     with c_btn1:
         start_gen = st.button("🚀 生成卡片", type="primary", use_container_width=True)
     with c_btn2:
-        st.button("🗑️ 清空重置", type="secondary", on_click=reset_anki_state)
+        # 修复点 2：增加 key 参数
+        st.button("🗑️ 清空重置", type="secondary", on_click=reset_anki_state, key="btn_clear_anki")
 
     if start_gen or st.session_state['anki_cards_cache'] is not None:
         if start_gen:
@@ -559,7 +549,6 @@ with tab_anki:
             
             with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
                 df_view = pd.DataFrame(cards)
-                # 重命名列头以便预览更直观
                 df_view.columns = ["正面(短语)", "英文释义", "英文例句", "中文词源"]
                 st.dataframe(df_view, use_container_width=True, hide_index=True)
 
