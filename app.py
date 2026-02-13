@@ -477,6 +477,12 @@ st.title("⚡️ Vocab Flow Ultra")
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv` 文件，请检查目录。")
 
+# === 修复点：将 voice_map 定义在全局或所有 Tabs 之前 ===
+voice_map = {
+    "👩 女声 (Jenny)": "en-US-JennyNeural",
+    "👨 男声 (Christopher)": "en-US-ChristopherNeural"
+}
+
 with st.expander("📖 使用指南 & 支持格式"):
     st.markdown("""
     **🚀 极速工作流**
@@ -600,10 +606,7 @@ with tab_extract:
             # 语音设置前置
             enable_audio_auto = st.checkbox("🔊 启用 AI 语音 (推荐)", value=True, key="chk_audio_auto")
         with auto_col_2:
-            voice_map = {
-                "👩 女声 (Jenny)": "en-US-JennyNeural",
-                "👨 男声 (Christopher)": "en-US-ChristopherNeural"
-            }
+            # 这里的 voice_map 已经改为引用全局变量
             selected_voice_label = st.selectbox("发音人", list(voice_map.keys()), key="sel_voice_auto")
             selected_voice_code = voice_map[selected_voice_label]
 
@@ -747,6 +750,7 @@ with tab_anki:
     with col_voice_sw:
         enable_audio = st.checkbox("🔊 启用 AI 语音合成", value=True, key="chk_audio_manual")
     with col_voice_sel:
+        # 这里之前报错，现在因为 voice_map 是全局变量，可以正常访问了
         st.selectbox("🎙️ 发音人", list(voice_map.keys()), key="sel_voice_manual")
         manual_voice_code = voice_map[st.session_state['sel_voice_manual']]
 
