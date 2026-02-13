@@ -53,6 +53,8 @@ st.markdown("""
     footer {visibility: hidden;}
     .stExpander { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
     .stProgress > div > div > div > div { background-color: #4CAF50; }
+    /* 风险提示样式 */
+    .ai-warning { font-size: 12px; color: #666; margin-top: -5px; margin-bottom: 10px; text-align: center; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -124,7 +126,7 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. 文本提取逻辑 (移除 OCR)
+# 2. 文本提取逻辑
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -133,6 +135,7 @@ def extract_text_from_file(uploaded_file):
     text = ""
     file_type = uploaded_file.name.split('.')[-1].lower()
     
+    # 增加通用异常捕获，防止单个文件解析崩溃导致应用报错
     try:
         if file_type == 'txt':
             bytes_data = uploaded_file.getvalue()
@@ -141,25 +144,36 @@ def extract_text_from_file(uploaded_file):
                 except: continue
         
         elif file_type == 'pdf':
-            reader = pypdf.PdfReader(uploaded_file)
-            text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            try:
+                reader = pypdf.PdfReader(uploaded_file)
+                text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            except Exception as e:
+                return f"Error parsing PDF: {e}"
         
         elif file_type == 'docx':
-            doc = docx.Document(uploaded_file)
-            text = "\n".join([p.text for p in doc.paragraphs])
+            try:
+                doc = docx.Document(uploaded_file)
+                text = "\n".join([p.text for p in doc.paragraphs])
+            except Exception as e:
+                return f"Error parsing DOCX: {e}"
         
         elif file_type == 'epub':
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.epub') as tmp:
-                tmp.write(uploaded_file.getvalue())
-                tmp_path = tmp.name
-            book = epub.read_epub(tmp_path)
-            for item in book.get_items():
-                if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                    soup = BeautifulSoup(item.get_content(), 'html.parser')
-                    text += soup.get_text(separator=' ', strip=True) + " "
-            os.remove(tmp_path)
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.epub') as tmp:
+                    tmp.write(uploaded_file.getvalue())
+                    tmp_path = tmp.name
+                book = epub.read_epub(tmp_path)
+                for item in book.get_items():
+                    if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                        soup = BeautifulSoup(item.get_content(), 'html.parser')
+                        text += soup.get_text(separator=' ', strip=True) + " "
+                os.remove(tmp_path)
+            except Exception as e:
+                 if os.path.exists(tmp_path): os.remove(tmp_path)
+                 return f"Error parsing EPUB: {e}"
             
         elif file_type in ['db', 'sqlite']:
+            # ... (Existing DB logic) ...
             with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp_db:
                 tmp_db.write(uploaded_file.getvalue())
                 tmp_db_path = tmp_db.name
@@ -183,7 +197,7 @@ def extract_text_from_file(uploaded_file):
                 if os.path.exists(tmp_db_path): os.remove(tmp_db_path)
 
     except Exception as e:
-        return f"Error: {e}"
+        return f"Unexpected Error: {e}"
     
     return text
 
@@ -252,7 +266,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# 3. AI 调用逻辑 (内置 AI - 简单模式)
+# 3. AI 调用逻辑 (增强稳定性：增加重试机制)
 # ==========================================
 def process_ai_in_batches(words_list, progress_callback=None):
     if not OpenAI:
@@ -273,9 +287,6 @@ def process_ai_in_batches(words_list, progress_callback=None):
     total_words = len(words_list)
     full_results = []
     
-    # === 内置 AI：简单卡片模式 (无词源字段) ===
-    # Front: Word
-    # Back: Meaning + Example
     system_prompt = "You are a helpful assistant for vocabulary learning."
     
     for i in range(0, total_words, BATCH_SIZE):
@@ -298,25 +309,33 @@ Output: hectic ||| 忙乱的，繁忙的 ||| She has a hectic schedule today.
 Input:
 {current_batch_str}
 """
-        try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7
-            )
-            content = response.choices[0].message.content
-            full_results.append(content)
-            
-            if progress_callback:
-                processed_count = min(i + BATCH_SIZE, total_words)
-                progress_callback(processed_count, total_words)
+        # === 核心修改：增加重试机制 (Retry Logic) ===
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7
+                )
+                content = response.choices[0].message.content
+                full_results.append(content)
                 
-        except Exception as e:
-            st.error(f"Batch {i//BATCH_SIZE + 1} failed: {e}")
-            continue
+                if progress_callback:
+                    processed_count = min(i + BATCH_SIZE, total_words)
+                    progress_callback(processed_count, total_words)
+                
+                break # 成功则跳出重试循环
+            
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(1 + attempt) # 失败等待 1s, 2s...
+                    continue
+                else:
+                    st.error(f"Batch {i//BATCH_SIZE + 1} failed after {max_retries} attempts: {e}")
             
     return "\n".join(full_results)
 
@@ -345,13 +364,10 @@ def parse_anki_data(raw_text):
         if len(parts) < 2: 
             continue
         
-        # === 兼容逻辑 ===
-        # 内置 AI (简单): Word, Meaning, Example (3 parts)
-        # 第三方 AI (复杂): Phrase, Definition, Example, Etymology (4 parts)
         w = parts[0].strip()
         m = parts[1].strip()
         e = parts[2].strip() if len(parts) > 2 else ""
-        r = parts[3].strip() if len(parts) > 3 else "" # 内置 AI 此字段为空
+        r = parts[3].strip() if len(parts) > 3 else "" 
 
         if w.lower() in seen_phrases: 
             continue
@@ -364,7 +380,7 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
-    """异步并发生成音频，带安全延时"""
+    """异步并发生成音频，带安全延时和重试"""
     semaphore = asyncio.Semaphore(concurrency)
     total_files = len(tasks)
     completed_files = 0
@@ -372,17 +388,23 @@ async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
     async def worker(task):
         nonlocal completed_files
         async with semaphore:
-            try:
-                if not os.path.exists(task['path']):
-                    comm = edge_tts.Communicate(task['text'], task['voice'])
-                    await comm.save(task['path'])
-                    await asyncio.sleep(random.uniform(0.1, 0.4)) 
-            except Exception as e:
-                print(f"TTS Error for {task['text']}: {e}")
-            finally:
-                completed_files += 1
-                if progress_callback:
-                    progress_callback(completed_files, total_files)
+            # === 核心修改：TTS 重试机制 ===
+            for attempt in range(3):
+                try:
+                    if not os.path.exists(task['path']):
+                        comm = edge_tts.Communicate(task['text'], task['voice'])
+                        await comm.save(task['path'])
+                        await asyncio.sleep(random.uniform(0.1, 0.4)) 
+                    break # 成功则跳出
+                except Exception as e:
+                    if attempt == 2:
+                        print(f"TTS Failed for {task['text']}: {e}")
+                    else:
+                        await asyncio.sleep(0.5) # 重试等待
+            
+            completed_files += 1
+            if progress_callback:
+                progress_callback(completed_files, total_files)
 
     jobs = [worker(t) for t in tasks]
     await asyncio.gather(*jobs)
@@ -402,7 +424,6 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
     genanki, tempfile = get_genanki()
     media_files = [] 
     
-    # 动态模板：词源部分仅在有内容时显示
     CSS = """
     .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .phrase { font-size: 28px; font-weight: 700; color: #0056b3; margin-bottom: 20px; }
@@ -594,7 +615,6 @@ with tab_extract:
         gen_type = st.radio("生成模式", ["🔢 顺序生成", "🔀 随机抽取"], horizontal=True)
         if "顺序生成" in gen_type:
              c_a, c_b = st.columns(2)
-             # === 修改点：数量最小改为 10，步长改为 10 ===
              s_rank = c_a.number_input("起始排名", 1, 20000, 8000, step=100)
              count = c_b.number_input("数量", 10, 5000, 10, step=10)
              if st.button("🚀 生成列表"):
@@ -610,7 +630,6 @@ with tab_extract:
              c_min, c_max, c_cnt = st.columns([1,1,1])
              min_r = c_min.number_input("最小排名", 1, 20000, 12000, step=100)
              max_r = c_max.number_input("最大排名", 1, 25000, 15000, step=100)
-             # === 修改点：数量最小改为 10，步长改为 10 ===
              r_count = c_cnt.number_input("抽取数量", 10, 5000, 10, step=10)
              if st.button("🎲 随机抽取"):
                  with st.spinner("正在抽取..."):
@@ -719,6 +738,7 @@ with tab_extract:
                         st.error("解析失败，AI 返回内容为空或格式错误。")
                 else:
                     st.error("AI 生成失败，请检查 API Key 或网络连接。")
+            st.caption("⚠️ AI 生成内容可能存在错误，请人工复核。")
 
         if st.session_state.get('anki_pkg_data'):
             st.download_button(
@@ -852,13 +872,15 @@ with tab_anki:
 
     if st.session_state['anki_cards_cache']:
         cards = st.session_state['anki_cards_cache']
-        with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
+        # === 预览数量限制为 10 ===
+        with st.expander("👀 预览卡片 (前 10 张)", expanded=True):
             df_view = pd.DataFrame(cards)
             # 动态调整预览表头，兼容不同列数
             cols = ["正面", "中文/英文释义", "例句"]
             if len(df_view.columns) > 3: cols.append("词源")
             df_view.columns = cols[:len(df_view.columns)]
-            st.dataframe(df_view, use_container_width=True, hide_index=True)
+            # 限制显示前 10 行
+            st.dataframe(df_view.head(10), use_container_width=True, hide_index=True)
 
         if st.session_state.get('anki_pkg_data'):
             st.download_button(
