@@ -408,7 +408,7 @@ def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
         r_instr = "Key `r`: Leave this empty string \"\"."
 
     return f"""
-Task: Create Anki cards.
+Task: Create Anki cards.Make sure to process everything at once, without missing anything.
 Words: {w_list}
 
 **CRITICAL: SEMANTIC ATOMICITY**
