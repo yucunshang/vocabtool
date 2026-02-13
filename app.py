@@ -129,7 +129,7 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. 核心逻辑 (修正了 Kindle DB 查询)
+# 2. 核心逻辑 (修复版)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -150,17 +150,19 @@ def extract_text_from_file(uploaded_file):
                 conn = sqlite3.connect(tmp_path)
                 cursor = conn.cursor()
                 
-                # 【核心修复】：移除 WHERE lang='en' 限制。
-                # 原因：很多 Kindle 书籍的语言标签是 'en-US', 'en-GB' 或空值，
-                # 严格限制会导致提取结果为空。
-                # 我们提取所有词，反正后续 is_valid_word 会清洗非英文内容。
+                # 【关键修复】取消 WHERE lang='en' 限制
+                # 很多 Kindle 书籍的语言标记为空或 en-US，限制会导致提取为空
                 cursor.execute("SELECT stem FROM WORDS")
                 
                 rows = cursor.fetchall()
                 # 拼接成字符串
                 text = " ".join([row[0] for row in rows if row[0]])
+                
+                if not text.strip():
+                    return "ERROR: 数据库读取成功，但未找到单词。请确认这是一个有效的 Kindle 生词本。"
+                    
             except Exception as e:
-                return f"数据库读取错误: {e}"
+                return f"ERROR_DB: 数据库读取错误 - {e}"
             finally:
                 if 'conn' in locals(): conn.close()
                 if os.path.exists(tmp_path): os.remove(tmp_path)
@@ -211,7 +213,7 @@ def extract_text_from_file(uploaded_file):
             os.remove(tmp_path)
             
     except Exception as e:
-        return f"Error: {e}"
+        return f"ERROR_FILE: {e}"
     return text
 
 def is_valid_word(word):
@@ -486,11 +488,14 @@ with tab_extract:
                 status.write("📂 读取文件并清洗...")
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
-                if len(raw_text) > 2:
+                # 【新增逻辑】如果提取过程报错返回了 ERROR_ 开头的信息，直接阻断
+                if raw_text.startswith("ERROR_"):
+                    st.error(raw_text)
+                    status.update(label="❌ 解析出错", state="error")
+                elif len(raw_text) > 2:
                     status.write("🔍 智能分析与词频比对...")
                     final_data, raw_count, stats_info = analyze_logic(raw_text, curr, targ, include_unknown)
                     
-                    # 关键修改：增加判空提示
                     if not final_data:
                         st.warning(f"分析完成，但所有 {raw_count} 个单词都被过滤掉了。请尝试调小'忽略排名前 N 的词'或勾选'包含生僻词'。")
                         status.update(label="⚠️ 结果为空", state="error")
