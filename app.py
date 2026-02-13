@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 # 0. 页面配置
 # ==========================================
 st.set_page_config(
-    page_title="Vocab Flow Ultra (Pro)", 
+    page_title="Vocab Flow Ultra", 
     page_icon="⚡️", 
     layout="centered", 
     initial_sidebar_state="collapsed"
@@ -110,7 +110,7 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. 文本提取逻辑 (无时间过滤版)
+# 2. 文本提取逻辑
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -145,9 +145,6 @@ def extract_text_from_file(uploaded_file):
                     text += soup.get_text(separator=' ', strip=True) + " "
             os.remove(tmp_path)
             
-        # ==========================================
-        # Kindle DB 逻辑 (提取全部)
-        # ==========================================
         elif file_type in ['db', 'sqlite']:
             with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp_db:
                 tmp_db.write(uploaded_file.getvalue())
@@ -156,22 +153,16 @@ def extract_text_from_file(uploaded_file):
             try:
                 conn = sqlite3.connect(tmp_db_path)
                 cursor = conn.cursor()
-                
                 try:
-                    # 优先提取 STEM (词干)
                     cursor.execute("SELECT stem FROM WORDS WHERE stem IS NOT NULL")
                     rows = cursor.fetchall()
                     text = " ".join([r[0] for r in rows if r[0]])
-                    
-                    # 兜底：如果 STEM 为空，提取原始 Word
                     if not text:
                          cursor.execute("SELECT word FROM WORDS")
                          rows = cursor.fetchall()
                          text = " ".join([r[0] for r in rows if r[0]])
-
                 except Exception as db_err:
                     text = f"Error reading DB schema: {db_err}"
-                
                 conn.close()
             except Exception as e:
                 text = f"Error connecting to DB: {e}"
@@ -403,73 +394,46 @@ st.title("⚡️ Vocab Flow Ultra")
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv` 文件，请检查目录。")
 
-tab_guide, tab_extract, tab_anki = st.tabs(["📖 使用指南", "1️⃣ 单词提取", "2️⃣ 卡片制作"])
-
-with tab_guide:
+# --- 使用指南 (折叠栏) ---
+with st.expander("📖 使用指南 & 支持格式"):
     st.markdown("""
-    ### 👋 欢迎使用 Vocab Flow Ultra
+    **🚀 极速工作流**
+    1. **提取**：在“单词提取”页上传文件或粘贴文本。
+    2. **生成**：复制生成的 AI 提示词发送给 ChatGPT/Claude。
+    3. **制作**：将 AI 返回的代码块粘贴回“卡片制作”页，下载 `.apkg`。
     
-    本工具旨在将您的阅读积累转化为永久记忆。支持从各种文档或生词本中提取单词，并利用 AI 生成高质量 Anki 卡片。
-    
-    #### 📂 全面支持的文件格式
-    | 类型 | 扩展名 | 说明 |
-    | :--- | :--- | :--- |
-    | **Kindle 生词本** | `.db` / `.sqlite` | 直接上传 `system/vocabulary/vocab.db`。 |
-    | **电子书** | `.epub` | 自动解析章节内容，去除 HTML 标签。 |
-    | **文档** | `.pdf` | 支持扫描版以外的标准 PDF 文本提取。 |
-    | **Word** | `.docx` | 提取段落文本，忽略图片和表格。 |
-    | **纯文本** | `.txt` | 支持 UTF-8, GBK 等常见编码。 |
-
-    ---
-
-    #### 💡 Kindle 生词本：防卡死技巧
-    如果您习惯删除 `vocab.db` 来清空生词本，请务必执行以下操作，否则 Kindle 将无法记录新词：
-    
-    1.  **删除文件**：将 `vocab.db` 移出或删除。
-    2.  **必须重启**：长按电源键 **40秒**，或在 Kindle 搜索栏输入 `;restart` 并回车。
-    3.  **恢复正常**：重启后系统会自动重建数据库，生词本即可恢复使用。
-    
-    ---
-    
-    #### ⚡️ 极速工作流
-    1. **提取**：在“单词提取”页上传文件。
-    2. **生成**：点击“复制代码”发送给 AI (ChatGPT/Claude)。
-    3. **制作**：将 AI 返回的代码块粘贴回“卡片制作”页，生成 `.apkg` 包。
+    **📂 支持格式**
+    * **Kindle**: `vocab.db` (若删除文件请务必重启Kindle)
+    * **电子书**: `.epub`
+    * **文档**: `.pdf`, `.docx`, `.txt`
     """)
+
+tab_extract, tab_anki = st.tabs(["1️⃣ 单词提取", "2️⃣ 卡片制作"])
 
 with tab_extract:
     mode_context, mode_direct, mode_rank = st.tabs(["📄 语境分析", "📝 直接输入", "🔢 词频列表"])
     
     # 模式1：语境分析
     with mode_context:
-        st.info("💡 **智能模式**：自动进行词形还原、去重和垃圾词清洗。")
-        
         c1, c2 = st.columns(2)
         curr = c1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100)
         targ = c2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
-        include_unknown = st.checkbox("🔓 包含生僻词/人名 (Rank > 20000)", value=False)
-
-        uploaded_file = st.file_uploader(
-            "📂 上传文件 (支持 .db, .pdf, .docx, .epub, .txt)", 
-            key=st.session_state['uploader_id']
-        )
         
-        # === 简洁的 Kindle 提示 ===
-        with st.expander("❓ 删除了 vocab.db 导致无法记录生词？"):
-            st.warning("**解决方法：必须重启 Kindle**\n\n请长按电源键 40 秒，或者在搜索栏输入 `;restart` 并回车。")
-        
-        pasted_text = st.text_area("📄 ...或在此粘贴文本", height=100, key="paste_key")
+        # 合并上传与粘贴
+        st.markdown("#### 📥 导入内容")
+        uploaded_file = st.file_uploader("直接上传文件 (支持 .db, .pdf, .epub, .txt)", key=st.session_state['uploader_id'], label_visibility="collapsed")
+        pasted_text = st.text_area("或在此粘贴文本", height=100, key="paste_key", placeholder="支持直接粘贴文章内容...")
         
         if st.button("🚀 开始分析", type="primary"):
             with st.status("正在处理中...", expanded=True) as status:
                 start_time = time.time()
-                status.write("📂 正在读取文件...")
                 
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
                 if len(raw_text) > 2:
-                    status.write("🔍 正在分析文本复杂度...")
-                    final_data, raw_count, stats_info = analyze_logic(raw_text, curr, targ, include_unknown)
+                    status.write("🔍 正在分析...")
+                    # include_unknown 强制为 False
+                    final_data, raw_count, stats_info = analyze_logic(raw_text, curr, targ, False)
                     
                     st.session_state['gen_words_data'] = final_data
                     st.session_state['raw_count'] = raw_count
@@ -482,7 +446,7 @@ with tab_extract:
     
     # 模式2：直接输入
     with mode_direct:
-        st.info("💡 **直接模式**：不进行词频过滤，直接为粘贴的单词生成 Prompt。")
+        st.info("💡 **直接模式**：直接为列表生成 Prompt，不过滤词频。")
         raw_input = st.text_area("✍️ 粘贴单词列表 (每行一个 或 逗号分隔)", height=200, placeholder="altruism\nhectic\nserendipity")
         
         if st.button("🚀 生成列表", key="btn_direct", type="primary"):
@@ -513,7 +477,7 @@ with tab_extract:
         gen_type = st.radio("生成模式", ["🔢 顺序生成", "🔀 随机抽取"], horizontal=True)
         if "顺序生成" in gen_type:
              c_a, c_b = st.columns(2)
-             s_rank = c_a.number_input("起始排名", 1, 20000, 1000, step=100)
+             s_rank = c_a.number_input("起始排名", 1, 20000, 8000, step=100)
              count = c_b.number_input("数量", 10, 5000, 50, step=50)
              if st.button("🚀 生成列表"):
                  if FULL_DF is not None:
@@ -526,8 +490,8 @@ with tab_extract:
                      st.session_state['stats_info'] = None
         else:
              c_min, c_max, c_cnt = st.columns([1,1,1])
-             min_r = c_min.number_input("最小排名", 1, 20000, 1, step=100)
-             max_r = c_max.number_input("最大排名", 1, 25000, 5000, step=100)
+             min_r = c_min.number_input("最小排名", 1, 20000, 12000, step=100)
+             max_r = c_max.number_input("最大排名", 1, 25000, 15000, step=100)
              r_count = c_cnt.number_input("抽取数量", 10, 5000, 50, step=50)
              if st.button("🎲 随机抽取"):
                  if FULL_DF is not None:
