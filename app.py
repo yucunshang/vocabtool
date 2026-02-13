@@ -20,7 +20,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 动态 Key 初始化
 if 'uploader_id' not in st.session_state:
     st.session_state['uploader_id'] = "1000"
 
@@ -32,23 +31,12 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     .stExpander { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
-    
-    /* 滚动容器样式 */
     .scrollable-text {
-        max-height: 200px;
-        overflow-y: auto;
-        padding: 10px;
-        border: 1px solid #eee;
-        border-radius: 5px;
-        background-color: #fafafa;
-        font-family: monospace;
-        white-space: pre-wrap;
+        max-height: 200px; overflow-y: auto; padding: 10px;
+        border: 1px solid #eee; border-radius: 5px; background-color: #fafafa;
+        font-family: monospace; white-space: pre-wrap;
     }
-    
-    /* 优化 st.code 的显示 */
     .stCodeBlock { border: 1px solid #d1d5db; border-radius: 8px; }
-
-    /* 夜间模式适配 */
     @media (prefers-color-scheme: dark) {
         .scrollable-text { background-color: #262730; border: 1px solid #444; color: #ccc; }
         .stCodeBlock { border: 1px solid #444; }
@@ -89,7 +77,6 @@ def get_genanki():
 
 @st.cache_data
 def load_vocab_data():
-    """加载 COCA 词频表"""
     possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next((f for f in possible_files if os.path.exists(f)), None)
     if file_path:
@@ -123,9 +110,9 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. 文本提取逻辑 (支持 DB 时间过滤)
+# 2. 文本提取逻辑 (无时间过滤版)
 # ==========================================
-def extract_text_from_file(uploaded_file, min_timestamp=0):
+def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
     _, tempfile = get_genanki() 
     
@@ -159,7 +146,7 @@ def extract_text_from_file(uploaded_file, min_timestamp=0):
             os.remove(tmp_path)
             
         # ==========================================
-        # Kindle DB 逻辑 (带时间过滤)
+        # Kindle DB 逻辑 (提取全部)
         # ==========================================
         elif file_type in ['db', 'sqlite']:
             with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp_db:
@@ -170,27 +157,17 @@ def extract_text_from_file(uploaded_file, min_timestamp=0):
                 conn = sqlite3.connect(tmp_db_path)
                 cursor = conn.cursor()
                 
-                # 尝试联合查询时间戳
                 try:
-                    query = """
-                        SELECT DISTINCT w.stem 
-                        FROM WORDS w 
-                        JOIN LOOKUPS l ON w.id = l.word_key 
-                        WHERE l.timestamp >= ?
-                    """
-                    cursor.execute(query, (min_timestamp,))
+                    # 优先提取 STEM (词干)
+                    cursor.execute("SELECT stem FROM WORDS WHERE stem IS NOT NULL")
                     rows = cursor.fetchall()
                     text = " ".join([r[0] for r in rows if r[0]])
                     
-                    # 兜底：如果没查到且没有时间限制，或表结构不对，尝试全量查询
-                    if not text and min_timestamp == 0:
-                         cursor.execute("SELECT stem FROM WORDS")
+                    # 兜底：如果 STEM 为空，提取原始 Word
+                    if not text:
+                         cursor.execute("SELECT word FROM WORDS")
                          rows = cursor.fetchall()
                          text = " ".join([r[0] for r in rows if r[0]])
-                         if not text: # 再次兜底
-                            cursor.execute("SELECT word FROM WORDS")
-                            rows = cursor.fetchall()
-                            text = " ".join([r[0] for r in rows if r[0]])
 
                 except Exception as db_err:
                     text = f"Error reading DB schema: {db_err}"
@@ -437,7 +414,7 @@ with tab_guide:
     #### 📂 全面支持的文件格式
     | 类型 | 扩展名 | 说明 |
     | :--- | :--- | :--- |
-    | **Kindle 生词本** | `.db` / `.sqlite` | 直接上传 `system/vocabulary/vocab.db`，支持**按时间筛选**。 |
+    | **Kindle 生词本** | `.db` / `.sqlite` | 直接上传 `system/vocabulary/vocab.db`。 |
     | **电子书** | `.epub` | 自动解析章节内容，去除 HTML 标签。 |
     | **文档** | `.pdf` | 支持扫描版以外的标准 PDF 文本提取。 |
     | **Word** | `.docx` | 提取段落文本，忽略图片和表格。 |
@@ -445,16 +422,12 @@ with tab_guide:
 
     ---
 
-    #### 💡 Kindle 生词本：删除后的“复活”技巧
-    很多用户习惯定期删除 `vocab.db` 来重置生词本，但删除后 Kindle 往往不再记录新词。
+    #### 💡 Kindle 生词本：防卡死技巧
+    如果您习惯删除 `vocab.db` 来清空生词本，请务必执行以下操作，否则 Kindle 将无法记录新词：
     
-    **❌ 常见误区**：直接删除文件，然后继续阅读（Kindle 系统进程会丢失文件句柄，导致无法写入）。
-    
-    **✅ 正确做法 (二选一)**：
-    1.  **软重启 (推荐)**：在 Kindle 搜索栏输入 `;restart` 并回车。屏幕闪烁后，系统会重建数据库。
-    2.  **硬重启**：长按电源键 **40秒** 直至屏幕变黑重启。
-    
-    **🚀 最佳实践**：**不要删除文件！** 本工具的 **“📅 Kindle 时间过滤器”** 功能允许您只提取“最近 X 天”的生词。保留 `vocab.db` 可以作为您的永久阅读档案。
+    1.  **删除文件**：将 `vocab.db` 移出或删除。
+    2.  **必须重启**：长按电源键 **40秒**，或在 Kindle 搜索栏输入 `;restart` 并回车。
+    3.  **恢复正常**：重启后系统会自动重建数据库，生词本即可恢复使用。
     
     ---
     
@@ -476,35 +449,14 @@ with tab_extract:
         targ = c2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
         include_unknown = st.checkbox("🔓 包含生僻词/人名 (Rank > 20000)", value=False)
 
-        # === Kindle 时间过滤器 ===
-        st.caption("📅 **Kindle 时间过滤器** (仅针对 .db 文件生效)")
-        filter_mode = st.radio("提取范围", ["📅 所有历史单词", "🆕 仅提取某日期之后的单词"], horizontal=True, label_visibility="collapsed")
-        
-        min_ts = 0
-        if "仅提取" in filter_mode:
-            c_date, _ = st.columns(2)
-            # 默认提取最近 7 天
-            date_picked = c_date.date_input("选择起始日期", value=datetime.now() - timedelta(days=7))
-            min_ts = int(datetime.combine(date_picked, datetime.min.time()).timestamp() * 1000)
-        # =======================
-
         uploaded_file = st.file_uploader(
             "📂 上传文件 (支持 .db, .pdf, .docx, .epub, .txt)", 
             key=st.session_state['uploader_id']
         )
         
-        # === Kindle 帮助提示 ===
+        # === 简洁的 Kindle 提示 ===
         with st.expander("❓ 删除了 vocab.db 导致无法记录生词？"):
-            st.info("""
-            **Kindle 停止记录生词了？**
-            如果您刚删除了 `vocab.db` 文件，Kindle 的后台服务可能卡死了。
-            
-            **解决方法**：
-            1. 打开 Kindle。
-            2. 点击顶部 **搜索栏**。
-            3. 输入代码 `;restart` 并回车（注意前面的分号）。
-            4. 等待界面刷新，生词本功能即可恢复。
-            """)
+            st.warning("**解决方法：必须重启 Kindle**\n\n请长按电源键 40 秒，或者在搜索栏输入 `;restart` 并回车。")
         
         pasted_text = st.text_area("📄 ...或在此粘贴文本", height=100, key="paste_key")
         
@@ -513,8 +465,7 @@ with tab_extract:
                 start_time = time.time()
                 status.write("📂 正在读取文件...")
                 
-                # 传入 min_ts
-                raw_text = extract_text_from_file(uploaded_file, min_ts) if uploaded_file else pasted_text
+                raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
                 if len(raw_text) > 2:
                     status.write("🔍 正在分析文本复杂度...")
