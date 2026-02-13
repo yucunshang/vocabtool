@@ -694,7 +694,8 @@ with tab_anki:
             
             with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
                 df_view = pd.DataFrame(cards)
-                df_view.columns = ["正面(短语)", "英文释义", "英文例句", "中文词源", "音频(正)", "音频(反)"]
+                # Fixed: Match column names to the 4 fields in parsed data
+                df_view.columns = ["正面(短语)", "英文释义", "英文例句", "中文词源"]
                 st.dataframe(df_view, use_container_width=True, hide_index=True)
 
             try:
