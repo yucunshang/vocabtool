@@ -34,6 +34,10 @@ if 'uploader_id' not in st.session_state:
 # 初始化跨 Tab 共享的数据
 if 'anki_input_text' not in st.session_state:
     st.session_state['anki_input_text'] = ""
+if 'anki_pkg_data' not in st.session_state: 
+    st.session_state['anki_pkg_data'] = None
+if 'anki_pkg_name' not in st.session_state: 
+    st.session_state['anki_pkg_name'] = ""
 
 st.markdown("""
 <style>
@@ -115,7 +119,7 @@ def get_beijing_time_str():
     return beijing_now.strftime('%m%d_%H%M')
 
 def clear_all_state():
-    keys_to_drop = ['gen_words_data', 'raw_count', 'process_time', 'stats_info']
+    keys_to_drop = ['gen_words_data', 'raw_count', 'process_time', 'stats_info', 'anki_pkg_data', 'anki_pkg_name', 'anki_input_text']
     for k in keys_to_drop:
         if k in st.session_state:
             del st.session_state[k]
@@ -252,7 +256,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# 3. AI 调用逻辑 (新增)
+# 3. AI 调用逻辑 (更新：精简 Prompt)
 # ==========================================
 def call_ai_generation(words_list):
     """调用内置 AI 生成 Prompt 结果"""
@@ -270,17 +274,17 @@ def call_ai_generation(words_list):
     
     client = OpenAI(api_key=api_key, base_url=base_url)
     
-    # 构建用户指定的 Prompt
+    # 构建用户指定的精简 Prompt (正面只有单词)
     words_str = "\n".join(words_list)
     system_prompt = "You are a helpful assistant."
     user_prompt = f"""
-Task: Convert words to Collocations for Anki.
-Format: Phrase ||| Definition ||| Sentence
-Rule: NEVER output single words. Use natural chunks.
+Task: Convert words to Anki cards.
+Format: Word ||| Definition ||| Sentence
+Rule: Front must be the Word only. Keep it simple.
 
 Example:
 Input: hectic
-Output: a hectic schedule ||| full of frantic activity ||| She has a hectic schedule today.
+Output: hectic ||| full of frantic activity ||| She has a hectic schedule today.
 
 Input:
 {words_str}
@@ -300,7 +304,7 @@ Input:
         return None
 
 # ==========================================
-# 4. 数据解析与 TTS (更新：支持男/女声)
+# 4. 数据解析与 TTS
 # ==========================================
 def parse_anki_data(raw_text):
     parsed_cards = []
@@ -328,7 +332,7 @@ def parse_anki_data(raw_text):
         w = parts[0].strip()
         m = parts[1].strip()
         e = parts[2].strip() if len(parts) > 2 else ""
-        # 兼容旧 prompt 可能存在的第4个字段，虽然新 prompt 只要3个
+        # 兼容第三方 Prompt 的第4个字段 (词源)
         r = parts[3].strip() if len(parts) > 3 else ""
 
         if w.lower() in seen_phrases: 
@@ -356,7 +360,7 @@ def run_async_task(task):
     finally:
         loop.close()
 
-def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en-US-JennyNeural"):
+def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en-US-JennyNeural", progress_callback=None):
     genanki, tempfile = get_genanki()
     media_files = [] 
     
@@ -405,8 +409,10 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
     
     deck = genanki.Deck(DECK_ID, deck_name)
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    # 如果没有传入回调，使用 st.empty 避免报错
+    if progress_callback is None:
+        def progress_callback(x, text): pass
+
     total_cards = len(cards_data)
     tmp_dir = tempfile.gettempdir()
 
@@ -421,6 +427,8 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
 
         if enable_tts and phrase:
             try:
+                progress_callback((idx + 1) / total_cards, f"🔊 生成语音 ({idx+1}/{total_cards}): {phrase}")
+                
                 safe_phrase = re.sub(r'[^a-zA-Z0-9]', '_', phrase)[:20]
                 unique_id = int(time.time() * 1000) + random.randint(0, 9999)
                 
@@ -430,7 +438,6 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
                 path_phrase = os.path.join(tmp_dir, f_phrase_name)
                 path_example = os.path.join(tmp_dir, f_example_name)
                 
-                # 传入选择的 tts_voice
                 run_async_task(generate_audio(phrase, path_phrase, tts_voice))
                 if os.path.exists(path_phrase):
                     media_files.append(path_phrase)
@@ -442,20 +449,16 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
                         media_files.append(path_example)
                         audio_example_field = f"[sound:{f_example_name}]"
                 
-                status_text.text(f"正在生成语音 ({idx+1}/{total_cards}): {phrase}")
             except Exception as e:
                 print(f"TTS Error for {phrase}: {e}")
+        else:
+             progress_callback((idx + 1) / total_cards, f"📥 打包卡片 ({idx+1}/{total_cards}): {phrase}")
 
         deck.add_note(genanki.Note(
             model=model, 
             fields=[phrase, meaning, example, etym, audio_phrase_field, audio_example_field]
         ))
         
-        progress_bar.progress((idx + 1) / total_cards)
-
-    status_text.empty()
-    progress_bar.empty()
-    
     package = genanki.Package(deck)
     package.media_files = media_files
     
@@ -478,8 +481,7 @@ with st.expander("📖 使用指南 & 支持格式"):
     st.markdown("""
     **🚀 极速工作流**
     1. **提取**：在“单词提取”页上传文件或粘贴文本。
-    2. **生成**：点击“使用内置 AI 生成”或手动复制 Prompt。
-    3. **制作**：生成的卡片内容会自动填入“卡片制作”页，下载 `.apkg`。
+    2. **生成**：点击“使用内置 AI 生成”，系统将自动完成文本生成、语音合成并打包下载。
     """)
 
 tab_extract, tab_anki = st.tabs(["1️⃣ 单词提取", "2️⃣ 卡片制作"])
@@ -590,55 +592,138 @@ with tab_extract:
             st.code(display_text, language="text")
 
         st.divider()
-        st.subheader("🤖 AI 智能生成")
+        st.subheader("🤖 一键生成 Anki 牌组")
         
+        # === 自动化控制面板 ===
+        auto_col_1, auto_col_2 = st.columns([2, 1])
+        with auto_col_1:
+            # 语音设置前置
+            enable_audio_auto = st.checkbox("🔊 启用 AI 语音 (推荐)", value=True, key="chk_audio_auto")
+        with auto_col_2:
+            voice_map = {
+                "👩 女声 (Jenny)": "en-US-JennyNeural",
+                "👨 男声 (Christopher)": "en-US-ChristopherNeural"
+            }
+            selected_voice_label = st.selectbox("发音人", list(voice_map.keys()), key="sel_voice_auto")
+            selected_voice_code = voice_map[selected_voice_label]
+
         col_ai_btn, col_copy_hint = st.columns([1, 2])
         
-        # === 新增：内置 AI 按钮 ===
+        # === 内置 AI 按钮 (全自动流程) ===
         with col_ai_btn:
             if st.button("✨ 使用内置 AI 生成", type="primary", use_container_width=True):
-                with st.spinner("🤖 AI 正在思考中... 请稍候"):
-                    # 限制一次发送的数量，防止 Token 溢出，这里简单截取前 50 个做演示
-                    # 实际使用可分批，但为了简洁，这里取前 50 个
+                # 1. AI 生成
+                with st.spinner("🤖 AI 正在思考中..."):
                     batch_words = words_only[:50] 
                     if len(words_only) > 50:
                         st.toast(f"⚠️ 单词较多，仅处理前 50 个用于演示", icon="ℹ️")
                     
                     ai_result = call_ai_generation(batch_words)
+                
+                # 2. 自动化处理
+                if ai_result:
+                    st.session_state['anki_input_text'] = ai_result
                     
-                    if ai_result:
-                        st.session_state['anki_input_text'] = ai_result
-                        st.success("✅ 生成成功！内容已填入“卡片制作”页面。")
-                        st.balloons()
+                    # 显示进度条容器
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    def update_progress(p, text):
+                        progress_bar.progress(p)
+                        status_text.text(text)
+                    
+                    # 解析与生成 APKG
+                    parsed_data = parse_anki_data(ai_result)
+                    if parsed_data:
+                        try:
+                            deck_name = f"Vocab_{get_beijing_time_str()}"
+                            f_path = generate_anki_package(
+                                parsed_data, 
+                                deck_name, 
+                                enable_tts=enable_audio_auto, 
+                                tts_voice=selected_voice_code,
+                                progress_callback=update_progress
+                            )
+                            with open(f_path, "rb") as f:
+                                st.session_state['anki_pkg_data'] = f.read()
+                            st.session_state['anki_pkg_name'] = f"{deck_name}.apkg"
+                            
+                            status_text.text("✅ 处理完成！")
+                            st.balloons()
+                        except Exception as e:
+                            st.error(f"生成出错: {e}")
                     else:
-                        st.error("生成失败，请检查 API 配置。")
+                        st.error("解析失败，AI 返回格式异常。")
+                else:
+                    st.error("AI 生成失败。")
+
+        # === 下载按钮直接显示在这里 ===
+        if st.session_state.get('anki_pkg_data'):
+            st.download_button(
+                label=f"📥 立即下载 {st.session_state['anki_pkg_name']}",
+                data=st.session_state['anki_pkg_data'],
+                file_name=st.session_state['anki_pkg_name'],
+                mime="application/octet-stream",
+                type="primary",
+                use_container_width=True
+            )
 
         with col_copy_hint:
-            st.info("👈 点击左侧按钮直接调用 AI，或复制下方 Prompt 手动生成。")
+            st.info("👈 点击按钮自动生成并下载。如需使用 ChatGPT/Claude，请复制下方 Prompt。")
 
-        # 备用：手动复制 Prompt
-        with st.expander("📌 手动复制 Prompt (备用)"):
-            prompt_text = f"""Task: Convert words to Collocations for Anki.
-Format: Phrase ||| Definition ||| Sentence
-Rule: NEVER output single words. Use natural chunks.
-
-Example:
-Input: hectic
-Output: a hectic schedule ||| full of frantic activity ||| She has a hectic schedule today.
-
-Input:
+        # 第三方 Prompt (详细版)
+        with st.expander("📌 手动复制 Prompt (第三方 AI 用)"):
+            prompt_text = f"""# Role
+You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
+Make sure to process everything in one go, without missing anything.
+# Input Data
 {", ".join(words_only)}
+
+# Output Format Guidelines
+1. **Output Container**: Strictly inside a single ```text code block.
+2. **Layout**: One entry per line.
+3. **Separator**: Use `|||` as the delimiter.
+4. **Target Structure**:
+   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
+
+# Field Constraints (Strict)
+1. **Field 1: Phrase (CRITICAL)**
+   - DO NOT output the single target word.
+   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
+   - Example: If input is "rain", output "heavy rain" or "torrential rain".
+   
+2. **Field 2: Definition (English)**
+   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
+
+3. **Field 3: Example**
+   - A short, authentic sentence containing the phrase.
+
+4. **Field 4: Roots/Etymology (Simplified Chinese)**
+   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
+   - If no classical roots exist, explain the origin briefly in Chinese.
+   - Use Simplified Chinese for meanings.
+
+# Valid Example (Follow this logic strictly)
+Input: altruism
+Output:
+motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
+
+Input: hectic
+Output:
+a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
+
+# Task
+Process the provided input list strictly adhering to the format above.
 """
             st.code(prompt_text, language="text")
 
-# ----------------- Tab 2: 卡片制作 -----------------
+# ----------------- Tab 2: 卡片制作 (手动模式) -----------------
 with tab_anki:
-    st.markdown("### 📦 制作 Anki 牌组")
+    st.markdown("### 📦 手动制作 Anki 牌组")
+    st.caption("如果你使用了“内置 AI 生成”，可以直接在 Tab 1 下载，无需在此操作。此页面主要用于处理第三方 AI 生成的文本。")
     
     # 状态管理
     if 'anki_cards_cache' not in st.session_state: st.session_state['anki_cards_cache'] = None
-    if 'anki_pkg_data' not in st.session_state: st.session_state['anki_pkg_data'] = None
-    if 'anki_pkg_name' not in st.session_state: st.session_state['anki_pkg_name'] = ""
     
     def reset_anki_state():
         st.session_state['anki_cards_cache'] = None
@@ -651,26 +736,19 @@ with tab_anki:
         bj_time_str = get_beijing_time_str()
         deck_name = st.text_input("🏷️ 牌组名称", f"Vocab_{bj_time_str}")
     
-    # 输入框绑定到 session_state，以便 AI 生成后自动填充
     ai_resp = st.text_area(
-        "粘贴 AI 返回内容 (如果使用了内置 AI，此处会自动填充)", 
+        "粘贴 AI 返回内容", 
         height=300, 
         key="anki_input_text",
         placeholder='a hectic schedule ||| full of frantic activity ||| She has a hectic schedule today.'
     )
     
-    # === 新增：语音选择与开关 ===
     col_voice_sw, col_voice_sel = st.columns(2)
     with col_voice_sw:
-        enable_audio = st.checkbox("🔊 启用 AI 语音合成 (推荐)", value=True)
+        enable_audio = st.checkbox("🔊 启用 AI 语音合成", value=True, key="chk_audio_manual")
     with col_voice_sel:
-        # 映射显示名称到 Edge-TTS 内部代号
-        voice_map = {
-            "👩 女声 (Jenny - 美式)": "en-US-JennyNeural",
-            "👨 男声 (Christopher - 美式)": "en-US-ChristopherNeural"
-        }
-        selected_voice_label = st.selectbox("🎙️ 选择发音人", list(voice_map.keys()))
-        selected_voice_code = voice_map[selected_voice_label]
+        st.selectbox("🎙️ 发音人", list(voice_map.keys()), key="sel_voice_manual")
+        manual_voice_code = voice_map[st.session_state['sel_voice_manual']]
 
     c_btn1, c_btn2 = st.columns([1, 4])
     with c_btn1:
@@ -678,41 +756,45 @@ with tab_anki:
     with c_btn2:
         st.button("🗑️ 清空重置", type="secondary", on_click=reset_anki_state, key="btn_clear_anki")
 
-    # 生成逻辑
     if start_gen:
         if not ai_resp.strip():
-            st.warning("⚠️ 输入框为空，请先粘贴内容或使用 AI 生成。")
+            st.warning("⚠️ 输入框为空。")
         else:
-            with st.spinner("正在解析数据并生成语音..."):
-                parsed_data = parse_anki_data(ai_resp)
-                if parsed_data:
-                    st.session_state['anki_cards_cache'] = parsed_data
-                    try:
-                        # 传入选定的声音代码
-                        f_path = generate_anki_package(
-                            parsed_data, 
-                            deck_name, 
-                            enable_tts=enable_audio, 
-                            tts_voice=selected_voice_code
-                        )
-                        with open(f_path, "rb") as f:
-                            st.session_state['anki_pkg_data'] = f.read()
-                        st.session_state['anki_pkg_name'] = f"{deck_name}.apkg"
-                        st.success(f"✅ 成功生成 {len(parsed_data)} 张卡片！")
-                    except Exception as e:
-                        st.error(f"生成文件出错: {e}")
-                else:
-                    st.error("❌ 解析失败。未检测到有效内容，请检查分隔符是否为 '|||'")
-                    st.session_state['anki_cards_cache'] = None
+            # 手动模式也加个简单的进度条
+            progress_bar_manual = st.progress(0)
+            status_manual = st.empty()
+            
+            def update_progress_manual(p, text):
+                progress_bar_manual.progress(p)
+                status_manual.text(text)
+
+            parsed_data = parse_anki_data(ai_resp)
+            if parsed_data:
+                st.session_state['anki_cards_cache'] = parsed_data
+                try:
+                    f_path = generate_anki_package(
+                        parsed_data, 
+                        deck_name, 
+                        enable_tts=enable_audio, 
+                        tts_voice=manual_voice_code,
+                        progress_callback=update_progress_manual
+                    )
+                    with open(f_path, "rb") as f:
+                        st.session_state['anki_pkg_data'] = f.read()
+                    st.session_state['anki_pkg_name'] = f"{deck_name}.apkg"
+                    status_manual.text("✅ 生成完毕！")
+                except Exception as e:
+                    st.error(f"生成文件出错: {e}")
+            else:
+                st.error("❌ 解析失败。")
 
     # 下载与预览逻辑
     if st.session_state['anki_cards_cache']:
         cards = st.session_state['anki_cards_cache']
         with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
             df_view = pd.DataFrame(cards)
-            # 动态调整列名显示，适应新 Prompt 只有3列的情况
-            cols = ["正面(短语)", "英文释义", "英文例句"]
-            if len(df_view.columns) > 3: cols.append("中文词源(可选)")
+            cols = ["正面", "英文释义", "英文例句"]
+            if len(df_view.columns) > 3: cols.append("中文词源")
             df_view.columns = cols[:len(df_view.columns)]
             st.dataframe(df_view, use_container_width=True, hide_index=True)
 
