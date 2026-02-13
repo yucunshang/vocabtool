@@ -254,7 +254,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# 3. AI 调用逻辑
+# 3. AI 调用逻辑 (更新：集成词典学家 Prompt)
 # ==========================================
 def process_ai_in_batches(words_list, progress_callback=None):
     if not OpenAI:
@@ -267,7 +267,7 @@ def process_ai_in_batches(words_list, progress_callback=None):
         return None
         
     base_url = st.secrets.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    model_name = st.secrets.get("OPENAI_MODEL", "deepseek-chat") # 默认尝试使用 deepseek，也可由 secrets 控制
+    model_name = st.secrets.get("OPENAI_MODEL", "deepseek-chat") 
     
     client = OpenAI(api_key=api_key, base_url=base_url)
     
@@ -275,26 +275,54 @@ def process_ai_in_batches(words_list, progress_callback=None):
     total_words = len(words_list)
     full_results = []
     
-    system_prompt = "You are a helpful assistant for vocabulary learning."
+    # 系统提示词简单化，主要逻辑放在 user prompt 中
+    system_prompt = "You are an expert English Lexicographer and Anki Card Designer."
     
     for i in range(0, total_words, BATCH_SIZE):
         batch = words_list[i : i + BATCH_SIZE]
         current_batch_str = "\n".join(batch)
         
+        # === 核心修改：使用用户指定的高级 Prompt ===
         user_prompt = f"""
-Task: Convert English words to Anki cards.
-Format: Word ||| Chinese Definition ||| English Sentence
-Rules: 
-1. Front must be the Word only.
-2. Definition must be in Simplified Chinese (Concise).
-3. Sentence must be in English (Simple).
+# Role
+You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
+Make sure to process everything in one go, without missing anything.
 
-Example:
-Input: hectic
-Output: hectic ||| 忙乱的，繁忙的 ||| She has a hectic schedule today.
-
-Input:
+# Input Data
 {current_batch_str}
+
+# Output Format Guidelines
+1. **Output Container**: Strictly inside a single ```text code block.
+2. **Layout**: One entry per line.
+3. **Separator**: Use `|||` as the delimiter.
+4. **Target Structure**:
+   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
+
+# Field Constraints (Strict)
+1. **Field 1: Phrase (CRITICAL)**
+   - DO NOT output the single target word.
+   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
+   - Example: If input is "rain", output "heavy rain" or "torrential rain".
+   
+2. **Field 2: Definition (English)**
+   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
+
+3. **Field 3: Example**
+   - A short, authentic sentence containing the phrase.
+
+4. **Field 4: Roots/Etymology (Simplified Chinese)**
+   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
+   - If no classical roots exist, explain the origin briefly in Chinese.
+   - Use Simplified Chinese for meanings.
+
+# Valid Example (Follow this logic strictly)
+Input: altruism
+Output:
+motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
+
+Input: hectic
+Output:
+a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
 """
         try:
             response = client.chat.completions.create(
@@ -343,6 +371,11 @@ def parse_anki_data(raw_text):
         if len(parts) < 2: 
             continue
         
+        # 按照新 Prompt 的结构：
+        # parts[0]: Natural Phrase (Front)
+        # parts[1]: Definition (English)
+        # parts[2]: Example
+        # parts[3]: Etymology (Chinese)
         w = parts[0].strip()
         m = parts[1].strip()
         e = parts[2].strip() if len(parts) > 2 else ""
@@ -491,9 +524,7 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
         def internal_progress(curr_files, total_files):
             if progress_callback:
                 base_progress = 0.1 
-                # === 核心修改：将文件完成度 映射回 单词完成度 ===
-                # 文件数通常是单词数的2倍左右。我们通过比例计算出当前大概处理到了第几个单词。
-                # 这样用户看到的总数就是单词数 (300)，而不是文件数 (600)。
+                # 映射回单词进度
                 current_word_idx = int((curr_files / total_files) * total_words_count)
                 
                 progress_callback(
@@ -669,7 +700,6 @@ with tab_extract:
         
         # === 内置 AI 按钮 ===
         with col_ai_btn:
-            # === 修改点 1：按钮文案明确 DeepSeek ===
             if st.button("✨ 使用 DeepSeek 生成", type="primary", use_container_width=True):
                 MAX_AUTO_LIMIT = 300 
                 target_words = words_only[:MAX_AUTO_LIMIT]
@@ -738,20 +768,44 @@ with tab_extract:
 
         with st.expander("📌 手动复制 Prompt (第三方 AI 用)"):
             prompt_text = f"""# Role
-You are an expert English Lexicographer.
+You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
+Make sure to process everything in one go, without missing anything.
+
 # Input Data
 {", ".join(words_only)}
 
-# Output Format
-1. **Container**: Strictly inside a single ```text code block.
-2. **One entry per line**.
-3. **Separator**: `|||`
+# Output Format Guidelines
+1. **Output Container**: Strictly inside a single ```text code block.
+2. **Layout**: One entry per line.
+3. **Separator**: Use `|||` as the delimiter.
 4. **Target Structure**:
-   `Word` ||| `Concise Definition (Simplified Chinese)` ||| `Short English Example`
+   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
 
-# Example
+# Field Constraints (Strict)
+1. **Field 1: Phrase (CRITICAL)**
+   - DO NOT output the single target word.
+   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
+   - Example: If input is "rain", output "heavy rain" or "torrential rain".
+   
+2. **Field 2: Definition (English)**
+   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
+
+3. **Field 3: Example**
+   - A short, authentic sentence containing the phrase.
+
+4. **Field 4: Roots/Etymology (Simplified Chinese)**
+   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
+   - If no classical roots exist, explain the origin briefly in Chinese.
+   - Use Simplified Chinese for meanings.
+
+# Valid Example (Follow this logic strictly)
+Input: altruism
+Output:
+motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
+
 Input: hectic
-Output: hectic ||| 忙乱的，繁忙的 ||| She has a hectic schedule today.
+Output:
+a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
 """
             st.code(prompt_text, language="text")
 
@@ -837,8 +891,8 @@ with tab_anki:
         cards = st.session_state['anki_cards_cache']
         with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
             df_view = pd.DataFrame(cards)
-            cols = ["正面", "中文释义", "英文例句"]
-            if len(df_view.columns) > 3: cols.append("词源")
+            cols = ["正面 (短语)", "英文释义", "英文例句"]
+            if len(df_view.columns) > 3: cols.append("中文词源")
             df_view.columns = cols[:len(df_view.columns)]
             st.dataframe(df_view, use_container_width=True, hide_index=True)
 
