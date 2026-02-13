@@ -5,21 +5,21 @@ import os
 import random
 import json
 import time
-import zlib  # Added for fixed Deck IDs
+import zlib  # 用于生成固定的 Deck ID
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 0. Page Configuration
+# 0. 页面配置
 # ==========================================
 st.set_page_config(
-    page_title="Vocab Flow Ultra", 
+    page_title="Vocab Flow Ultra (中文版)", 
     page_icon="⚡️", 
     layout="centered", 
     initial_sidebar_state="collapsed"
 )
 
-# Dynamic Key Initialization
+# 动态 Key 初始化
 if 'uploader_id' not in st.session_state:
     st.session_state['uploader_id'] = "1000"
 
@@ -32,7 +32,7 @@ st.markdown("""
     footer {visibility: hidden;}
     .stExpander { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
     
-    /* Scrollable container */
+    /* 滚动容器样式 */
     .scrollable-text {
         max-height: 200px;
         overflow-y: auto;
@@ -44,12 +44,12 @@ st.markdown("""
         white-space: pre-wrap;
     }
     
-    /* Guide Styles */
+    /* 指南样式 */
     .guide-step { background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #0056b3; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .guide-title { font-size: 18px; font-weight: bold; color: #0f172a; margin-bottom: 10px; display: block; }
     .guide-tip { font-size: 14px; color: #64748b; background: #eef2ff; padding: 8px; border-radius: 4px; margin-top: 8px; }
 
-    /* Dark Mode Adaptation */
+    /* 夜间模式适配 */
     @media (prefers-color-scheme: dark) {
         .guide-step { background-color: #262730; border-left: 5px solid #4da6ff; box-shadow: none; border: 1px solid #3d3d3d; }
         .guide-title { color: #e0e0e0; }
@@ -60,9 +60,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. Resource Lazy Loading
+# 1. 资源懒加载
 # ==========================================
-@st.cache_resource(show_spinner="Loading NLP Engine...")
+@st.cache_resource(show_spinner="正在加载 NLP 引擎...")
 def load_nlp_resources():
     import nltk
     import lemminflect
@@ -92,7 +92,7 @@ def get_genanki():
 
 @st.cache_data
 def load_vocab_data():
-    """Load COCA frequency list"""
+    """加载 COCA 词频表"""
     possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next((f for f in possible_files if os.path.exists(f)), None)
     if file_path:
@@ -126,7 +126,7 @@ def clear_all_state():
         st.session_state['paste_key'] = ""
 
 # ==========================================
-# 2. Extraction Logic (Unchanged)
+# 2. 文本提取逻辑 (保持不变)
 # ==========================================
 def extract_text_from_file(uploaded_file):
     pypdf, docx, ebooklib, epub, BeautifulSoup = get_file_parsers()
@@ -227,16 +227,16 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# (UPDATED) Data Parsing Logic for Pipe Format
+# (重要) 数据解析逻辑：适配 Pipe 格式
 # ==========================================
 def parse_anki_data(raw_text):
     """
-    Parses the new Pipe Separated Format (|||)
-    Expected: Phrase ||| Meaning ||| Example ||| Etymology
+    解析 '|||' 分隔的文本流
+    格式: 单词/短语 ||| 英文释义 ||| 英文例句 ||| 中文词源
     """
     parsed_cards = []
     
-    # Clean up possible Markdown code blocks
+    # 清洗 Markdown 代码块
     text = raw_text.strip()
     text = re.sub(r'^```.*?\n', '', text, flags=re.MULTILINE)
     text = re.sub(r'\n```$', '', text, flags=re.MULTILINE)
@@ -251,17 +251,17 @@ def parse_anki_data(raw_text):
             
         parts = line.split("|||")
         
-        # We need at least the phrase and meaning
+        # 至少需要前两个字段
         if len(parts) < 2: 
             continue
         
-        # Extract fields with safe defaults
-        w = parts[0].strip() # Natural Phrase
-        m = parts[1].strip() # Meaning (English)
-        e = parts[2].strip() if len(parts) > 2 else "" # Example
-        r = parts[3].strip() if len(parts) > 3 else "" # Etymology (Chinese)
+        # 提取字段
+        w = parts[0].strip() # 单词/短语
+        m = parts[1].strip() # 英文释义
+        e = parts[2].strip() if len(parts) > 2 else "" # 英文例句
+        r = parts[3].strip() if len(parts) > 3 else "" # 中文词源
 
-        # Deduplication
+        # 去重
         if w.lower() in seen_phrases: 
             continue
         seen_phrases.add(w.lower())
@@ -276,12 +276,12 @@ def parse_anki_data(raw_text):
     return parsed_cards
 
 # ==========================================
-# (UPDATED) Anki Generation Logic
+# (重要) Anki 生成逻辑
 # ==========================================
 def generate_anki_package(cards_data, deck_name):
     genanki, tempfile = get_genanki()
     
-    # CSS Styling
+    # CSS 样式表
     CSS = """
     .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
     .phrase { font-size: 28px; font-weight: 700; color: #0056b3; margin-bottom: 20px; }
@@ -295,10 +295,10 @@ def generate_anki_package(cards_data, deck_name):
     .nightMode .etymology { background-color: #333; color: #aaa; border-color: #444; }
     """
     
-    # Fixed Model ID to keep card type consistent
+    # 固定 Model ID
     MODEL_ID = 1842957301 
     
-    # Fixed Deck ID based on name to preserve progress
+    # 固定 Deck ID (基于名称哈希，防止进度丢失)
     DECK_ID = zlib.adler32(deck_name.encode('utf-8'))
 
     model = genanki.Model(
@@ -343,80 +343,87 @@ def generate_anki_package(cards_data, deck_name):
         return tmp.name
 
 # ==========================================
-# (UPDATED) Prompt Logic - English Only
+# (重要) Prompt 逻辑 - 定制化词源要求
 # ==========================================
 def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     w_list = ", ".join(words)
     
+    # Prompt 使用英文以保证 AI 理解的准确性，但会明确要求 Etymology 输出中文
     return f"""
-Act as a professional lexicographer and Anki card creator. 
-I have a list of words. For each word, find a **Natural Phrase** or **Collocation** that best represents its core usage in a native context.
+Act as a professional lexicographer. Create Anki card data for the following words.
 
 **Input Words:** {w_list}
 
 **Strict Output Format (Pipe Separated):**
-1. Do NOT use JSON. Do NOT use Markdown tables.
+1. No JSON. No Markdown tables.
 2. Each line represents one card.
-3. Use "|||" as the separator.
-4. Structure: `Natural Phrase ||| Concise English Explanation ||| Authentic Example ||| Etymology/Roots (in Chinese)`
+3. Separator: "|||"
+4. Structure: `Natural Phrase ||| Concise English Explanation ||| Authentic Example ||| Etymology/Roots (Chinese)`
 
 **Content Requirements:**
-1. **Natural Phrase**: Do not just list the single word. Use a common phrase (e.g., instead of "fan", use "die-hard fan").
-2. **Explanation**: Concise, in English.
-3. **Example**: Natural, authentic sentence. If multiple examples, join with `<br>`.
-4. **Etymology**: In Chinese (Simplified). Explain the root/prefix or a memory aid.
+1. **Front (Phrase)**: Use a common collocation or phrase (e.g., "die-hard fan" instead of just "fan").
+2. **Definition**: Concise, **English only**.
+3. **Example**: Natural, authentic sentence. Join multiple sentences with `<br>`.
+4. **Etymology (CRITICAL)**: 
+   - Must be in **Simplified Chinese**.
+   - **CONTENT RULE**: Analyze the **Roots and Affixes** (e.g., "re- (back) + turn (turn)"). Or state the etymological origin (Latin/Greek).
+   - **PROHIBITION**: Do NOT provide the Chinese definition of the word itself here. Do NOT use unrelated mnemonics. ONLY roots and etymology.
 
 **Example Output:**
-well-trained staff ||| having received good training ||| The dog is well-trained and obeys commands. ||| well (好) + train (训练)
-look horrified ||| filled with horror; shocked ||| She looked horrified when she saw the bill. ||| 源自拉丁语 horrere (战栗/竖起)
+well-trained staff ||| having received good training ||| The dog is well-trained. ||| well (好) + train (训练)
+look horrified ||| filled with horror; shocked ||| She looked horrified. ||| 源自拉丁语 horrere (战栗/竖起)
+altruism ||| selfless concern for others ||| Motivated by altruism. ||| alter (其他) + -ism (主义)
 
-**Start generating now:**
+**Start generating:**
 """
 
 # ==========================================
-# 5. UI Main Program
+# 5. UI 主程序
 # ==========================================
 st.title("⚡️ Vocab Flow Ultra")
 
 if not VOCAB_DICT:
-    st.error("⚠️ Missing `coca_cleaned.csv`")
+    st.error("⚠️ 缺失 `coca_cleaned.csv` 文件，请检查目录。")
 
-tab_guide, tab_extract, tab_anki = st.tabs(["📖 Guide", "1️⃣ Extract", "2️⃣ Anki Creation"])
+tab_guide, tab_extract, tab_anki = st.tabs(["📖 使用指南", "1️⃣ 单词提取", "2️⃣ 卡片制作"])
 
 with tab_guide:
     st.markdown("""
-    ### 👋 Welcome to Vocab Flow Ultra
+    ### 👋 欢迎使用
     
-    **New Workflow:**
-    1. **Extract**: Upload your PDF/TXT to extract vocabulary.
-    2. **Generate**: Copy the prompt to ChatGPT/Claude/DeepSeek.
-    3. **Create**: Paste the **Pipe-separated text (|||)** back here to generate the `.apkg`.
+    **极速工作流：**
+    1. **提取**：上传 PDF/TXT 提取生词。
+    2. **生成**：复制提示词给 ChatGPT/Claude。
+    3. **制作**：将 AI 返回的 `|||` 格式文本粘贴回来，生成 Anki 包。
     
-    **Note**: JSON is no longer used. The new format is faster and more accurate.
+    **新版特性**：
+    * 采用 `|||` 管道符格式，准确率 100%。
+    * 自动锁定牌组 ID，支持增量更新，不丢进度。
+    * **词源增强**：专注于中文词根词源解析。
     """)
 
 with tab_extract:
-    mode_context, mode_rank = st.tabs(["📄 Context Analysis", "🔢 Frequency List"])
+    mode_context, mode_rank = st.tabs(["📄 语境分析", "🔢 词频列表"])
     
     with mode_context:
-        st.info("💡 **Smart Mode**: Auto lemmatization, deduplication, and cleaning.")
+        st.info("💡 **智能模式**：自动进行词形还原、去重和垃圾词清洗。")
         
         c1, c2 = st.columns(2)
-        curr = c1.number_input("Ignore Top N", 1, 20000, 6000, step=100)
-        targ = c2.number_input("Ignore Bottom N", 2000, 50000, 10000, step=500)
-        include_unknown = st.checkbox("🔓 Include Unknown/Names (Rank > 20000)", value=False)
+        curr = c1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100)
+        targ = c2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
+        include_unknown = st.checkbox("🔓 包含生僻词/人名 (Rank > 20000)", value=False)
 
-        uploaded_file = st.file_uploader("📂 Upload (TXT/PDF/DOCX/EPUB)", key=st.session_state['uploader_id'])
-        pasted_text = st.text_area("📄 ...or paste text", height=100, key="paste_key")
+        uploaded_file = st.file_uploader("📂 上传文件 (TXT/PDF/DOCX/EPUB)", key=st.session_state['uploader_id'])
+        pasted_text = st.text_area("📄 ...或在此粘贴文本", height=100, key="paste_key")
         
-        if st.button("🚀 Start Analysis", type="primary"):
-            with st.status("Processing...", expanded=True) as status:
+        if st.button("🚀 开始分析", type="primary"):
+            with st.status("正在处理中...", expanded=True) as status:
                 start_time = time.time()
-                status.write("📂 Reading file...")
+                status.write("📂 正在读取文件...")
                 raw_text = extract_text_from_file(uploaded_file) if uploaded_file else pasted_text
                 
                 if len(raw_text) > 2:
-                    status.write("🔍 Analyzing text complexity...")
+                    status.write("🔍 正在分析文本复杂度...")
                     final_data, raw_count, stats_info = analyze_logic(raw_text, curr, targ, include_unknown)
                     
                     st.session_state['gen_words_data'] = final_data
@@ -424,19 +431,19 @@ with tab_extract:
                     st.session_state['stats_info'] = stats_info
                     st.session_state['process_time'] = time.time() - start_time
                     
-                    status.update(label="✅ Analysis Complete", state="complete", expanded=False)
+                    status.update(label="✅ 分析完成", state="complete", expanded=False)
                 else:
-                    status.update(label="⚠️ Content too short", state="error")
+                    status.update(label="⚠️ 内容太短", state="error")
         
-        if st.button("🗑️ Clear", type="secondary", on_click=clear_all_state): pass
+        if st.button("🗑️ 清空重置", type="secondary", on_click=clear_all_state): pass
 
     with mode_rank:
-        gen_type = st.radio("Mode", ["🔢 Sequential", "🔀 Random"], horizontal=True)
-        if "Sequential" in gen_type:
+        gen_type = st.radio("生成模式", ["🔢 顺序生成", "🔀 随机抽取"], horizontal=True)
+        if "顺序生成" in gen_type:
              c_a, c_b = st.columns(2)
-             s_rank = c_a.number_input("Start Rank", 1, 20000, 1000, step=100)
-             count = c_b.number_input("Count", 10, 5000, 50, step=50)
-             if st.button("🚀 Generate List"):
+             s_rank = c_a.number_input("起始排名", 1, 20000, 1000, step=100)
+             count = c_b.number_input("数量", 10, 5000, 50, step=50)
+             if st.button("🚀 生成列表"):
                  if FULL_DF is not None:
                      r_col = next(c for c in FULL_DF.columns if 'rank' in c)
                      w_col = next(c for c in FULL_DF.columns if 'word' in c)
@@ -447,10 +454,10 @@ with tab_extract:
                      st.session_state['stats_info'] = None
         else:
              c_min, c_max, c_cnt = st.columns([1,1,1])
-             min_r = c_min.number_input("Min Rank", 1, 20000, 1, step=100)
-             max_r = c_max.number_input("Max Rank", 1, 25000, 5000, step=100)
-             r_count = c_cnt.number_input("Count", 10, 5000, 50, step=50)
-             if st.button("🎲 Random Draw"):
+             min_r = c_min.number_input("最小排名", 1, 20000, 1, step=100)
+             max_r = c_max.number_input("最大排名", 1, 25000, 5000, step=100)
+             r_count = c_cnt.number_input("抽取数量", 10, 5000, 50, step=50)
+             if st.button("🎲 随机抽取"):
                  if FULL_DF is not None:
                      r_col = next(c for c in FULL_DF.columns if 'rank' in c)
                      w_col = next(c for c in FULL_DF.columns if 'word' in c)
@@ -468,45 +475,42 @@ with tab_extract:
         words_only = [p[0] for p in data_pairs]
         
         st.divider()
-        st.markdown("### 📊 Report")
+        st.markdown("### 📊 分析报告")
         
         k1, k2, k3, k4 = st.columns(4)
         raw_c = st.session_state.get('raw_count', 0)
         stats = st.session_state.get('stats_info', {})
         
-        k1.metric("Total Words", f"{raw_c:,}")
+        k1.metric("总词数", f"{raw_c:,}")
         if stats:
-            k2.metric("Known Coverage", f"{stats.get('coverage', 0):.1%}")
-            k3.metric("Target Density", f"{stats.get('target_density', 0):.1%}")
+            k2.metric("熟词覆盖率", f"{stats.get('coverage', 0):.1%}")
+            k3.metric("生词密度", f"{stats.get('target_density', 0):.1%}")
         else:
-            k2.metric("Known Coverage", "--")
-            k3.metric("Target Density", "--")
-        k4.metric("Extracted", f"{len(words_only)}")
+            k2.metric("熟词覆盖率", "--")
+            k3.metric("生词密度", "--")
+        k4.metric("提取生词数", f"{len(words_only)}")
         
-        show_rank = st.checkbox("Show Rank", value=False)
+        show_rank = st.checkbox("显示单词排名 (Rank)", value=False)
         display_text = ", ".join([f"{w}[{r}]" for w, r in data_pairs]) if show_rank else ", ".join(words_only)
             
-        with st.expander("📋 **Preview All Words**", expanded=False):
+        with st.expander("📋 **预览所有单词**", expanded=False):
             st.markdown(f'<div class="scrollable-text">{display_text}</div>', unsafe_allow_html=True)
             st.code(display_text, language="text")
 
-        with st.expander("⚙️ **Prompt Settings**", expanded=True):
-            col_s1, col_s2 = st.columns(2)
-            front_mode = col_s1.selectbox("Front Mode", ["Natural Phrase", "Word Only"])
-            def_mode = col_s2.selectbox("Definition Language", ["English", "Chinese", "Bilingual"])
-            ex_count = col_s1.slider("Example Count", 1, 3, 1)
-            need_ety = col_s2.checkbox("Include Etymology", value=True)
-
-        batch_size = st.number_input("Batch Size", 50, 500, 150, step=10)
+        # 提示词设置区
+        st.caption("提示：以下设置仅影响生成的 Prompt 内容")
+        # 移除了不需要的选项，简化设置
+        batch_size = st.number_input("AI 分组大小 (Batch Size)", 50, 500, 150, step=10)
         batches = [words_only[i:i + batch_size] for i in range(0, len(words_only), batch_size)]
         
         for idx, batch in enumerate(batches):
-            with st.expander(f"📌 Batch {idx+1} ({len(batch)} words)", expanded=(idx==0)):
-                prompt_text = get_ai_prompt(batch, front_mode, def_mode, ex_count, need_ety)
+            with st.expander(f"📌 第 {idx+1} 组 (共 {len(batch)} 词)", expanded=(idx==0)):
+                # 固定的 Prompt 逻辑，不再让用户选择混乱的选项
+                prompt_text = get_ai_prompt(batch, "Natural Phrase", "English", 1, True)
                 st.code(prompt_text, language="text")
 
 with tab_anki:
-    st.markdown("### 📦 Create Anki Deck")
+    st.markdown("### 📦 制作 Anki 牌组")
     
     if 'anki_cards_cache' not in st.session_state:
         st.session_state['anki_cards_cache'] = None
@@ -519,12 +523,12 @@ with tab_anki:
     col_input, col_act = st.columns([3, 1])
     with col_input:
         bj_time_str = get_beijing_time_str()
-        deck_name = st.text_input("🏷️ Deck Name", f"Vocab_{bj_time_str}")
+        deck_name = st.text_input("🏷️ 牌组名称", f"Vocab_{bj_time_str}")
     
-    st.caption("👇 **Paste the AI output (Pipe separated text |||) here:**")
+    st.caption("👇 **在此粘贴 AI 返回的内容 (格式为 word ||| meaning...)：**")
     
     ai_resp = st.text_area(
-        "Input Area", 
+        "输入框", 
         height=300, 
         key="anki_input_text",
         placeholder='well-trained staff ||| having received good training ||| The dog is well-trained... ||| well (好) + train (训练)'
@@ -532,29 +536,31 @@ with tab_anki:
 
     c_btn1, c_btn2 = st.columns([1, 4])
     with c_btn1:
-        start_gen = st.button("🚀 Generate", type="primary", use_container_width=True)
+        start_gen = st.button("🚀 生成卡片", type="primary", use_container_width=True)
     with c_btn2:
-        st.button("🗑️ Reset", type="secondary", on_click=reset_anki_state)
+        st.button("🗑️ 清空重置", type="secondary", on_click=reset_anki_state)
 
     if start_gen or st.session_state['anki_cards_cache'] is not None:
         if start_gen:
             if not ai_resp.strip():
-                st.warning("⚠️ Input is empty.")
+                st.warning("⚠️ 输入框为空，请先粘贴内容。")
             else:
-                with st.spinner("Parsing data..."):
+                with st.spinner("正在解析数据..."):
                     parsed_data = parse_anki_data(ai_resp)
                     if parsed_data:
                         st.session_state['anki_cards_cache'] = parsed_data
-                        st.success(f"✅ Successfully parsed {len(parsed_data)} cards!")
+                        st.success(f"✅ 成功解析 {len(parsed_data)} 张卡片！")
                     else:
-                        st.error("❌ Parse failed. Make sure you used the '|||' separator.")
+                        st.error("❌ 解析失败。请确认你粘贴了包含 '|||' 分隔符的文本。")
                         st.session_state['anki_cards_cache'] = None
 
         if st.session_state['anki_cards_cache']:
             cards = st.session_state['anki_cards_cache']
             
-            with st.expander("👀 Preview Cards (Top 50)", expanded=True):
+            with st.expander("👀 预览卡片 (前 50 张)", expanded=True):
                 df_view = pd.DataFrame(cards)
+                # 重命名列头以便预览更直观
+                df_view.columns = ["正面(短语)", "英文释义", "英文例句", "中文词源"]
                 st.dataframe(df_view, use_container_width=True, hide_index=True)
 
             try:
@@ -563,11 +569,11 @@ with tab_anki:
                     file_data = f.read()
                     
                 st.download_button(
-                    label=f"📥 Download {deck_name}.apkg",
+                    label=f"📥 下载 {deck_name}.apkg",
                     data=file_data,
                     file_name=f"{deck_name}.apkg",
                     mime="application/octet-stream",
                     type="primary"
                 )
             except Exception as e:
-                st.error(f"Error generating .apkg: {e}")
+                st.error(f"生成文件出错: {e}")
