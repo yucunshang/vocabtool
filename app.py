@@ -402,11 +402,14 @@ with tab_guide:
     * **专家级 Prompt**：专注于**自然搭配 (Collocations)** 和 **词源拆解**。
     * **格式标准化**：严格的结构化输出，确保 100% 解析成功率。
     * **代码块支持**：AI 输出结果直接复制，无需手动清洗。
+    * **新增：直接输入**：支持粘贴自选单词表，跳过频率筛选直接生成 Prompt。
     """)
 
 with tab_extract:
-    mode_context, mode_rank = st.tabs(["📄 语境分析", "🔢 词频列表"])
+    # 修改：增加了中间的 "📝 直接输入" Tab
+    mode_context, mode_direct, mode_rank = st.tabs(["📄 语境分析", "📝 直接输入", "🔢 词频列表"])
     
+    # 模式1：语境分析 (原功能)
     with mode_context:
         st.info("💡 **智能模式**：自动进行词形还原、去重和垃圾词清洗。")
         
@@ -436,9 +439,39 @@ with tab_extract:
                     status.update(label="✅ 分析完成", state="complete", expanded=False)
                 else:
                     status.update(label="⚠️ 内容太短", state="error")
+    
+    # 模式2：直接输入 (新增功能)
+    with mode_direct:
+        st.info("💡 **直接模式**：不进行词频过滤，直接为粘贴的单词生成 Prompt。")
+        raw_input = st.text_area("✍️ 粘贴单词列表 (每行一个 或 逗号分隔)", height=200, placeholder="altruism\nhectic\nserendipity")
         
-        if st.button("🗑️ 清空重置", type="secondary", on_click=clear_all_state, key="btn_clear_extract"): pass
+        if st.button("🚀 生成列表", key="btn_direct", type="primary"):
+            if raw_input.strip():
+                # 使用正则分割：支持换行、逗号、制表符
+                words = [w.strip() for w in re.split(r'[,\n\t]+', raw_input) if w.strip()]
+                # 去重但保持顺序
+                seen = set()
+                unique_words = []
+                for w in words:
+                    if w.lower() not in seen:
+                        seen.add(w.lower())
+                        unique_words.append(w)
+                
+                # 构建数据结构，尝试查找排名以便显示，但不进行过滤
+                data_list = []
+                for w in unique_words:
+                    rank = VOCAB_DICT.get(w.lower(), 99999) # 找不到则标记为生僻
+                    data_list.append((w, rank))
+                
+                st.session_state['gen_words_data'] = data_list
+                st.session_state['raw_count'] = len(unique_words)
+                st.session_state['stats_info'] = None # 该模式无语境统计
+                
+                st.success(f"✅ 已加载 {len(unique_words)} 个单词")
+            else:
+                st.warning("⚠️ 内容为空，请先粘贴单词。")
 
+    # 模式3：词频列表 (原功能)
     with mode_rank:
         gen_type = st.radio("生成模式", ["🔢 顺序生成", "🔀 随机抽取"], horizontal=True)
         if "顺序生成" in gen_type:
@@ -471,7 +504,13 @@ with tab_extract:
                          st.session_state['gen_words_data'] = data_list
                          st.session_state['raw_count'] = 0
                          st.session_state['stats_info'] = None
+    
+    # 清空按钮通用
+    if st.button("🗑️ 清空重置", type="secondary", on_click=clear_all_state, key="btn_clear_extract"): pass
 
+    # ==========================================
+    # 结果展示区 (通用于所有模式)
+    # ==========================================
     if 'gen_words_data' in st.session_state and st.session_state['gen_words_data']:
         data_pairs = st.session_state['gen_words_data']
         words_only = [p[0] for p in data_pairs]
