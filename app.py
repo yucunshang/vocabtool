@@ -422,44 +422,47 @@ def get_ai_prompt(words, front_mode, def_mode, ex_count, need_ety):
     w_list = ", ".join(words)
 
     if front_mode == "单词 (Word)":
-        w_instr = "键 `w`：单词本体（小写）。"
+        w_instr = "Key `w`: The word itself (lowercase)."
     else:
-        w_instr = "键 `w`：包含该词的实用短语（2-5词）。"
+        w_instr = "Key `w`: A short practical collocation/phrase (2-5 words) that naturally contains the word."
 
     if def_mode == "中文":
-        m_instr = "键 `m`：该词的中文释义（不超过10字），不是短语释义。"
+        m_instr = "Key `m`: Concise Chinese definition of the **word** (max 10 chars). NOT the definition of the phrase."
     elif def_mode == "中英双语":
-        m_instr = "键 `m`：该词的英文释义 + 中文释义。"
+        m_instr = "Key `m`: English definition + Chinese definition of the **word**."
     else:
-        m_instr = "键 `m`：该词的英文释义（简洁）。"
+        m_instr = "Key `m`: English definition of the **word** (concise)."
 
-    e_instr = f"键 `e`：{ex_count} 个例句；多个时用 `<br>` 分隔。"
+    e_instr = f"Key `e`: {ex_count} example sentence(s). Use `<br>` to separate if multiple."
     r_instr = (
-        "键 `r`：该义项对应的中文词源/词根词缀说明。"
+        "Key `r`: Simplified Chinese Etymology (Root/Prefix) corresponding to this specific meaning."
         if need_ety else
-        "键 `r`：留空字符串 \"\"。"
+        "Key `r`: Leave this empty string \"\"."
     )
 
     return f"""
-任务：生成 Anki 卡片。
-词表：{w_list}
+Task: Create Anki cards.
+Words: {w_list}
 
-**关键要求：语义一致性**
-1. `w`、`m`、`e`、`r` 必须对应同一个义项/语境。
-2. 不要混用不同义项。
-3. 即使 `w` 是短语，`m` 也应解释该词核心含义。
+**CRITICAL: SEMANTIC ATOMICITY**
+1. **Consistency**: The Word/Phrase (`w`), Meaning (`m`), Example (`e`), and Etymology (`r`) MUST all correspond to the **same specific context/meaning**.
+2. **No Mixing**: Do NOT mix definitions. (e.g., If `w` is "bracket" in a tax context, `m` must be "grade/category", `e` must be about taxes. Do NOT give the definition of "punctuation mark").
+3. **Definition Focus**: Even if `w` is a phrase (e.g. "give up"), `m` should explain the core meaning derived from it.
 
-**输出格式：NDJSON（每行一个 JSON 对象）。**
+**Output Format: NDJSON (One line per object).**
 
-**要求：**
+**Requirements:**
 1. {w_instr}
 2. {m_instr}
 3. {e_instr}
 4. {r_instr}
 
-**键名：** `w`（正面）, `m`（释义）, `e`（例句）, `r`（词源）
+**Keys:** `w` (Front), `m` (Meaning), `e` (Examples), `r` (Etymology)
 
-**开始：**
+**Example (Correct Consistency):**
+{{"w": "bracket", "m": "绛夌骇/妗ｆ", "e": "He is in the highest income tax bracket.", "r": "from braguette (codpiece)"}}
+
+**Start:**
 """
 
 st.title("Vocab Flow Ultra")
