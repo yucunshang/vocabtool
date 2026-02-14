@@ -716,6 +716,162 @@ def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
     
     return parsed_cards
 
+
+def parse_apkg_data(apkg_bytes: bytes) -> Dict[str, Any]:
+    """Parse APKG and return available model/deck metadata plus notes."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        apkg_path = os.path.join(tmp_dir, "input.apkg")
+        with open(apkg_path, "wb") as f:
+            f.write(apkg_bytes)
+
+        with zipfile.ZipFile(apkg_path, 'r') as zf:
+            collection_name = next(
+                (name for name in zf.namelist() if Path(name).name.startswith("collection.anki")),
+                None
+            )
+            if not collection_name:
+                raise ValueError("未在 APKG 中找到 collection.anki2/collection.anki21 文件")
+
+            db_path = os.path.join(tmp_dir, "collection.anki2")
+            with open(db_path, "wb") as f:
+                f.write(zf.read(collection_name))
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            col_row = conn.execute("SELECT models, decks FROM col LIMIT 1").fetchone()
+            if not col_row:
+                raise ValueError("无法读取 APKG 元数据")
+
+            models_data = json.loads(col_row["models"])
+            decks_data = json.loads(col_row["decks"])
+
+            notes_rows = conn.execute("SELECT id, guid, mid, flds FROM notes ORDER BY id").fetchall()
+            if not notes_rows:
+                raise ValueError("该 APKG 中没有可处理的 notes")
+
+            model_counts = Counter(str(row["mid"]) for row in notes_rows)
+            model_choices = []
+            for model_id, count in model_counts.items():
+                model_meta = models_data.get(model_id, {})
+                model_choices.append({
+                    "id": model_id,
+                    "name": model_meta.get("name", f"Model {model_id}"),
+                    "count": count,
+                })
+
+            # Default to the most common model in the uploaded deck
+            model_choices.sort(key=lambda x: x["count"], reverse=True)
+            selected_model_id = model_choices[0]["id"]
+
+            # Choose the first non-default deck as target deck metadata
+            target_deck = next((d for d in decks_data.values() if str(d.get("id")) != "1"), None)
+            if not target_deck:
+                target_deck = {
+                    "id": zlib.adler32(b"Imported Voiceover Deck"),
+                    "name": "Imported Voiceover Deck"
+                }
+
+            return {
+                "models": models_data,
+                "decks": decks_data,
+                "model_choices": model_choices,
+                "selected_model_id": selected_model_id,
+                "notes": [dict(row) for row in notes_rows],
+                "target_deck_id": int(target_deck.get("id", zlib.adler32(b"Imported Voiceover Deck"))),
+                "target_deck_name": target_deck.get("name", "Imported Voiceover Deck"),
+            }
+        finally:
+            conn.close()
+
+
+def generate_apkg_with_voiceovers(
+    parsed_apkg: Dict[str, Any],
+    model_id: str,
+    selected_fields: List[str],
+    tts_voice: str,
+    progress_callback: Optional[ProgressCallback] = None
+) -> str:
+    """Generate a new APKG from uploaded notes while preserving GUIDs for merge safety."""
+    genanki, tempfile = get_genanki()
+    model_meta = parsed_apkg["models"].get(model_id)
+    if not model_meta:
+        raise ValueError("无法找到选定的模型")
+
+    model_fields = model_meta.get("flds", [])
+    field_names = [f.get("name", f"Field_{idx+1}") for idx, f in enumerate(model_fields)]
+    field_index_map = {name: idx for idx, name in enumerate(field_names)}
+    selected_indices = [field_index_map[name] for name in selected_fields if name in field_index_map]
+
+    if not selected_indices:
+        raise ValueError("请至少选择一个需要生成语音的字段")
+
+    templates = []
+    for idx, tmpl in enumerate(model_meta.get("tmpls", []), start=1):
+        templates.append({
+            "name": tmpl.get("name", f"Card {idx}"),
+            "qfmt": tmpl.get("qfmt", ""),
+            "afmt": tmpl.get("afmt", ""),
+        })
+
+    if not templates:
+        first_field = field_names[0] if field_names else "Front"
+        templates = [{"name": "Card 1", "qfmt": f"{{{{{first_field}}}}}", "afmt": "{{FrontSide}}"}]
+
+    model = genanki.Model(
+        int(model_id),
+        model_meta.get("name", f"Imported Model {model_id}"),
+        fields=[{"name": name} for name in field_names],
+        templates=templates,
+        css=model_meta.get("css", "")
+    )
+
+    deck_name = f"{parsed_apkg['target_deck_name']}_voiceover"
+    deck = genanki.Deck(parsed_apkg["target_deck_id"], deck_name)
+    tmp_dir = tempfile.gettempdir()
+    media_files = []
+    audio_tasks = []
+    notes_buffer = []
+
+    notes = [n for n in parsed_apkg["notes"] if str(n["mid"]) == model_id]
+    for note in notes:
+        values = note["flds"].split("\x1f") if note.get("flds") else [""] * len(field_names)
+        if len(values) < len(field_names):
+            values.extend([""] * (len(field_names) - len(values)))
+
+        for field_index in selected_indices:
+            field_text = safe_str_clean(values[field_index])
+            if not field_text or "[sound:" in field_text:
+                continue
+
+            safe_name = re.sub(r'[^a-zA-Z0-9]', '_', field_names[field_index])[:15]
+            unique_id = f"{note['id']}_{field_index}"
+            filename = f"tts_{safe_name}_{unique_id}.mp3"
+            audio_path = os.path.join(tmp_dir, filename)
+            audio_tasks.append({"text": field_text, "path": audio_path, "voice": tts_voice})
+            media_files.append(audio_path)
+            values[field_index] = f"{field_text} [sound:{filename}]"
+
+        notes_buffer.append(genanki.Note(model=model, fields=values, guid=str(note["guid"])))
+
+    if audio_tasks:
+        run_async_batch(audio_tasks, concurrency=TTS_CONCURRENCY, progress_callback=progress_callback)
+
+    for note in notes_buffer:
+        deck.add_note(note)
+
+    package = genanki.Package(deck)
+    package.media_files = media_files
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".apkg") as tmp:
+        package.write_to_file(tmp.name)
+        for file_path in media_files:
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        return tmp.name
+
 # ==========================================
 # TTS Audio Generation
 # ==========================================
@@ -1287,6 +1443,80 @@ Process the provided input list strictly adhering to the format above."""
 # ==========================================
 with tab_anki:
     st.markdown("### 📦 手动制作 Anki 牌组")
+
+    st.markdown("### 🔁 APKG 补充语音（保留学习记录）")
+    uploaded_apkg = st.file_uploader("上传已有 APKG", type=["apkg"], key="apkg_voiceover_uploader")
+    parsed_apkg = None
+
+    if uploaded_apkg is not None:
+        try:
+            parsed_apkg = parse_apkg_data(uploaded_apkg.getvalue())
+            model_options = {
+                f"{item['name']} (ID: {item['id']}, Notes: {item['count']})": item["id"]
+                for item in parsed_apkg["model_choices"]
+            }
+            model_label = st.selectbox("选择要处理的模型", list(model_options.keys()), key="apkg_model_select")
+            selected_model_id = model_options[model_label]
+
+            selected_model_meta = parsed_apkg["models"].get(selected_model_id, {})
+            available_fields = [
+                f.get("name", f"Field_{idx+1}")
+                for idx, f in enumerate(selected_model_meta.get("flds", []))
+            ]
+
+            field_defaults = available_fields[:1] if available_fields else []
+            fields_for_voice = st.multiselect(
+                "选择要添加语音的字段（可多选）",
+                options=available_fields,
+                default=field_defaults,
+                key="apkg_voice_fields"
+            )
+
+            apkg_voice_label = st.radio(
+                "🎙️ APKG 发音人",
+                options=list(VOICE_MAP.keys()),
+                index=0,
+                horizontal=True,
+                key="sel_voice_apkg"
+            )
+            apkg_voice_code = VOICE_MAP[apkg_voice_label]
+
+            if st.button("🚀 生成可合并的 APKG（含语音）", key="btn_apkg_voiceover", type="primary"):
+                if not fields_for_voice:
+                    st.warning("⚠️ 请至少选择一个字段")
+                else:
+                    progress_bar_apkg = st.progress(0)
+                    status_apkg = st.empty()
+
+                    def update_progress_apkg(ratio: float, text: str) -> None:
+                        progress_bar_apkg.progress(ratio)
+                        status_apkg.text(text)
+
+                    with st.spinner("⏳ 正在为上传卡片生成语音..."):
+                        out_path = generate_apkg_with_voiceovers(
+                            parsed_apkg=parsed_apkg,
+                            model_id=selected_model_id,
+                            selected_fields=fields_for_voice,
+                            tts_voice=apkg_voice_code,
+                            progress_callback=update_progress_apkg
+                        )
+
+                        with open(out_path, "rb") as f:
+                            out_data = f.read()
+
+                        output_name = f"{parsed_apkg['target_deck_name']}_voiceover.apkg"
+                        st.success(
+                            f"✅ 已完成！建议在 Anki 中直接导入该文件以合并到原牌组（保留历史学习记录）。"
+                        )
+                        st.download_button(
+                            label=f"📥 下载 {output_name}",
+                            data=out_data,
+                            file_name=output_name,
+                            mime="application/octet-stream",
+                            type="primary"
+                        )
+        except Exception as e:
+            ErrorHandler.handle(e, "APKG 解析或语音生成失败")
     
     if 'anki_cards_cache' not in st.session_state:
         st.session_state['anki_cards_cache'] = None
