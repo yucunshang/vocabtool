@@ -1376,7 +1376,7 @@ with tab_optimize:
                 
                 # Column mapping configuration
                 st.write("#### 1. 核心步骤：请核对列名")
-                st.caption("提示：Prompt 生成了 4 列数据，请务必将"词源"也选上，防止丢失。")
+                st.caption("提示：Prompt 生成了 4 列数据，请务必将'词源'也选上，防止丢失。")
                 st.dataframe(df_preview.head(3), use_container_width=True, hide_index=True)
                 
                 all_cols = list(df_preview.columns)
@@ -1432,7 +1432,7 @@ with tab_optimize:
                 # Execute button
                 if st.button("🚀 开始生成 (可视化进度)", type="primary", key="btn_txt_gen"):
                     if not col_word:
-                        st.error("❌ 必须选择"单词列"！")
+                        st.error("❌ 必须选择'单词列'！")
                     else:
                         # Prepare data
                         full_cards_list = []
