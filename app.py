@@ -965,15 +965,16 @@ with tab_anki:
 # ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
 # ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
 # ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
+# ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
 with tab_optimize:
     st.markdown("### 🗣️ 文本转语音 (TXT -> Anki)")
-    st.info("💡 一次性处理模式：上传文件后，请务必在下方核对列的对应关系。")
+    st.info("💡 适合大批量处理，将实时显示生成进度。")
 
     up_txt = st.file_uploader("上传 .txt / .csv 文件", type=['txt', 'csv'], key="txt_audio_up")
     
     if up_txt:
         try:
-            # === 预处理文件，清洗掉 Anki 的 header ===
+            # === 1. 预处理文件，清洗掉 Anki 的 header ===
             string_data = up_txt.getvalue().decode("utf-8", errors="ignore")
             lines = string_data.splitlines()
             valid_lines = [line for line in lines if not line.strip().startswith("#")]
@@ -1002,9 +1003,8 @@ with tab_optimize:
 
                 st.toast(f"成功读取 {len(df_preview)} 行数据", icon="✅")
                 
-                # --- 1. 列映射配置 ---
+                # === 2. 列映射配置 ===
                 st.write("#### 1. 核心步骤：请核对列名")
-                st.caption("请根据您的文件内容，手动选择对应的列，防止错位。")
                 st.dataframe(df_preview.head(3), use_container_width=True, hide_index=True)
                 
                 all_cols = list(df_preview.columns)
@@ -1012,16 +1012,15 @@ with tab_optimize:
                 
                 c1, c2, c3 = st.columns(3)
                 
-                # 智能尝试默认索引 (防止默认选错)
                 idx_word = 0
                 idx_meaning = 1 if len(all_cols) > 1 else 0
                 idx_example = 2 if len(all_cols) > 2 else 0
                 
-                col_word = c1.selectbox("📝 单词列 (正面+语音)", all_cols, index=idx_word, help="卡片正面显示的单词")
-                col_meaning = c2.selectbox("🇨🇳 释义列 (背面-不发音)", all_cols_options, index=idx_meaning + 1, help="卡片背面的中文意思")
-                col_example = c3.selectbox("🗣️ 例句列 (背面+语音)", all_cols_options, index=idx_example + 1, help="卡片背面的例句")
+                col_word = c1.selectbox("📝 单词列 (正面+语音)", all_cols, index=idx_word)
+                col_meaning = c2.selectbox("🇨🇳 释义列 (背面-不发音)", all_cols_options, index=idx_meaning + 1)
+                col_example = c3.selectbox("🗣️ 例句列 (背面+语音)", all_cols_options, index=idx_example + 1)
                 
-                # --- 2. 语音配置 ---
+                # === 3. 语音配置 ===
                 st.write("#### 2. 生成配置")
                 voice_choice_txt = st.radio(
                     "选择发音人", 
@@ -1033,8 +1032,8 @@ with tab_optimize:
                 
                 txt_deck_name = st.text_input("牌组名称", f"AudioDeck_{get_beijing_time_str()}", key="txt_deck_name")
                 
-                # --- 3. 执行按钮 ---
-                if st.button("🚀 生成全部 (不分组)", type="primary", key="btn_txt_gen"):
+                # === 4. 执行按钮 ===
+                if st.button("🚀 开始生成 (可视化进度)", type="primary", key="btn_txt_gen"):
                     if not col_word:
                         st.error("❌ 必须选择“单词列”！")
                     else:
@@ -1042,7 +1041,6 @@ with tab_optimize:
                         full_cards_list = []
                         for idx, row in df_preview.iterrows():
                             w_val = str(row[col_word]).strip()
-                            # 处理 (无) 的情况
                             m_val = str(row[col_meaning]).strip() if col_meaning != "(无)" else ""
                             e_val = str(row[col_example]).strip() if col_example != "(无)" else ""
                             
@@ -1053,34 +1051,40 @@ with tab_optimize:
                         if total_cards == 0:
                             st.warning("有效数据为空。")
                         else:
-                            st.write(f"📊 正在处理 **{total_cards}** 张卡片，请耐心等待...")
+                            # === 进度显示区域 ===
+                            st.divider()
+                            st.write(f"📊 任务总量: **{total_cards}** 张卡片")
                             
-                            # 进度条容器
-                            prog_cont = st.container()
-                            with prog_cont:
-                                main_prog_bar = st.progress(0)
-                                status_text = st.empty()
+                            prog_container = st.container()
+                            with prog_container:
+                                progress_bar = st.progress(0)
+                                status_text = st.empty() # 这是一个占位符，用于动态更新文字
                             
-                            def progress_callback_all(curr, total):
-                                main_prog_bar.progress(curr / total)
-                                status_text.text(f"🔊 正在生成语音: {curr} / {total}")
+                            # === 关键：定义回调函数更新 UI ===
+                            def visual_progress_callback(progress_ratio, status_message):
+                                # progress_ratio: 0.0 ~ 1.0
+                                # status_message: 来自底层函数的文字信息 (例如: "正在生成... (5/100)")
+                                progress_bar.progress(progress_ratio)
+                                # 使用 Markdown 加粗显示，更醒目
+                                status_text.markdown(f"### {status_message}")
                                 
                             try:
-                                # 一次性生成
-                                f_path = generate_anki_package(
-                                    full_cards_list, 
-                                    txt_deck_name, 
-                                    enable_tts=True, 
-                                    tts_voice=voice_code_txt,
-                                    progress_callback=progress_callback_all
-                                )
+                                with st.spinner("正在初始化音频引擎..."):
+                                    f_path = generate_anki_package(
+                                        full_cards_list, 
+                                        txt_deck_name, 
+                                        enable_tts=True, 
+                                        tts_voice=voice_code_txt,
+                                        progress_callback=visual_progress_callback
+                                    )
                                 
                                 # 读取并提供下载
                                 with open(f_path, "rb") as f:
                                     st.session_state['txt_pkg_data'] = f.read()
                                 st.session_state['txt_pkg_name'] = f"{txt_deck_name}.apkg"
                                 
-                                status_text.success(f"🎉 成功！{total_cards} 张卡片已打包完毕。")
+                                status_text.markdown(f"## ✅ 生成完成！共 {total_cards} 张。")
+                                progress_bar.progress(1.0)
                                 st.balloons()
                                 
                             except Exception as e:
@@ -1091,7 +1095,7 @@ with tab_optimize:
 
     if st.session_state.get('txt_pkg_data'):
         st.download_button(
-            label=f"📥 下载完整牌组 {st.session_state['txt_pkg_name']}",
+            label=f"📥 下载牌组 {st.session_state['txt_pkg_name']}",
             data=st.session_state['txt_pkg_data'],
             file_name=st.session_state['txt_pkg_name'],
             mime="application/octet-stream",
