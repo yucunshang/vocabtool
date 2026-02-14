@@ -500,7 +500,6 @@ def get_lemma(word: str, lemminflect: Any) -> str:
         return lemmas[0] if lemmas else word
     except Exception:
         return word
-
 def analyze_logic(
     text: str,
     current_level: int,
@@ -508,9 +507,10 @@ def analyze_logic(
     include_unknown: bool
 ) -> Tuple[List[Tuple[str, int]], int, Dict[str, float]]:
     """Analyze text to extract vocabulary within specified rank range."""
+    # 确保加载了必要的资源
     nltk, lemminflect = load_nlp_resources()
     
-    # Extract tokens
+    # Extract tokens (使用更宽容的正则，确保能抓取带连字符和撇号的词)
     raw_tokens = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", text)
     total_raw_count = len(raw_tokens)
     
@@ -525,50 +525,63 @@ def analyze_logic(
     
     # Process candidates
     final_candidates = []
-    seen_lemmas = set()
+    seen_lemmas = set() # 用于避免重复推荐同一个词根
     
     for word, count in token_counts.items():
-        # 1. 获取 Lemma (用于后续去重和兜底)
-        lemma = get_lemma(word, lemminflect)
+        # === 核心修改：多级匹配机制，防止遗漏 ===
         
-        # 2. 获取排名
-        rank_orig = VOCAB_DICT.get(word, 99999)
-        rank_lemma = VOCAB_DICT.get(lemma, 99999)
+        found_rank = 99999
+        word_to_keep = word # 默认展示原词
         
-        # === 核心逻辑修改 ===
-        # 优先使用原词 (Prototype)，如果原词在词库中找不到，才使用 Lemma
-        
-        best_rank = 99999
-        word_to_keep = word  # 默认展示原词
-        
-        if rank_orig != 99999:
-            # 情况A: 原词在词库中 -> 优先采用原词
-            best_rank = rank_orig
-            word_to_keep = word
-        elif rank_lemma != 99999:
-            # 情况B: 原词不在，但Lemma在 -> 采用Lemma
-            best_rank = rank_lemma
-            word_to_keep = lemma
-        else:
-            # 情况C: 都不在 -> 视为生词 (99999)，展示原词
-            best_rank = 99999
+        # 1. 尝试直接匹配原词 (如 "Looking")
+        if word in VOCAB_DICT:
+            found_rank = VOCAB_DICT[word]
             word_to_keep = word
             
-        # Update statistics (基于最终选定的 rank)
+        # 2. 如果原词没找到，尝试匹配 Lemma (如 "Look")
+        if found_rank == 99999:
+            lemma = get_lemma(word, lemminflect)
+            if lemma in VOCAB_DICT:
+                found_rank = VOCAB_DICT[lemma]
+                word_to_keep = lemma # 修正展示为词库里的形式
+        
+        # 3. 强力兜底匹配 (解决 "driver's" 或 "co-operate" 这种词库不收录的问题)
+        if found_rank == 99999:
+            # 尝试去除所有的 's, 'd, 'll 等后缀
+            clean_word = re.sub(r"['’](s|d|ll|re|ve|m|t)$", "", word)
+            # 尝试去除连字符
+            dehyphen_word = word.replace("-", "")
+            
+            if clean_word in VOCAB_DICT:
+                found_rank = VOCAB_DICT[clean_word]
+                word_to_keep = clean_word
+            elif dehyphen_word in VOCAB_DICT:
+                found_rank = VOCAB_DICT[dehyphen_word]
+                word_to_keep = dehyphen_word
+        
+        # === 匹配结束 ===
+
+        # 此时 found_rank 就是我们能找到的最优排名
+        best_rank = found_rank
+        
+        # 计算统计数据
         if best_rank < current_level:
             stats_known_count += count
         elif current_level <= best_rank <= target_level:
             stats_target_count += count
         
-        # Add to candidates if in range
+        # 判断是否保留该词
         is_in_range = (best_rank >= current_level and best_rank <= target_level)
         is_unknown_included = (best_rank == 99999 and include_unknown)
         
         if is_in_range or is_unknown_included:
-            # 使用 lemma 进行去重，确保同一词根只出现一次
-            if lemma not in seen_lemmas:
+            # 获取该词的"词根"形式用于去重 (如果之前没算过lemma，这里算一下)
+            current_lemma = get_lemma(word_to_keep, lemminflect)
+            
+            # 去重逻辑：确保同一个意思不重复出现 (比如 saw 和 see 只出一个)
+            if current_lemma not in seen_lemmas:
                 final_candidates.append((word_to_keep, best_rank))
-                seen_lemmas.add(lemma)
+                seen_lemmas.add(current_lemma)
     
     # Sort by rank
     final_candidates.sort(key=lambda x: x[1])
