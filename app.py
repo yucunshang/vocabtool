@@ -15,6 +15,7 @@ import zipfile
 import tempfile
 import traceback
 from collections import Counter
+from io import StringIO
 from datetime import datetime, timedelta, timezone
 
 # 尝试导入 OpenAI
@@ -413,11 +414,11 @@ def parse_anki_data(raw_text):
 
     return parsed_cards
 
-async def _generate_audio_batch(tasks, concurrency=1, progress_callback=None):
+async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
     """
-    极度稳健的音频生成逻辑。
-    1. 并发默认为 1 (串行)，防止触发 500 错误。
-    2. 捕获所有异常，绝不让主程序崩溃。
+    智能优化的音频生成逻辑。
+    1. 并发设置为 3 (安全甜点值)，既快又不封号。
+    2. 使用短随机抖动 (0.1-0.8s) 模拟真人操作。
     """
     semaphore = asyncio.Semaphore(concurrency)
     total_files = len(tasks)
@@ -426,8 +427,8 @@ async def _generate_audio_batch(tasks, concurrency=1, progress_callback=None):
     async def worker(task):
         nonlocal completed_files
         async with semaphore:
-            # 增加显著延时，微软TTS免费接口非常敏感
-            await asyncio.sleep(random.uniform(1.0, 2.5))
+            # 智能抖动：小幅随机延时，防止瞬时并发过高被 WAF 拦截
+            await asyncio.sleep(random.uniform(0.1, 0.8))
             
             success = False
             error_msg = ""
@@ -435,25 +436,23 @@ async def _generate_audio_batch(tasks, concurrency=1, progress_callback=None):
             for attempt in range(3):
                 try:
                     if not os.path.exists(task['path']):
-                        # 关键：每次重试都重新创建对象，防止 socket 状态残留
+                        # 关键：每次重试都重新创建对象
                         comm = edge_tts.Communicate(task['text'], task['voice'])
                         await comm.save(task['path'])
                         
-                        # 校验文件有效性
                         if os.path.exists(task['path']) and os.path.getsize(task['path']) > 100:
                              success = True
                              break
                         else:
-                             # 文件太小，可能是空文件
                              if os.path.exists(task['path']): os.remove(task['path'])
-                             raise Exception("File size too small (empty response)")
+                             raise Exception("File size too small")
                     else:
                         success = True
                         break
                 except Exception as e:
                     error_msg = str(e)
-                    # 失败后等待更长时间
-                    await asyncio.sleep(2 * (attempt + 1)) 
+                    # 失败后指数退避等待
+                    await asyncio.sleep(1.5 * (attempt + 1)) 
             
             if not success:
                 print(f"TTS Failed finally for: {task['text']} | Error: {error_msg}")
@@ -462,17 +461,17 @@ async def _generate_audio_batch(tasks, concurrency=1, progress_callback=None):
             if progress_callback:
                 progress_callback(completed_files, total_files)
 
-    # 捕获所有任务异常，防止单个任务崩溃导致 gather 抛出
     jobs = [worker(t) for t in tasks]
     await asyncio.gather(*jobs, return_exceptions=True)
 
-def run_async_batch(tasks, concurrency=1, progress_callback=None):
+def run_async_batch(tasks, concurrency=3, progress_callback=None):
     if not tasks:
         return
     
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
+        # 这里默认 concurrency=3，安全且快速
         loop.run_until_complete(_generate_audio_batch(tasks, concurrency, progress_callback))
     finally:
         loop.close()
@@ -584,8 +583,9 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
                     base_progress + (curr_files/total_files)*0.8, 
                     f"🔊 正在生成语音 ({current_word_idx}/{total_words_count})..."
                 )
-
-        run_async_batch(audio_tasks, concurrency=1, progress_callback=internal_progress)
+        
+        # ⚠️ 关键优化：并发设置为 3，安全提速
+        run_async_batch(audio_tasks, concurrency=3, progress_callback=internal_progress)
 
     for note in notes_buffer:
         deck.add_note(note)
@@ -616,7 +616,7 @@ with st.expander("📖 使用指南 & 支持格式"):
     **🚀 极速工作流**
     1. **提取**：支持 URL、PDF, ePub, Docx, txt 等格式。
     2. **生成**：自动完成文本生成、**并发语音合成**并打包下载。
-    3. **优化**：支持导入文本(TXT/CSV)牌组，**自动添加语音**并打包为 Anki 文件。
+    3. **优化**：支持导入 Anki 导出文本或 CSV，**自动添加语音**并打包。
     """)
 
 tab_extract, tab_anki, tab_optimize = st.tabs(["1️⃣ 单词提取", "2️⃣ 卡片制作", "3️⃣ 文本转语音(TXT->Anki)"])
@@ -965,90 +965,125 @@ with tab_anki:
 # ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
 with tab_optimize:
     st.markdown("### 🗣️ 文本转语音 (TXT -> Anki)")
-    st.info("💡 上传您的单词文本文件，配置列映射，即可自动生成语音并打包为 .apkg 导入使用。")
+    st.info("💡 上传 Anki 导出的 Notes 文本文件，或者普通的 CSV/TXT。我们会自动处理 # 开头的杂讯行。")
 
-    up_txt = st.file_uploader("上传 .txt / .csv 文件 (支持 Tab 或逗号分隔)", type=['txt', 'csv'], key="txt_audio_up")
+    up_txt = st.file_uploader("上传 .txt / .csv 文件", type=['txt', 'csv'], key="txt_audio_up")
     
     if up_txt:
-        # 尝试读取文件
         try:
-            # 自动探测分隔符
-            df_preview = pd.read_csv(up_txt, sep=None, engine='python', dtype=str).fillna('')
-            st.toast(f"成功读取 {len(df_preview)} 行数据", icon="✅")
+            # === 核心修改：预处理文件，清洗掉 Anki 的 header ===
+            string_data = up_txt.getvalue().decode("utf-8", errors="ignore")
+            lines = string_data.splitlines()
             
-            st.write("#### 1. 数据预览与列映射")
-            st.dataframe(df_preview.head(5), use_container_width=True, hide_index=True)
+            # 过滤掉以 # 开头的行 (Anki metadata)
+            valid_lines = [line for line in lines if not line.strip().startswith("#")]
             
-            all_cols = list(df_preview.columns)
-            all_cols_options = ["(无)"] + all_cols
-            
-            c1, c2, c3 = st.columns(3)
-            col_word = c1.selectbox("📝 单词列 (正面 + 语音)", all_cols, index=0)
-            col_meaning = c2.selectbox("🇨🇳 释义列 (背面)", all_cols_options, index=1 if len(all_cols) > 1 else 0)
-            col_example = c3.selectbox("🗣️ 例句列 (背面 + 语音)", all_cols_options, index=2 if len(all_cols) > 2 else 0)
-            
-            st.write("#### 2. 语音配置")
-            voice_choice_txt = st.radio(
-                "选择发音人", 
-                list(VOICE_MAP.keys()), 
-                horizontal=True,
-                key="txt_voice_radio"
-            )
-            voice_code_txt = VOICE_MAP[voice_choice_txt]
-            
-            txt_deck_name = st.text_input("牌组名称", f"AudioDeck_{get_beijing_time_str()}", key="txt_deck_name")
-            
-            if st.button("🚀 生成带语音的 Anki 包", type="primary", key="btn_txt_gen"):
-                if not col_word:
-                    st.error("必须选择“单词列”！")
-                else:
-                    # 转换数据格式为 generate_anki_package 需要的格式
-                    cards_list = []
-                    for idx, row in df_preview.iterrows():
-                        w_val = str(row[col_word]).strip()
-                        m_val = str(row[col_meaning]).strip() if col_meaning != "(无)" else ""
-                        e_val = str(row[col_example]).strip() if col_example != "(无)" else ""
-                        
-                        if w_val:
-                            cards_list.append({
-                                'w': w_val,
-                                'm': m_val,
-                                'e': e_val,
-                                'r': '' # 词源暂时留空
-                            })
-                    
-                    if not cards_list:
-                        st.warning("有效数据为空，请检查文件内容。")
+            if not valid_lines:
+                st.error("文件内容为空（或者全是注释行）。")
+            else:
+                # 重新组合成干净的文本流
+                clean_data = "\n".join(valid_lines)
+                
+                # 尝试读取，如果不含表头，则使用 header=None
+                # 简单的启发式判断：看第一行是否包含常见列名
+                first_line_clean = valid_lines[0].lower()
+                has_header = any(x in first_line_clean for x in ['word', 'term', 'phrase', 'meaning', 'def', 'example'])
+                
+                header_arg = 0 if has_header else None
+                
+                # 读取数据
+                df_preview = pd.read_csv(
+                    StringIO(clean_data), 
+                    sep=None, 
+                    engine='python', 
+                    dtype=str, 
+                    header=header_arg
+                ).fillna('')
+                
+                # 如果是无表头模式，手动给列起名
+                if header_arg is None:
+                    df_preview.columns = [f"第 {i+1} 列 (示例: {df_preview.iloc[0, i]})" for i in range(len(df_preview.columns))]
+
+                st.toast(f"成功读取 {len(df_preview)} 行数据", icon="✅")
+                
+                st.write("#### 1. 列映射 (请对应 Anki 的字段)")
+                st.dataframe(df_preview.head(3), use_container_width=True, hide_index=True)
+                
+                all_cols = list(df_preview.columns)
+                all_cols_options = ["(无)"] + all_cols
+                
+                c1, c2, c3 = st.columns(3)
+                # 智能尝试自动选中
+                idx_word = 0
+                idx_meaning = 1 if len(all_cols) > 1 else 0
+                idx_example = 2 if len(all_cols) > 2 else 0
+
+                col_word = c1.selectbox("📝 单词列 (正面 + 语音)", all_cols, index=idx_word)
+                col_meaning = c2.selectbox("🇨🇳 释义列 (背面)", all_cols_options, index=idx_meaning + 1)
+                col_example = c3.selectbox("🗣️ 例句列 (背面 + 语音)", all_cols_options, index=idx_example + 1)
+                
+                st.write("#### 2. 语音配置")
+                voice_choice_txt = st.radio(
+                    "选择发音人", 
+                    list(VOICE_MAP.keys()), 
+                    horizontal=True,
+                    key="txt_voice_radio"
+                )
+                voice_code_txt = VOICE_MAP[voice_choice_txt]
+                
+                txt_deck_name = st.text_input("牌组名称", f"AudioDeck_{get_beijing_time_str()}", key="txt_deck_name")
+                
+                if st.button("🚀 生成带语音的 Anki 包", type="primary", key="btn_txt_gen"):
+                    if not col_word:
+                        st.error("❌ 必须选择“单词列”！")
                     else:
-                        txt_prog_cont = st.container()
-                        with txt_prog_cont:
-                            txt_prog_bar = st.progress(0)
-                            txt_status = st.empty()
-                        
-                        def update_txt_progress(p, text):
-                            txt_prog_bar.progress(p)
-                            txt_status.text(text)
+                        cards_list = []
+                        for idx, row in df_preview.iterrows():
+                            # 获取列的真实名称 (如果选了(无)则为空)
+                            w_val = str(row[col_word]).strip()
+                            m_val = str(row[col_meaning]).strip() if col_meaning != "(无)" else ""
+                            e_val = str(row[col_example]).strip() if col_example != "(无)" else ""
                             
-                        with st.spinner("🔊 正在生成语音并打包..."):
-                            try:
-                                f_path = generate_anki_package(
-                                    cards_list, 
-                                    txt_deck_name, 
-                                    enable_tts=True, 
-                                    tts_voice=voice_code_txt,
-                                    progress_callback=update_txt_progress
-                                )
-                                with open(f_path, "rb") as f:
-                                    st.session_state['txt_pkg_data'] = f.read()
-                                st.session_state['txt_pkg_name'] = f"{txt_deck_name}.apkg"
+                            if w_val:
+                                cards_list.append({
+                                    'w': w_val,
+                                    'm': m_val,
+                                    'e': e_val,
+                                    'r': '' 
+                                })
+                        
+                        if not cards_list:
+                            st.warning("⚠️ 有效数据为空，请检查列映射是否正确。")
+                        else:
+                            txt_prog_cont = st.container()
+                            with txt_prog_cont:
+                                txt_prog_bar = st.progress(0)
+                                txt_status = st.empty()
+                            
+                            def update_txt_progress(p, text):
+                                txt_prog_bar.progress(p)
+                                txt_status.text(text)
                                 
-                                txt_status.markdown(f"✅ **成功生成！包含 {len(cards_list)} 张卡片**")
-                                st.balloons()
-                            except Exception as e:
-                                st.error(f"处理失败: {e}")
-                                
+                            with st.spinner("🔊 正在生成语音并打包..."):
+                                try:
+                                    f_path = generate_anki_package(
+                                        cards_list, 
+                                        txt_deck_name, 
+                                        enable_tts=True, 
+                                        tts_voice=voice_code_txt,
+                                        progress_callback=update_txt_progress
+                                    )
+                                    with open(f_path, "rb") as f:
+                                        st.session_state['txt_pkg_data'] = f.read()
+                                    st.session_state['txt_pkg_name'] = f"{txt_deck_name}.apkg"
+                                    
+                                    txt_status.markdown(f"✅ **成功生成！包含 {len(cards_list)} 张卡片**")
+                                    st.balloons()
+                                except Exception as e:
+                                    st.error(f"处理失败: {e}")
+                                    
         except Exception as e:
-            st.error(f"文件读取失败: {e}")
+            st.error(f"文件解析失败: {e}")
 
     if st.session_state.get('txt_pkg_data'):
         st.download_button(
