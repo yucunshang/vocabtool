@@ -135,7 +135,6 @@ def extract_text_from_file(uploaded_file):
     text = ""
     file_type = uploaded_file.name.split('.')[-1].lower()
     
-    # 增加通用异常捕获，防止单个文件解析崩溃导致应用报错
     try:
         if file_type == 'txt':
             bytes_data = uploaded_file.getvalue()
@@ -173,7 +172,6 @@ def extract_text_from_file(uploaded_file):
                  return f"Error parsing EPUB: {e}"
             
         elif file_type in ['db', 'sqlite']:
-            # ... (Existing DB logic) ...
             with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as tmp_db:
                 tmp_db.write(uploaded_file.getvalue())
                 tmp_db_path = tmp_db.name
@@ -266,7 +264,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# 3. AI 调用逻辑 (增强稳定性：增加重试机制)
+# 3. AI 调用逻辑 (内置 AI - 简单模式)
 # ==========================================
 def process_ai_in_batches(words_list, progress_callback=None):
     if not OpenAI:
@@ -287,6 +285,7 @@ def process_ai_in_batches(words_list, progress_callback=None):
     total_words = len(words_list)
     full_results = []
     
+    # 内置 AI 保持简单：Word ||| CN Meaning ||| EN Example
     system_prompt = "You are a helpful assistant for vocabulary learning."
     
     for i in range(0, total_words, BATCH_SIZE):
@@ -309,7 +308,6 @@ Output: hectic ||| 忙乱的，繁忙的 ||| She has a hectic schedule today.
 Input:
 {current_batch_str}
 """
-        # === 核心修改：增加重试机制 (Retry Logic) ===
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -328,11 +326,11 @@ Input:
                     processed_count = min(i + BATCH_SIZE, total_words)
                     progress_callback(processed_count, total_words)
                 
-                break # 成功则跳出重试循环
+                break 
             
             except Exception as e:
                 if attempt < max_retries - 1:
-                    time.sleep(1 + attempt) # 失败等待 1s, 2s...
+                    time.sleep(1 + attempt)
                     continue
                 else:
                     st.error(f"Batch {i//BATCH_SIZE + 1} failed after {max_retries} attempts: {e}")
@@ -364,6 +362,7 @@ def parse_anki_data(raw_text):
         if len(parts) < 2: 
             continue
         
+        # 兼容 3段式 和 4段式
         w = parts[0].strip()
         m = parts[1].strip()
         e = parts[2].strip() if len(parts) > 2 else ""
@@ -388,19 +387,18 @@ async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
     async def worker(task):
         nonlocal completed_files
         async with semaphore:
-            # === 核心修改：TTS 重试机制 ===
             for attempt in range(3):
                 try:
                     if not os.path.exists(task['path']):
                         comm = edge_tts.Communicate(task['text'], task['voice'])
                         await comm.save(task['path'])
                         await asyncio.sleep(random.uniform(0.1, 0.4)) 
-                    break # 成功则跳出
+                    break 
                 except Exception as e:
                     if attempt == 2:
                         print(f"TTS Failed for {task['text']}: {e}")
                     else:
-                        await asyncio.sleep(0.5) # 重试等待
+                        await asyncio.sleep(0.5) 
             
             completed_files += 1
             if progress_callback:
@@ -753,45 +751,82 @@ with tab_extract:
         with col_copy_hint:
             st.info("👈 点击左侧按钮自动生成。如使用第三方 AI，请复制下方 Prompt。")
 
-        # 保留这个高级 Prompt 供用户复制到第三方使用
+        # === 增强版：手动 Prompt 配置器 ===
         with st.expander("📌 手动复制 Prompt (第三方 AI 用)"):
-            prompt_text = f"""# Role
-You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
-Make sure to process everything in one go, without missing anything.
+            st.write("⚙️ **Prompt 生成设置**")
+            p_c1, p_c2 = st.columns(2)
+            
+            # 配置项
+            with p_c1:
+                p_front_type = st.selectbox("正面类型", ["Phrase (短语搭配)", "Word (仅单词)"], index=0)
+                p_def_lang = st.selectbox("释义语言", ["English (B2-C1)", "Simplified Chinese"], index=0)
+            with p_c2:
+                p_ex_count = st.number_input("例句数量", min_value=1, max_value=3, value=1)
+                p_etym_on = st.checkbox("包含词源 (Etymology)", value=True)
+            
+            # 批量分组逻辑
+            batch_size_prompt = st.number_input("分组大小 (Max 500)", min_value=10, max_value=500, value=50, step=10)
+            
+            # 将 words_only 切片
+            if words_only:
+                total_w = len(words_only)
+                num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
+                
+                batch_options = [f"第 {i+1} 组 ({i*batch_size_prompt+1} - {min((i+1)*batch_size_prompt, total_w)})" for i in range(num_batches)]
+                selected_batch_str = st.selectbox("选择要复制的分组", batch_options)
+                
+                # 获取当前选中的单词列表
+                sel_idx = batch_options.index(selected_batch_str)
+                current_batch_words = words_only[sel_idx*batch_size_prompt : min((sel_idx+1)*batch_size_prompt, total_w)]
+                words_str = ", ".join(current_batch_words)
+            else:
+                words_str = "[Words list is empty]"
 
+            # 动态生成 Prompt 文本
+            # 逻辑：根据用户选择调整 Prompt 内容
+            
+            phrase_rule = "You MUST generate a high-frequency **collocation** or **short phrase** containing the target word." if "Phrase" in p_front_type else "Front must be the **Single Target Word** only."
+            phrase_eg = "heavy rain" if "Phrase" in p_front_type else "rain"
+            
+            def_rule = "Define the phrase in concise **English (B2-C1 level)**." if "English" in p_def_lang else "Define in **Simplified Chinese** (Concise)."
+            def_eg = "water falling in drops from vapor condensed in the atmosphere" if "English" in p_def_lang else "雨，降雨"
+            
+            # 例句数量处理
+            ex_rule = f"{p_ex_count} short, authentic sentence(s) containing the phrase."
+            ex_eg_arr = ["It's raining heavily outside."] * p_ex_count
+            ex_eg_str = " ||| ".join(ex_eg_arr) if p_ex_count > 1 else ex_eg_arr[0]
+            
+            # 词源处理
+            etym_field_rule = "4. **Field 4: Roots/Etymology (Simplified Chinese)**\n   - Format: `prefix- + root + -suffix`." if p_etym_on else ""
+            etym_struct = " ||| `Etymology`" if p_etym_on else ""
+            etym_eg = " ||| rain (Germanic origin)" if p_etym_on else ""
+
+            dynamic_prompt = f"""# Role
+You are an expert English Lexicographer and Anki Card Designer.
 # Input Data
-{", ".join(words_only)}
+{words_str}
 
-# Output Format Guidelines
-1. **Output Container**: Strictly inside a single ```text code block.
+# Output Format
+1. **Container**: Strictly inside a single ```text code block.
 2. **Layout**: One entry per line.
-3. **Separator**: Use `|||` as the delimiter.
+3. **Separator**: `|||`
 4. **Target Structure**:
-   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
+   `Front ({p_front_type.split()[0]})` ||| `Definition` ||| `Example(s)`{etym_struct}
 
-# Field Constraints (Strict)
-1. **Field 1: Phrase (CRITICAL)**
-   - DO NOT output the single target word.
-   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
-   - Example: If input is "rain", output "heavy rain" or "torrential rain".
-   
-2. **Field 2: Definition (English)**
-   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
-
+# Field Constraints
+1. **Field 1: Front**
+   - {phrase_rule}
+2. **Field 2: Definition**
+   - {def_rule}
 3. **Field 3: Example**
-   - A short, authentic sentence containing the phrase.
+   - {ex_rule}
+{etym_field_rule}
 
-4. **Field 4: Roots/Etymology (Simplified Chinese)**
-   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
-   - If no classical roots exist, explain the origin briefly in Chinese.
-   - Use Simplified Chinese for meanings.
-
-# Valid Example (Follow this logic strictly)
-Input: altruism
-Output:
-motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
+# Example
+Input: rain
+Output: {phrase_eg} ||| {def_eg} ||| {ex_eg_str}{etym_eg}
 """
-            st.code(prompt_text, language="text")
+            st.code(dynamic_prompt, language="text")
 
 # ----------------- Tab 2: 卡片制作 (手动模式) -----------------
 with tab_anki:
