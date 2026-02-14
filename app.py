@@ -909,12 +909,14 @@ with tab_extract:
         
         st.write("🎙️ **语音设置**")
         
+        # 修复冲突: 给 Tab1 的 radio 增加 key
         selected_voice_label = st.radio(
             "选择发音人", 
             options=list(VOICE_MAP.keys()), 
             index=0, 
             horizontal=True, 
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="extract_voice_radio"
         )
         selected_voice_code = VOICE_MAP[selected_voice_label]
         
@@ -1161,7 +1163,13 @@ with tab_optimize:
             audio_configs = []
             
             st.markdown("##### 🎙️ 语音配置")
-            voice_choice = st.radio("选择发音人", list(VOICE_MAP.keys()), horizontal=True)
+            # 修复冲突: 给 Tab3 的 radio 增加 key
+            voice_choice = st.radio(
+                "选择发音人", 
+                list(VOICE_MAP.keys()), 
+                horizontal=True,
+                key="opt_voice_radio"
+            )
             voice_code = VOICE_MAP[voice_choice]
             
             st.write("---")
