@@ -826,6 +826,7 @@ def generate_anki_package(
         meaning = safe_str_clean(card.get('m', ''))
         example = safe_str_clean(card.get('e', ''))
         etymology = safe_str_clean(card.get('r', ''))
+        note_id = card.get('id')  # Get original Anki note ID if available
         
         audio_phrase_field = ""
         audio_example_field = ""
@@ -857,10 +858,20 @@ def generate_anki_package(
                 media_files.append(example_path)
                 audio_example_field = f"[sound:{example_filename}]"
         
-        note = genanki.Note(
-            model=model,
-            fields=[phrase, meaning, example, etymology, audio_phrase_field, audio_example_field]
-        )
+        # Create note with original ID if available (for deck merging)
+        if note_id:
+            # Use original Anki note ID as GUID for proper merging
+            note = genanki.Note(
+                model=model,
+                fields=[phrase, meaning, example, etymology, audio_phrase_field, audio_example_field],
+                guid=note_id  # Preserve original note ID
+            )
+        else:
+            # Create new note without GUID (will auto-generate)
+            note = genanki.Note(
+                model=model,
+                fields=[phrase, meaning, example, etymology, audio_phrase_field, audio_example_field]
+            )
         notes_buffer.append(note)
     
     # Generate audio files if needed
@@ -1377,24 +1388,41 @@ with tab_optimize:
                 # Column mapping configuration
                 st.write("#### 1. 核心步骤：请核对列名")
                 st.caption("提示：Prompt 生成了 4 列数据，请务必将'词源'也选上，防止丢失。")
+                
+                # Check if first column looks like Anki note IDs
+                first_col_name = df_preview.columns[0]
+                has_note_id = False
+                
+                # Detect if first column contains note IDs (numeric values ~13 digits)
+                if len(df_preview) > 0:
+                    first_col_values = df_preview[first_col_name].astype(str)
+                    # Check if most values in first column are long numbers (Anki note IDs)
+                    numeric_count = sum(1 for v in first_col_values if v.isdigit() and len(v) >= 10)
+                    if numeric_count / len(first_col_values) > 0.8:  # 80% are long numbers
+                        has_note_id = True
+                        st.success(f"✅ 检测到 Anki 笔记 ID (列: {first_col_name}) - 新牌组将可以与原牌组合并！")
+                
                 st.dataframe(df_preview.head(3), use_container_width=True, hide_index=True)
                 
                 all_cols = list(df_preview.columns)
-                all_cols_options = ["(无)"] + all_cols
+                # If has note ID, exclude first column from mapping options
+                content_cols = all_cols[1:] if has_note_id else all_cols
+                all_cols_options = ["(无)"] + content_cols
                 
                 # 2x2 layout for 4 selection boxes
                 col1, col2 = st.columns(2)
                 col3, col4 = st.columns(2)
                 
-                # Smart default indices
+                # Smart default indices (adjusted if note ID column present)
+                base_offset = 1 if has_note_id else 0
                 idx_word = 0
-                idx_meaning = 1 if len(all_cols) > 1 else 0
-                idx_example = 2 if len(all_cols) > 2 else 0
-                idx_etym = 3 if len(all_cols) > 3 else 0
+                idx_meaning = 1 if len(content_cols) > 1 else 0
+                idx_example = 2 if len(content_cols) > 2 else 0
+                idx_etym = 3 if len(content_cols) > 3 else 0
                 
                 col_word = col1.selectbox(
                     "📝 单词/短语列 (正面+语音)",
-                    all_cols,
+                    content_cols,
                     index=idx_word
                 )
                 col_meaning = col2.selectbox(
@@ -1436,6 +1464,8 @@ with tab_optimize:
                     else:
                         # Prepare data
                         full_cards_list = []
+                        note_id_col = df_preview.columns[0] if has_note_id else None
+                        
                         for idx, row in df_preview.iterrows():
                             word_val = safe_str_clean(row[col_word])
                             meaning_val = safe_str_clean(row[col_meaning]) if col_meaning != "(无)" else ""
@@ -1443,12 +1473,20 @@ with tab_optimize:
                             etym_val = safe_str_clean(row[col_etym]) if col_etym != "(无)" else ""
                             
                             if word_val:
-                                full_cards_list.append({
+                                card_data = {
                                     'w': word_val,
                                     'm': meaning_val,
                                     'e': example_val,
                                     'r': etym_val
-                                })
+                                }
+                                
+                                # Preserve original Anki note ID if available
+                                if note_id_col:
+                                    note_id = safe_str_clean(row[note_id_col])
+                                    if note_id and note_id.isdigit():
+                                        card_data['id'] = note_id
+                                
+                                full_cards_list.append(card_data)
                         
                         total_cards = len(full_cards_list)
                         if total_cards == 0:
