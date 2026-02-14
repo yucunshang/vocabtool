@@ -963,35 +963,29 @@ with tab_anki:
             )
 
 # ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
+# ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
 with tab_optimize:
     st.markdown("### 🗣️ 文本转语音 (TXT -> Anki)")
-    st.info("💡 上传 Anki 导出的 Notes 文本文件，或者普通的 CSV/TXT。我们会自动处理 # 开头的杂讯行。")
+    st.info("💡 适合大批量处理！我们会将任务自动切分成多个小文件（分卷），每完成一卷即可立即下载，防止意外中断导致前功尽弃。")
 
     up_txt = st.file_uploader("上传 .txt / .csv 文件", type=['txt', 'csv'], key="txt_audio_up")
     
     if up_txt:
         try:
-            # === 核心修改：预处理文件，清洗掉 Anki 的 header ===
+            # === 预处理文件，清洗掉 Anki 的 header ===
             string_data = up_txt.getvalue().decode("utf-8", errors="ignore")
             lines = string_data.splitlines()
-            
-            # 过滤掉以 # 开头的行 (Anki metadata)
             valid_lines = [line for line in lines if not line.strip().startswith("#")]
             
             if not valid_lines:
-                st.error("文件内容为空（或者全是注释行）。")
+                st.error("文件内容为空。")
             else:
-                # 重新组合成干净的文本流
                 clean_data = "\n".join(valid_lines)
-                
-                # 尝试读取，如果不含表头，则使用 header=None
-                # 简单的启发式判断：看第一行是否包含常见列名
                 first_line_clean = valid_lines[0].lower()
                 has_header = any(x in first_line_clean for x in ['word', 'term', 'phrase', 'meaning', 'def', 'example'])
-                
                 header_arg = 0 if has_header else None
                 
-                # 读取数据
+                from io import StringIO
                 df_preview = pd.read_csv(
                     StringIO(clean_data), 
                     sep=None, 
@@ -1000,30 +994,26 @@ with tab_optimize:
                     header=header_arg
                 ).fillna('')
                 
-                # 如果是无表头模式，手动给列起名
                 if header_arg is None:
                     df_preview.columns = [f"第 {i+1} 列 (示例: {df_preview.iloc[0, i]})" for i in range(len(df_preview.columns))]
 
                 st.toast(f"成功读取 {len(df_preview)} 行数据", icon="✅")
                 
-                st.write("#### 1. 列映射 (请对应 Anki 的字段)")
+                # --- 布局配置 ---
+                st.write("#### 1. 列映射")
                 st.dataframe(df_preview.head(3), use_container_width=True, hide_index=True)
                 
                 all_cols = list(df_preview.columns)
                 all_cols_options = ["(无)"] + all_cols
                 
                 c1, c2, c3 = st.columns(3)
-                # 智能尝试自动选中
-                idx_word = 0
-                idx_meaning = 1 if len(all_cols) > 1 else 0
-                idx_example = 2 if len(all_cols) > 2 else 0
-
-                col_word = c1.selectbox("📝 单词列 (正面 + 语音)", all_cols, index=idx_word)
-                col_meaning = c2.selectbox("🇨🇳 释义列 (背面)", all_cols_options, index=idx_meaning + 1)
-                col_example = c3.selectbox("🗣️ 例句列 (背面 + 语音)", all_cols_options, index=idx_example + 1)
+                col_word = c1.selectbox("📝 单词列 (正面 + 语音)", all_cols, index=0)
+                col_meaning = c2.selectbox("🇨🇳 释义列 (背面-不发音)", all_cols_options, index=1 if len(all_cols) > 1 else 0)
+                col_example = c3.selectbox("🗣️ 例句列 (背面 + 语音)", all_cols_options, index=2 if len(all_cols) > 2 else 0)
                 
-                st.write("#### 2. 语音配置")
-                voice_choice_txt = st.radio(
+                st.write("#### 2. 生成配置")
+                c_voice, c_batch = st.columns(2)
+                voice_choice_txt = c_voice.radio(
                     "选择发音人", 
                     list(VOICE_MAP.keys()), 
                     horizontal=True,
@@ -1031,59 +1021,100 @@ with tab_optimize:
                 )
                 voice_code_txt = VOICE_MAP[voice_choice_txt]
                 
-                txt_deck_name = st.text_input("牌组名称", f"AudioDeck_{get_beijing_time_str()}", key="txt_deck_name")
+                # === 新增：分卷大小设置 ===
+                batch_size = c_batch.number_input(
+                    "📦 分卷大小 (每多少张打一个包)", 
+                    min_value=10, 
+                    max_value=500, 
+                    value=50, 
+                    help="建议设置 50-100。每处理完这些数量，就会生成一个下载按钮。这样即使中途断网，前面的进度也能保存。"
+                )
                 
-                if st.button("🚀 生成带语音的 Anki 包", type="primary", key="btn_txt_gen"):
+                txt_deck_name = st.text_input("牌组名称 (建议英文)", f"AudioDeck_{get_beijing_time_str()}", key="txt_deck_name")
+                
+                if st.button("🚀 开始分卷生成", type="primary", key="btn_txt_gen"):
                     if not col_word:
                         st.error("❌ 必须选择“单词列”！")
                     else:
-                        cards_list = []
+                        # 1. 准备所有数据
+                        full_cards_list = []
                         for idx, row in df_preview.iterrows():
-                            # 获取列的真实名称 (如果选了(无)则为空)
                             w_val = str(row[col_word]).strip()
                             m_val = str(row[col_meaning]).strip() if col_meaning != "(无)" else ""
                             e_val = str(row[col_example]).strip() if col_example != "(无)" else ""
                             
                             if w_val:
-                                cards_list.append({
-                                    'w': w_val,
-                                    'm': m_val,
-                                    'e': e_val,
-                                    'r': '' 
-                                })
+                                full_cards_list.append({'w': w_val, 'm': m_val, 'e': e_val, 'r': ''})
                         
-                        if not cards_list:
-                            st.warning("⚠️ 有效数据为空，请检查列映射是否正确。")
+                        total_cards = len(full_cards_list)
+                        if total_cards == 0:
+                            st.warning("有效数据为空。")
                         else:
-                            txt_prog_cont = st.container()
-                            with txt_prog_cont:
-                                txt_prog_bar = st.progress(0)
-                                txt_status = st.empty()
+                            st.write(f"---")
+                            st.write(f"📊 总任务: **{total_cards}** 张卡片 | 分卷大小: **{batch_size}** | 预计分卷数: **{(total_cards + batch_size - 1) // batch_size}**")
                             
-                            def update_txt_progress(p, text):
-                                txt_prog_bar.progress(p)
-                                txt_status.text(text)
+                            # 2. 开始分批循环
+                            # 使用 st.container 确保按钮按顺序排列
+                            result_container = st.container()
+                            
+                            # 进度条
+                            main_prog_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            processed_global_count = 0
+                            
+                            # 分切列表
+                            for batch_idx, i in enumerate(range(0, total_cards, batch_size)):
+                                batch_cards = full_cards_list[i : i + batch_size]
+                                current_part_num = batch_idx + 1
+                                current_filename = f"{txt_deck_name}_Part{current_part_num}.apkg"
                                 
-                            with st.spinner("🔊 正在生成语音并打包..."):
+                                status_text.markdown(f"⏳ **正在处理第 {current_part_num} 卷 ({len(batch_cards)} 张)...**")
+                                
+                                # 内部回调，用于更新总体进度条
+                                def batch_progress_callback(curr, total):
+                                    # 计算全局进度
+                                    global_curr = processed_global_count + curr
+                                    main_prog_bar.progress(min(global_curr / total_cards, 1.0))
+                                
                                 try:
+                                    # 生成该批次的 APKG
                                     f_path = generate_anki_package(
-                                        cards_list, 
-                                        txt_deck_name, 
+                                        batch_cards, 
+                                        txt_deck_name, # 使用相同的牌组名，导入Anki时会自动合并！
                                         enable_tts=True, 
                                         tts_voice=voice_code_txt,
-                                        progress_callback=update_txt_progress
+                                        progress_callback=batch_progress_callback
                                     )
-                                    with open(f_path, "rb") as f:
-                                        st.session_state['txt_pkg_data'] = f.read()
-                                    st.session_state['txt_pkg_name'] = f"{txt_deck_name}.apkg"
                                     
-                                    txt_status.markdown(f"✅ **成功生成！包含 {len(cards_list)} 张卡片**")
-                                    st.balloons()
+                                    # 读取文件并显示下载按钮
+                                    with open(f_path, "rb") as f:
+                                        batch_data = f.read()
+                                        
+                                    # 在容器中添加下载按钮
+                                    with result_container:
+                                        st.download_button(
+                                            label=f"✅ 下载第 {current_part_num} 卷 ({i+1}~{i+len(batch_cards)})",
+                                            data=batch_data,
+                                            file_name=current_filename,
+                                            mime="application/octet-stream",
+                                            key=f"dl_btn_{batch_idx}"
+                                        )
+                                    
+                                    # 更新计数
+                                    processed_global_count += len(batch_cards)
+                                    
                                 except Exception as e:
-                                    st.error(f"处理失败: {e}")
+                                    st.error(f"❌ 第 {current_part_num} 卷处理失败: {e}")
+                                    # 遇到错误如果不严重，可以选择 continue 继续下一卷，或者 break
+                                    # 这里为了安全选择继续，防止一张卡片卡死整个任务
+                                    continue
+                            
+                            status_text.success(f"🎉 所有任务处理完毕！共完成 {processed_global_count} 张。")
+                            st.balloons()
                                     
         except Exception as e:
-            st.error(f"文件解析失败: {e}")
+            st.error(f"系统错误: {e}")
 
     if st.session_state.get('txt_pkg_data'):
         st.download_button(
