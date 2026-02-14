@@ -42,10 +42,10 @@ if 'anki_pkg_data' not in st.session_state:
     st.session_state['anki_pkg_data'] = None
 if 'anki_pkg_name' not in st.session_state: 
     st.session_state['anki_pkg_name'] = ""
-if 'opt_pkg_data' not in st.session_state:
-    st.session_state['opt_pkg_data'] = None
-if 'opt_pkg_name' not in st.session_state:
-    st.session_state['opt_pkg_name'] = ""
+if 'txt_pkg_data' not in st.session_state:
+    st.session_state['txt_pkg_data'] = None
+if 'txt_pkg_name' not in st.session_state:
+    st.session_state['txt_pkg_name'] = ""
 if 'url_input_key' not in st.session_state:
     st.session_state['url_input_key'] = ""
 
@@ -136,7 +136,7 @@ def clear_all_state():
     if 'url_input_key' in st.session_state:
         st.session_state['url_input_key'] = ""
     
-    keys_to_drop = ['gen_words_data', 'raw_count', 'process_time', 'stats_info', 'anki_pkg_data', 'anki_pkg_name', 'anki_input_text', 'opt_pkg_data', 'opt_pkg_name']
+    keys_to_drop = ['gen_words_data', 'raw_count', 'process_time', 'stats_info', 'anki_pkg_data', 'anki_pkg_name', 'anki_input_text', 'txt_pkg_data', 'txt_pkg_name']
     for k in keys_to_drop:
         if k in st.session_state:
             del st.session_state[k]
@@ -604,169 +604,6 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
         return tmp.name
 
 # ==========================================
-# 5. APKG 优化与语音注入逻辑 (防崩溃版)
-# ==========================================
-def load_anki_media_map(media_file_path):
-    if not os.path.exists(media_file_path):
-        return {}
-    
-    encodings_to_try = ['utf-8', 'utf-8-sig', 'gb18030', 'cp437', 'latin-1']
-    
-    content_str = None
-    for enc in encodings_to_try:
-        try:
-            with open(media_file_path, 'r', encoding=enc) as f:
-                content_str = f.read()
-            return json.loads(content_str)
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            continue
-            
-    if content_str:
-        try:
-            import ast
-            return ast.literal_eval(content_str)
-        except: pass
-            
-    return {}
-
-def process_apkg_with_audio(uploaded_file, audio_configs, progress_callback):
-    extract_dir = tempfile.mkdtemp()
-    new_apkg_path = ""
-    
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".apkg") as tmp_in:
-            tmp_in.write(uploaded_file.getvalue())
-            input_path = tmp_in.name
-
-        with zipfile.ZipFile(input_path, 'r') as z:
-            z.extractall(extract_dir)
-
-        db_path = os.path.join(extract_dir, 'collection.anki2')
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT id, flds FROM notes")
-        notes = cursor.fetchall()
-        
-        media_file_path = os.path.join(extract_dir, 'media')
-        media_map = load_anki_media_map(media_file_path)
-
-        # 找最大 index
-        existing_indices = []
-        for k in media_map.keys():
-            if k.isdigit():
-                existing_indices.append(int(k))
-        next_media_idx = max(existing_indices) + 1 if existing_indices else 0
-
-        tasks = []
-        note_updates_map = {} 
-        
-        for nid, flds_str in notes:
-            fields = flds_str.split('\x1f')
-            
-            for cfg in audio_configs:
-                s_idx = cfg['src_idx']
-                t_idx = cfg['tgt_idx']
-                voice = cfg['voice']
-                
-                if len(fields) > max(s_idx, t_idx):
-                    src_text = fields[s_idx]
-                    clean_text = re.sub(r'<[^>]+>', '', src_text).strip()
-                    target_content = fields[t_idx]
-                    
-                    # 生成条件：文本不为空，长度适中，且该位置没有音频
-                    if clean_text and len(clean_text) < 1000 and "[sound:" not in target_content:
-                        safe_text = re.sub(r'[^a-zA-Z0-9]', '_', clean_text)[:20]
-                        fname = f"tts_{safe_text}_{nid}_{s_idx}.mp3"
-                        fpath = os.path.join(extract_dir, fname)
-                        
-                        tasks.append({
-                            'text': clean_text,
-                            'path': fpath,
-                            'voice': voice,
-                            'nid': nid,
-                            'tgt_idx': t_idx,
-                            'fname': fname,
-                            'orig_fields': fields
-                        })
-
-        def update_tts_prog(c, t):
-            if progress_callback:
-                progress_callback(c/t * 0.8, f"🔊 正在生成音频 ({c}/{t}) - 串行安全模式")
-        
-        # ⚠️ 关键设置：并发=1，极大降低被服务器拒绝的概率
-        run_async_batch(tasks, concurrency=1, progress_callback=update_tts_prog)
-
-        if progress_callback: progress_callback(0.85, "💾 正在写入数据库...")
-        
-        successful_tasks = 0
-        for task in tasks:
-            # 严格检查：只有文件生成成功了，才去修改数据库
-            if os.path.exists(task['path']) and os.path.getsize(task['path']) > 500:
-                media_idx_str = str(next_media_idx)
-                final_path = os.path.join(extract_dir, media_idx_str)
-                
-                if not os.path.exists(final_path):
-                    shutil.move(task['path'], final_path)
-                    media_map[media_idx_str] = task['fname']
-                    next_media_idx += 1
-                    
-                    nid = task['nid']
-                    tgt_idx = task['tgt_idx']
-                    fname = task['fname']
-                    
-                    if nid not in note_updates_map:
-                        note_updates_map[nid] = list(task['orig_fields'])
-                    
-                    audio_tag = f"[sound:{fname}]"
-                    current_val = note_updates_map[nid][tgt_idx]
-                    
-                    # 避免重复追加
-                    if audio_tag not in current_val:
-                        note_updates_map[nid][tgt_idx] = current_val + f" {audio_tag}"
-                        successful_tasks += 1
-            else:
-                # 清理失败的垃圾文件
-                if os.path.exists(task['path']):
-                    try: os.remove(task['path'])
-                    except: pass
-
-        db_updates = []
-        for nid, new_fields_list in note_updates_map.items():
-            new_flds_str = '\x1f'.join(new_fields_list)
-            # 关键：强制更新修改时间戳(mod)，确保 Anki 识别为更新
-            db_updates.append((new_flds_str, int(time.time()), nid))
-
-        if db_updates:
-            cursor.executemany("UPDATE notes SET flds = ?, usn = -1, mod = ? WHERE id = ?", db_updates)
-            conn.commit()
-        
-        conn.close()
-
-        with open(media_file_path, 'w', encoding='utf-8') as f:
-            json.dump(media_map, f)
-
-        if progress_callback: progress_callback(0.95, "📦 正在重新打包...")
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".apkg") as tmp_out:
-            new_apkg_path = tmp_out.name
-            
-        with zipfile.ZipFile(new_apkg_path, 'w', zipfile.ZIP_DEFLATED) as z_out:
-            for root, dirs, files in os.walk(extract_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, extract_dir)
-                    z_out.write(file_path, arcname)
-
-        return new_apkg_path, successful_tasks
-
-    except Exception as e:
-        return None, f"Error: {str(e)}"
-    finally:
-        if os.path.exists(input_path): os.remove(input_path)
-        shutil.rmtree(extract_dir, ignore_errors=True)
-
-# ==========================================
 # 6. UI 主程序
 # ==========================================
 st.title("⚡️ Vocab Flow Ultra")
@@ -779,10 +616,10 @@ with st.expander("📖 使用指南 & 支持格式"):
     **🚀 极速工作流**
     1. **提取**：支持 URL、PDF, ePub, Docx, txt 等格式。
     2. **生成**：自动完成文本生成、**并发语音合成**并打包下载。
-    3. **优化**：支持导入现有 APKG，**支持同时为正面和背面添加语音**。
+    3. **优化**：支持导入文本(TXT/CSV)牌组，**自动添加语音**并打包为 Anki 文件。
     """)
 
-tab_extract, tab_anki, tab_optimize = st.tabs(["1️⃣ 单词提取", "2️⃣ 卡片制作", "3️⃣ 牌组优化(APKG)"])
+tab_extract, tab_anki, tab_optimize = st.tabs(["1️⃣ 单词提取", "2️⃣ 卡片制作", "3️⃣ 文本转语音(TXT->Anki)"])
 
 # ----------------- Tab 1: 提取与 AI 生成 -----------------
 with tab_extract:
@@ -1125,106 +962,99 @@ with tab_anki:
                 type="primary"
             )
 
-# ----------------- Tab 3: APKG 优化 (防崩溃稳定版) -----------------
+# ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
 with tab_optimize:
-    st.markdown("### 🛠️ Anki 牌组优化 (极简稳定版)")
-    st.info("💡 修复了 500 错误和合并问题。采用**安全慢速模式**（防止被封），生成时间稍长，请耐心等待。")
-    
-    up_apkg = st.file_uploader("上传 .apkg 文件", type=['apkg'], key="opt_apkg")
-    
-    if up_apkg:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".apkg") as tmp_scan:
-            tmp_scan.write(up_apkg.getvalue())
-            scan_path = tmp_scan.name
-        
-        scan_dir = tempfile.mkdtemp()
-        fields_found = []
-        try:
-            with zipfile.ZipFile(scan_path, 'r') as z:
-                z.extract('collection.anki2', scan_dir)
-            
-            conn = sqlite3.connect(os.path.join(scan_dir, 'collection.anki2'))
-            cursor = conn.cursor()
-            cursor.execute("SELECT models FROM col")
-            models_json = cursor.fetchone()[0]
-            models = json.loads(models_json)
-            
-            first_mid = list(models.keys())[0]
-            fields_found = [f['name'] for f in models[first_mid]['flds']]
-            conn.close()
-        except Exception as e:
-            st.error(f"无法读取 APKG 结构: {e}")
-        finally:
-            if os.path.exists(scan_path): os.remove(scan_path)
-            shutil.rmtree(scan_dir, ignore_errors=True)
+    st.markdown("### 🗣️ 文本转语音 (TXT -> Anki)")
+    st.info("💡 上传您的单词文本文件，配置列映射，即可自动生成语音并打包为 .apkg 导入使用。")
 
-        if fields_found:
-            st.divider()
-            audio_configs = []
+    up_txt = st.file_uploader("上传 .txt / .csv 文件 (支持 Tab 或逗号分隔)", type=['txt', 'csv'], key="txt_audio_up")
+    
+    if up_txt:
+        # 尝试读取文件
+        try:
+            # 自动探测分隔符
+            df_preview = pd.read_csv(up_txt, sep=None, engine='python', dtype=str).fillna('')
+            st.toast(f"成功读取 {len(df_preview)} 行数据", icon="✅")
             
-            st.markdown("##### 🎙️ 语音配置")
-            # 修复冲突: 给 Tab3 的 radio 增加 key
-            voice_choice = st.radio(
+            st.write("#### 1. 数据预览与列映射")
+            st.dataframe(df_preview.head(5), use_container_width=True, hide_index=True)
+            
+            all_cols = list(df_preview.columns)
+            all_cols_options = ["(无)"] + all_cols
+            
+            c1, c2, c3 = st.columns(3)
+            col_word = c1.selectbox("📝 单词列 (正面 + 语音)", all_cols, index=0)
+            col_meaning = c2.selectbox("🇨🇳 释义列 (背面)", all_cols_options, index=1 if len(all_cols) > 1 else 0)
+            col_example = c3.selectbox("🗣️ 例句列 (背面 + 语音)", all_cols_options, index=2 if len(all_cols) > 2 else 0)
+            
+            st.write("#### 2. 语音配置")
+            voice_choice_txt = st.radio(
                 "选择发音人", 
                 list(VOICE_MAP.keys()), 
                 horizontal=True,
-                key="opt_voice_radio"
+                key="txt_voice_radio"
             )
-            voice_code = VOICE_MAP[voice_choice]
+            voice_code_txt = VOICE_MAP[voice_choice_txt]
             
-            st.write("---")
+            txt_deck_name = st.text_input("牌组名称", f"AudioDeck_{get_beijing_time_str()}", key="txt_deck_name")
             
-            use_front = st.checkbox("✅ 正面生成语音 (例如：单词)", value=True)
-            if use_front:
-                c1_src, c1_tgt = st.columns(2)
-                f_src = c1_src.selectbox("正面-朗读来源", fields_found, index=0, key="fs")
-                f_tgt = c1_tgt.selectbox("正面-音频存放", fields_found, index=0, key="ft")
-            
-            use_back = st.checkbox("✅ 背面生成语音 (例如：例句)", value=False)
-            if use_back:
-                c2_src, c2_tgt = st.columns(2)
-                b_src = c2_src.selectbox("背面-朗读来源", fields_found, index=min(1, len(fields_found)-1), key="bs")
-                b_tgt = c2_tgt.selectbox("背面-音频存放", fields_found, index=min(1, len(fields_found)-1), key="bt")
-            
-            if st.button("🚀 开始注入语音", type="primary"):
-                if use_front:
-                    audio_configs.append({'src_idx': fields_found.index(f_src), 'tgt_idx': fields_found.index(f_tgt), 'voice': voice_code})
-                if use_back:
-                    audio_configs.append({'src_idx': fields_found.index(b_src), 'tgt_idx': fields_found.index(b_tgt), 'voice': voice_code})
-                
-                if not audio_configs:
-                    st.warning("请至少选择一项任务！")
+            if st.button("🚀 生成带语音的 Anki 包", type="primary", key="btn_txt_gen"):
+                if not col_word:
+                    st.error("必须选择“单词列”！")
                 else:
-                    p_cont = st.container()
-                    with p_cont:
-                        opt_prog = st.progress(0)
-                        opt_status = st.empty()
+                    # 转换数据格式为 generate_anki_package 需要的格式
+                    cards_list = []
+                    for idx, row in df_preview.iterrows():
+                        w_val = str(row[col_word]).strip()
+                        m_val = str(row[col_meaning]).strip() if col_meaning != "(无)" else ""
+                        e_val = str(row[col_example]).strip() if col_example != "(无)" else ""
+                        
+                        if w_val:
+                            cards_list.append({
+                                'w': w_val,
+                                'm': m_val,
+                                'e': e_val,
+                                'r': '' # 词源暂时留空
+                            })
                     
-                    with st.spinner("正在以安全模式生成（每条约 1-2 秒），防止 500 错误..."):
-                        new_path, count = process_apkg_with_audio(
-                            up_apkg, 
-                            audio_configs,
-                            lambda p, t: (opt_prog.progress(p), opt_status.text(t))
-                        )
-                    
-                    if new_path and isinstance(count, int):
-                        opt_status.markdown(f"✅ **成功生成 {count} 条语音！**")
-                        if count == 0:
-                            st.warning("生成数量为 0。可能是所有卡片都已经有声音了，或者文本提取失败。")
-                        else:
-                            st.balloons()
-                            with open(new_path, "rb") as f:
-                                st.session_state['opt_pkg_data'] = f.read()
-                            st.session_state['opt_pkg_name'] = f"Optimized_{up_apkg.name}"
-                            os.remove(new_path)
+                    if not cards_list:
+                        st.warning("有效数据为空，请检查文件内容。")
                     else:
-                        st.error(f"处理失败: {count}")
+                        txt_prog_cont = st.container()
+                        with txt_prog_cont:
+                            txt_prog_bar = st.progress(0)
+                            txt_status = st.empty()
+                        
+                        def update_txt_progress(p, text):
+                            txt_prog_bar.progress(p)
+                            txt_status.text(text)
+                            
+                        with st.spinner("🔊 正在生成语音并打包..."):
+                            try:
+                                f_path = generate_anki_package(
+                                    cards_list, 
+                                    txt_deck_name, 
+                                    enable_tts=True, 
+                                    tts_voice=voice_code_txt,
+                                    progress_callback=update_txt_progress
+                                )
+                                with open(f_path, "rb") as f:
+                                    st.session_state['txt_pkg_data'] = f.read()
+                                st.session_state['txt_pkg_name'] = f"{txt_deck_name}.apkg"
+                                
+                                txt_status.markdown(f"✅ **成功生成！包含 {len(cards_list)} 张卡片**")
+                                st.balloons()
+                            except Exception as e:
+                                st.error(f"处理失败: {e}")
+                                
+        except Exception as e:
+            st.error(f"文件读取失败: {e}")
 
-    if st.session_state['opt_pkg_data']:
+    if st.session_state.get('txt_pkg_data'):
         st.download_button(
-            label=f"📥 下载优化后的牌组 ({st.session_state['opt_pkg_name']})",
-            data=st.session_state['opt_pkg_data'],
-            file_name=st.session_state['opt_pkg_name'],
+            label=f"📥 下载 {st.session_state['txt_pkg_name']}",
+            data=st.session_state['txt_pkg_data'],
+            file_name=st.session_state['txt_pkg_name'],
             mime="application/octet-stream",
             type="primary",
             use_container_width=True
