@@ -76,8 +76,6 @@ DEFAULT_SESSION_STATE = {
     'anki_input_text': "",
     'anki_pkg_data': None,
     'anki_pkg_name': "",
-    'txt_pkg_data': None,
-    'txt_pkg_name': "",
     'url_input_key': "",
 }
 
@@ -281,8 +279,7 @@ def clear_all_state() -> None:
     
     keys_to_drop = [
         'gen_words_data', 'raw_count', 'process_time', 'stats_info',
-        'anki_pkg_data', 'anki_pkg_name', 'anki_input_text',
-        'txt_pkg_data', 'txt_pkg_name'
+        'anki_pkg_data', 'anki_pkg_name', 'anki_input_text'
     ]
     
     for key in keys_to_drop:
@@ -919,13 +916,11 @@ with st.expander("📖 使用指南 & 支持格式"):
     **🚀 极速工作流**
     1. **提取**：支持 URL、PDF, ePub, Docx, txt 等格式。
     2. **生成**：自动完成文本生成、**并发语音合成**并打包下载。
-    3. **优化**：支持导入 Anki 导出文本或 CSV，**自动添加语音**并打包。
     """)
 
-tab_extract, tab_anki, tab_optimize = st.tabs([
+tab_extract, tab_anki = st.tabs([
     "1️⃣ 单词提取",
-    "2️⃣ 卡片制作",
-    "3️⃣ 文本转语音(TXT->Anki)"
+    "2️⃣ 卡片制作"
 ])
 
 # ==========================================
@@ -1334,206 +1329,3 @@ with tab_anki:
                 mime="application/octet-stream",
                 type="primary"
             )
-
-# ==========================================
-# Tab 3: Text-to-Speech (TXT -> Anki)
-# ==========================================
-with tab_optimize:
-    st.markdown("### 🗣️ 文本转语音 (TXT -> Anki)")
-    st.info("💡 适合大批量处理，将实时显示生成进度。我们支持最多 4 列数据的映射，确保信息不遗漏。")
-    
-    uploaded_txt = st.file_uploader(
-        "上传 .txt / .csv 文件",
-        type=['txt', 'csv'],
-        key="txt_audio_up"
-    )
-    
-    if uploaded_txt:
-        try:
-            # Preprocess file, clean Anki headers
-            string_data = uploaded_txt.getvalue().decode("utf-8", errors="ignore")
-            lines = string_data.splitlines()
-            valid_lines = [line for line in lines if not line.strip().startswith("#")]
-            
-            if not valid_lines:
-                st.error("文件内容为空。")
-            else:
-                clean_data = "\n".join(valid_lines)
-                
-                # Detect header
-                first_line_clean = valid_lines[0].lower()
-                has_header = any(
-                    keyword in first_line_clean
-                    for keyword in ['word', 'term', 'phrase', 'meaning', 'def', 'example']
-                )
-                header_arg = 0 if has_header else None
-                
-                df_preview = pd.read_csv(
-                    StringIO(clean_data),
-                    sep=None,
-                    engine='python',
-                    dtype=str,
-                    header=header_arg
-                ).fillna('')
-                
-                # Auto-name columns if no header
-                if header_arg is None:
-                    df_preview.columns = [
-                        f"第 {i+1} 列 (示例: {df_preview.iloc[0, i]})"
-                        for i in range(len(df_preview.columns))
-                    ]
-                
-                st.toast(f"成功读取 {len(df_preview)} 行数据", icon="✅")
-                
-                # Column mapping configuration
-                st.write("#### 1. 核心步骤：请核对列名")
-                st.caption("提示：Prompt 生成了 4 列数据，请务必将'词源'也选上，防止丢失。")
-                
-                # Check if first column looks like Anki note IDs
-                first_col_name = df_preview.columns[0]
-                has_note_id = False
-                
-                # Detect if first column contains note IDs (numeric values ~13 digits)
-                if len(df_preview) > 0:
-                    first_col_values = df_preview[first_col_name].astype(str)
-                    # Check if most values in first column are long numbers (Anki note IDs)
-                    numeric_count = sum(1 for v in first_col_values if v.isdigit() and len(v) >= 10)
-                    if numeric_count / len(first_col_values) > 0.8:  # 80% are long numbers
-                        has_note_id = True
-                        st.success(f"✅ 检测到 Anki 笔记 ID (列: {first_col_name}) - 新牌组将可以与原牌组合并！")
-                
-                st.dataframe(df_preview.head(3), use_container_width=True, hide_index=True)
-                
-                all_cols = list(df_preview.columns)
-                # If has note ID, exclude first column from mapping options
-                content_cols = all_cols[1:] if has_note_id else all_cols
-                all_cols_options = ["(无)"] + content_cols
-                
-                # 2x2 layout for 4 selection boxes
-                col1, col2 = st.columns(2)
-                col3, col4 = st.columns(2)
-                
-                # Smart default indices (adjusted if note ID column present)
-                base_offset = 1 if has_note_id else 0
-                idx_word = 0
-                idx_meaning = 1 if len(content_cols) > 1 else 0
-                idx_example = 2 if len(content_cols) > 2 else 0
-                idx_etym = 3 if len(content_cols) > 3 else 0
-                
-                col_word = col1.selectbox(
-                    "📝 单词/短语列 (正面+语音)",
-                    content_cols,
-                    index=idx_word
-                )
-                col_meaning = col2.selectbox(
-                    "🇨🇳 释义列 (背面-不发音)",
-                    all_cols_options,
-                    index=idx_meaning + 1
-                )
-                col_example = col3.selectbox(
-                    "🗣️ 例句列 (背面+语音)",
-                    all_cols_options,
-                    index=idx_example + 1
-                )
-                col_etym = col4.selectbox(
-                    "🌱 词源/备注列 (背面-不发音)",
-                    all_cols_options,
-                    index=idx_etym + 1
-                )
-                
-                # Voice configuration
-                st.write("#### 2. 生成配置")
-                voice_choice_txt = st.radio(
-                    "选择发音人",
-                    list(VOICE_MAP.keys()),
-                    horizontal=True,
-                    key="txt_voice_radio"
-                )
-                voice_code_txt = VOICE_MAP[voice_choice_txt]
-                
-                txt_deck_name = st.text_input(
-                    "牌组名称",
-                    f"AudioDeck_{get_beijing_time_str()}",
-                    key="txt_deck_name"
-                )
-                
-                # Execute button
-                if st.button("🚀 开始生成 (可视化进度)", type="primary", key="btn_txt_gen"):
-                    if not col_word:
-                        st.error("❌ 必须选择'单词列'！")
-                    else:
-                        # Prepare data
-                        full_cards_list = []
-                        note_id_col = df_preview.columns[0] if has_note_id else None
-                        
-                        for idx, row in df_preview.iterrows():
-                            word_val = safe_str_clean(row[col_word])
-                            meaning_val = safe_str_clean(row[col_meaning]) if col_meaning != "(无)" else ""
-                            example_val = safe_str_clean(row[col_example]) if col_example != "(无)" else ""
-                            etym_val = safe_str_clean(row[col_etym]) if col_etym != "(无)" else ""
-                            
-                            if word_val:
-                                card_data = {
-                                    'w': word_val,
-                                    'm': meaning_val,
-                                    'e': example_val,
-                                    'r': etym_val
-                                }
-                                
-                                # Preserve original Anki note ID if available
-                                if note_id_col:
-                                    note_id = safe_str_clean(row[note_id_col])
-                                    if note_id and note_id.isdigit():
-                                        card_data['id'] = note_id
-                                
-                                full_cards_list.append(card_data)
-                        
-                        total_cards = len(full_cards_list)
-                        if total_cards == 0:
-                            st.warning("有效数据为空。")
-                        else:
-                            st.divider()
-                            st.write(f"📊 任务总量: **{total_cards}** 张卡片")
-                            
-                            progress_container = st.container()
-                            with progress_container:
-                                progress_bar = st.progress(0)
-                                status_text = st.empty()
-                            
-                            def visual_progress_callback(progress_ratio: float, status_message: str) -> None:
-                                progress_bar.progress(progress_ratio)
-                                status_text.markdown(f"### {status_message}")
-                            
-                            try:
-                                with st.spinner("正在初始化音频引擎..."):
-                                    file_path = generate_anki_package(
-                                        full_cards_list,
-                                        txt_deck_name,
-                                        enable_tts=True,
-                                        tts_voice=voice_code_txt,
-                                        progress_callback=visual_progress_callback
-                                    )
-                                
-                                with open(file_path, "rb") as f:
-                                    st.session_state['txt_pkg_data'] = f.read()
-                                st.session_state['txt_pkg_name'] = f"{txt_deck_name}.apkg"
-                                
-                                status_text.markdown(f"## ✅ 生成完成！共 {total_cards} 张。")
-                                progress_bar.progress(1.0)
-                                st.balloons()
-                                
-                            except Exception as e:
-                                ErrorHandler.handle(e, "处理失败")
-        
-        except Exception as e:
-            ErrorHandler.handle(e, "系统错误")
-    
-    if st.session_state.get('txt_pkg_data'):
-        st.download_button(
-            label=f"📥 下载牌组 {st.session_state['txt_pkg_name']}",
-            data=st.session_state['txt_pkg_data'],
-            file_name=st.session_state['txt_pkg_name'],
-            mime="application/octet-stream",
-            type="primary",
-            use_container_width=True
-        )
