@@ -230,91 +230,44 @@ def get_genanki() -> Tuple[Any, Any]:
     return genanki, tempfile
 
 @st.cache_data
-@st.cache_data
-def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame], str]:
-    """
-    加载词库并提供详细的数据健康报告 (Debug版)
-    Returns: (字典, DataFrame, 调试信息字符串)
-    """
-    debug_logs = []
-    
-    def log(msg):
-        debug_logs.append(msg)
-        logger.info(msg)
-
-    # 1. 尝试加载 Pickle
+def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame]]:
+    """Load vocabulary data from pickle or CSV files."""
+    # Try pickle first
     if os.path.exists("vocab.pkl"):
         try:
             df = pd.read_pickle("vocab.pkl")
             vocab_dict = pd.Series(df['rank'].values, index=df['word']).to_dict()
-            return vocab_dict, df, "✅ 已加载缓存文件 vocab.pkl (极速模式)"
-        except Exception as e:
-            log(f"缓存文件加载失败，转为读取CSV: {e}")
+            return vocab_dict, df
+        except (FileNotFoundError, pd.errors.PickleError, KeyError) as e:
+            logger.warning(f"Could not load pickle file: {e}")
 
-    # 2. 尝试加载 CSV
+    # Fallback to CSV files
     possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next((f for f in possible_files if os.path.exists(f)), None)
     
     if file_path:
         try:
-            log(f"📂 正在读取文件: {file_path}")
-            # 读取原始数据
-            df_raw = pd.read_csv(file_path)
-            raw_count = len(df_raw)
-            log(f"📊 原始行数: {raw_count}")
-
-            # 规范化列名
-            df_raw.columns = [c.strip().lower() for c in df_raw.columns]
+            df = pd.read_csv(file_path)
+            df.columns = [c.strip().lower() for c in df.columns]
             
-            # 智能寻找列
-            word_col = next((c for c in df_raw.columns if 'word' in c), df_raw.columns[0])
-            rank_col = next((c for c in df_raw.columns if 'rank' in c), df_raw.columns[1])
+            word_col = next((c for c in df.columns if 'word' in c), df.columns[0])
+            rank_col = next((c for c in df.columns if 'rank' in c), df.columns[1])
             
-            # --- 步骤 A: 清洗无效数据 ---
-            # 丢弃单词为空的行
-            df_clean = df_raw.dropna(subset=[word_col]).copy()
-            dropped_nan = raw_count - len(df_clean)
+            df = df.dropna(subset=[word_col])
+            df[word_col] = df[word_col].astype(str).str.lower().str.strip()
+            df[rank_col] = pd.to_numeric(df[rank_col], errors='coerce')
+            df = df.sort_values(rank_col).drop_duplicates(subset=[word_col], keep='first')
             
-            # 强制转为小写并去空格
-            df_clean[word_col] = df_clean[word_col].astype(str).str.lower().str.strip()
-            # 强制Rank为数字，非数字转为NaN并填充为99999
-            df_clean[rank_col] = pd.to_numeric(df_clean[rank_col], errors='coerce').fillna(99999).astype(int)
-            
-            # --- 步骤 B: 处理重复 (这是单词减少的主要原因) ---
-            # 统计去重前的数量
-            before_dedup_count = len(df_clean)
-            
-            # 按排名排序，保留排名最靠前（数字最小）的那个
-            # 比如: "bank" 排名 500 和 "bank" 排名 2000，系统保留 500 的那个
-            df_final = df_clean.sort_values(rank_col).drop_duplicates(subset=[word_col], keep='first')
-            
-            final_count = len(df_final)
-            duplicates_dropped = before_dedup_count - final_count
-            
-            # --- 生成报告 ---
-            report = (
-                f"✅ 词库加载成功!\n"
-                f"📥 原始数据: {raw_count} 行\n"
-                f"🗑️ 无效/空行: {dropped_nan} 行\n"
-                f"👯 重复单词: {duplicates_dropped} 行 (已合并，保留最优排名)\n"
-                f"✨ 最终有效: {final_count} 个单词"
-            )
-            log(report)
-            
-            vocab_dict = pd.Series(df_final[rank_col].values, index=df_final[word_col]).to_dict()
-            return vocab_dict, df_final, report
-            
+            vocab_dict = pd.Series(df[rank_col].values, index=df[word_col]).to_dict()
+            return vocab_dict, df
         except Exception as e:
-            err_msg = f"❌ CSV加载严重错误: {e}"
-            logger.error(err_msg)
-            return {}, None, err_msg
+            logger.error(f"Error loading CSV file {file_path}: {e}")
+            return {}, None
     
-    return {}, None, "⚠️ 未找到词库文件 (csv/data.csv)"
+    logger.warning("No vocabulary data files found")
+    return {}, None
 
-# 修改全局变量接收部分 (在 app.py 的后面一点点)
-# 原代码: VOCAB_DICT, FULL_DF = load_vocab_data()
-# 新代码:
-VOCAB_DICT, FULL_DF, LOAD_REPORT = load_vocab_data()
+VOCAB_DICT, FULL_DF = load_vocab_data()
 
 # ==========================================
 # State Management
@@ -547,6 +500,7 @@ def get_lemma(word: str, lemminflect: Any) -> str:
         return lemmas[0] if lemmas else word
     except Exception:
         return word
+
 def analyze_logic(
     text: str,
     current_level: int,
@@ -554,10 +508,9 @@ def analyze_logic(
     include_unknown: bool
 ) -> Tuple[List[Tuple[str, int]], int, Dict[str, float]]:
     """Analyze text to extract vocabulary within specified rank range."""
-    # 确保加载了必要的资源
     nltk, lemminflect = load_nlp_resources()
     
-    # Extract tokens (使用更宽容的正则，确保能抓取带连字符和撇号的词)
+    # Extract tokens
     raw_tokens = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", text)
     total_raw_count = len(raw_tokens)
     
@@ -572,63 +525,36 @@ def analyze_logic(
     
     # Process candidates
     final_candidates = []
-    seen_lemmas = set() # 用于避免重复推荐同一个词根
+    seen_lemmas = set()
     
     for word, count in token_counts.items():
-        # === 核心修改：多级匹配机制，防止遗漏 ===
+        lemma = get_lemma(word, lemminflect)
+        rank_lemma = VOCAB_DICT.get(lemma, 99999)
+        rank_orig = VOCAB_DICT.get(word, 99999)
         
-        found_rank = 99999
-        word_to_keep = word # 默认展示原词
+        # Determine best rank
+        if rank_lemma != 99999 and rank_orig != 99999:
+            best_rank = min(rank_lemma, rank_orig)
+        elif rank_lemma != 99999:
+            best_rank = rank_lemma
+        else:
+            best_rank = rank_orig
         
-        # 1. 尝试直接匹配原词 (如 "Looking")
-        if word in VOCAB_DICT:
-            found_rank = VOCAB_DICT[word]
-            word_to_keep = word
-            
-        # 2. 如果原词没找到，尝试匹配 Lemma (如 "Look")
-        if found_rank == 99999:
-            lemma = get_lemma(word, lemminflect)
-            if lemma in VOCAB_DICT:
-                found_rank = VOCAB_DICT[lemma]
-                word_to_keep = lemma # 修正展示为词库里的形式
-        
-        # 3. 强力兜底匹配 (解决 "driver's" 或 "co-operate" 这种词库不收录的问题)
-        if found_rank == 99999:
-            # 尝试去除所有的 's, 'd, 'll 等后缀
-            clean_word = re.sub(r"['’](s|d|ll|re|ve|m|t)$", "", word)
-            # 尝试去除连字符
-            dehyphen_word = word.replace("-", "")
-            
-            if clean_word in VOCAB_DICT:
-                found_rank = VOCAB_DICT[clean_word]
-                word_to_keep = clean_word
-            elif dehyphen_word in VOCAB_DICT:
-                found_rank = VOCAB_DICT[dehyphen_word]
-                word_to_keep = dehyphen_word
-        
-        # === 匹配结束 ===
-
-        # 此时 found_rank 就是我们能找到的最优排名
-        best_rank = found_rank
-        
-        # 计算统计数据
+        # Update statistics
         if best_rank < current_level:
             stats_known_count += count
         elif current_level <= best_rank <= target_level:
             stats_target_count += count
         
-        # 判断是否保留该词
+        # Add to candidates if in range
         is_in_range = (best_rank >= current_level and best_rank <= target_level)
         is_unknown_included = (best_rank == 99999 and include_unknown)
         
         if is_in_range or is_unknown_included:
-            # 获取该词的"词根"形式用于去重 (如果之前没算过lemma，这里算一下)
-            current_lemma = get_lemma(word_to_keep, lemminflect)
-            
-            # 去重逻辑：确保同一个意思不重复出现 (比如 saw 和 see 只出一个)
-            if current_lemma not in seen_lemmas:
+            word_to_keep = lemma if rank_lemma != 99999 else word
+            if lemma not in seen_lemmas:
                 final_candidates.append((word_to_keep, best_rank))
-                seen_lemmas.add(current_lemma)
+                seen_lemmas.add(lemma)
     
     # Sort by rank
     final_candidates.sort(key=lambda x: x[1])
@@ -643,6 +569,7 @@ def analyze_logic(
     }
     
     return final_candidates, total_raw_count, stats_info
+
 # ==========================================
 # AI Processing
 # ==========================================
