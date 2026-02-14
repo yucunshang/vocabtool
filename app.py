@@ -528,19 +528,33 @@ def analyze_logic(
     seen_lemmas = set()
     
     for word, count in token_counts.items():
+        # 1. 获取 Lemma (用于后续去重和兜底)
         lemma = get_lemma(word, lemminflect)
-        rank_lemma = VOCAB_DICT.get(lemma, 99999)
+        
+        # 2. 获取排名
         rank_orig = VOCAB_DICT.get(word, 99999)
+        rank_lemma = VOCAB_DICT.get(lemma, 99999)
         
-        # Determine best rank
-        if rank_lemma != 99999 and rank_orig != 99999:
-            best_rank = min(rank_lemma, rank_orig)
-        elif rank_lemma != 99999:
-            best_rank = rank_lemma
-        else:
+        # === 核心逻辑修改 ===
+        # 优先使用原词 (Prototype)，如果原词在词库中找不到，才使用 Lemma
+        
+        best_rank = 99999
+        word_to_keep = word  # 默认展示原词
+        
+        if rank_orig != 99999:
+            # 情况A: 原词在词库中 -> 优先采用原词
             best_rank = rank_orig
-        
-        # Update statistics
+            word_to_keep = word
+        elif rank_lemma != 99999:
+            # 情况B: 原词不在，但Lemma在 -> 采用Lemma
+            best_rank = rank_lemma
+            word_to_keep = lemma
+        else:
+            # 情况C: 都不在 -> 视为生词 (99999)，展示原词
+            best_rank = 99999
+            word_to_keep = word
+            
+        # Update statistics (基于最终选定的 rank)
         if best_rank < current_level:
             stats_known_count += count
         elif current_level <= best_rank <= target_level:
@@ -551,7 +565,7 @@ def analyze_logic(
         is_unknown_included = (best_rank == 99999 and include_unknown)
         
         if is_in_range or is_unknown_included:
-            word_to_keep = lemma if rank_lemma != 99999 else word
+            # 使用 lemma 进行去重，确保同一词根只出现一次
             if lemma not in seen_lemmas:
                 final_candidates.append((word_to_keep, best_rank))
                 seen_lemmas.add(lemma)
@@ -569,7 +583,6 @@ def analyze_logic(
     }
     
     return final_candidates, total_raw_count, stats_info
-
 # ==========================================
 # AI Processing
 # ==========================================
