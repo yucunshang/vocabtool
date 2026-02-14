@@ -323,28 +323,40 @@ def process_ai_in_batches(words_list, progress_callback=None):
     total_words = len(words_list)
     full_results = []
     
+    # 这里的 System Prompt 可以简单些，主要靠 User Prompt 控制格式
     system_prompt = "You are a helpful assistant for vocabulary learning."
     
     for i in range(0, total_words, BATCH_SIZE):
         batch = words_list[i : i + BATCH_SIZE]
         current_batch_str = "\n".join(batch)
         
-        user_prompt = f"""
-Task: Convert English words to Anki cards.
-Format: Word ||| Chinese Meaning ||| English Example
-Rules: 
-1. Front must be the Word only (Original).
-2. Definition must be in Simplified Chinese (Concise & Accurate).
-3. Sentence must be in English (Simple & Authentic).
-4. Do NOT add etymology or extra fields.
-
-Example:
-Input: hectic
-Output: hectic ||| 忙乱的，繁忙的 ||| She has a hectic schedule today.
-
-Input:
+        # 使用用户更新后的严格 Prompt 逻辑 (稍作简化以适应 API 内部调用，保持核心指令一致)
+        user_prompt = f"""# Role
+You are an expert English Lexicographer.
+# Input Data
 {current_batch_str}
-"""
+
+# Output Format Guidelines
+1. **Output Container**: Strictly inside a single ```text code block.
+2. **Layout**: One entry per line.
+3. **Separator**: Use `|||` as the delimiter.
+4. **Target Structure**:
+   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
+
+# Field Constraints
+1. Field 1: Phrase - DO NOT output the single target word. Generate a high-frequency collocation.
+2. Field 2: Definition - Define the *phrase* in English (B2-C1).
+3. Field 3: Example - Authentic sentence.
+4. Field 4: Etymology - Simplified Chinese.
+
+# Valid Example
+Input: hectic
+Output:
+a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的) + -ic (形容词后缀)
+
+# Task
+Process the input list strictly."""
+
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -399,6 +411,7 @@ def parse_anki_data(raw_text):
         if len(parts) < 2: 
             continue
         
+        # 按照 Prompt 格式：Phrase ||| Definition ||| Example ||| Etymology
         w = parts[0].strip()
         m = parts[1].strip()
         e = parts[2].strip() if len(parts) > 2 else ""
@@ -427,7 +440,7 @@ async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
     async def worker(task):
         nonlocal completed_files
         async with semaphore:
-            # 智能抖动：小幅随机延时，防止瞬时并发过高被 WAF 拦截
+            # 智能抖动
             await asyncio.sleep(random.uniform(0.1, 0.8))
             
             success = False
@@ -451,7 +464,6 @@ async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
                         break
                 except Exception as e:
                     error_msg = str(e)
-                    # 失败后指数退避等待
                     await asyncio.sleep(1.5 * (attempt + 1)) 
             
             if not success:
@@ -459,7 +471,7 @@ async def _generate_audio_batch(tasks, concurrency=3, progress_callback=None):
             
             completed_files += 1
             if progress_callback:
-                progress_callback(completed_files, total_files)
+                progress_callback(completed_files / total_files, f"正在生成 ({completed_files}/{total_files})")
 
     jobs = [worker(t) for t in tasks]
     await asyncio.gather(*jobs, return_exceptions=True)
@@ -471,7 +483,7 @@ def run_async_batch(tasks, concurrency=3, progress_callback=None):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        # 这里默认 concurrency=3，安全且快速
+        # 这里默认 concurrency=3
         loop.run_until_complete(_generate_audio_batch(tasks, concurrency, progress_callback))
     finally:
         loop.close()
@@ -575,23 +587,17 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
         notes_buffer.append(note)
 
     if audio_tasks:
-        def internal_progress(curr_files, total_files):
+        def internal_progress(ratio, msg):
             if progress_callback:
-                base_progress = 0.1 
-                current_word_idx = int((curr_files / total_files) * total_words_count)
-                progress_callback(
-                    base_progress + (curr_files/total_files)*0.8, 
-                    f"🔊 正在生成语音 ({current_word_idx}/{total_words_count})..."
-                )
+                progress_callback(ratio, msg)
         
-        # ⚠️ 关键优化：并发设置为 3，安全提速
         run_async_batch(audio_tasks, concurrency=3, progress_callback=internal_progress)
 
     for note in notes_buffer:
         deck.add_note(note)
     
     if progress_callback:
-        progress_callback(0.95, "📦 正在打包 .apkg 文件...")
+        progress_callback(1.0, "📦 正在打包 .apkg 文件...")
 
     package = genanki.Package(deck)
     package.media_files = media_files
@@ -778,6 +784,8 @@ with tab_extract:
                     status_text = st.empty()
                 
                 def update_ai_progress(current, total):
+                    # API 调用中的 progress callback 简单适配
+                    # current/total 是 batch 级别
                     percent = current / total
                     progress_bar.progress(percent)
                     status_text.markdown(f"🤖 **DeepSeek 思考中...** ({current}/{total})")
@@ -793,8 +801,8 @@ with tab_extract:
                         try:
                             deck_name = f"Vocab_{get_beijing_time_str()}"
                             
-                            def update_pkg_progress(p, text):
-                                progress_bar.progress(p)
+                            def update_pkg_progress(ratio, text):
+                                progress_bar.progress(ratio)
                                 status_text.text(text)
 
                             f_path = generate_anki_package(
@@ -844,10 +852,12 @@ with tab_extract:
             else:
                 st.warning("⚠️ 暂无单词数据，请先提取单词。")
 
-            words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[WAITING FOR WORDS...]"
+            words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[INSERT YOUR WORD LIST HERE]"
             
+            # === 这里已经更新为你提供的最新 Prompt ===
             strict_prompt_template = f"""# Role
-You are an expert English Lexicographer.
+You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
+Make sure to process everything in one go, without missing anything.
 # Input Data
 {words_str_for_prompt}
 
@@ -856,15 +866,36 @@ You are an expert English Lexicographer.
 2. **Layout**: One entry per line.
 3. **Separator**: Use `|||` as the delimiter.
 4. **Target Structure**:
-   `Natural Phrase` ||| `Concise Definition` ||| `Short Example` ||| `Etymology`
+   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
 
-# Valid Example
+# Field Constraints (Strict)
+1. **Field 1: Phrase (CRITICAL)**
+   - DO NOT output the single target word.
+   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
+   - Example: If input is "rain", output "heavy rain" or "torrential rain".
+   
+2. **Field 2: Definition (English)**
+   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
+
+3. **Field 3: Example**
+   - A short, authentic sentence containing the phrase.
+
+4. **Field 4: Roots/Etymology (Simplified Chinese)**
+   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
+   - If no classical roots exist, explain the origin briefly in Chinese.
+   - Use Simplified Chinese for meanings.
+
+# Valid Example (Follow this logic strictly)
+Input: altruism
+Output:
+motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
+
 Input: hectic
 Output:
-a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (sustained) + -ic (adj suffix)
+a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
 
 # Task
-Process the input list strictly."""
+Process the provided input list strictly adhering to the format above."""
             st.code(strict_prompt_template, language="text")
 
 # ----------------- Tab 2: 卡片制作 (手动模式) -----------------
@@ -917,8 +948,8 @@ with tab_anki:
                 progress_bar_manual = st.progress(0)
                 status_manual = st.empty()
             
-            def update_progress_manual(p, text):
-                progress_bar_manual.progress(p)
+            def update_progress_manual(ratio, text):
+                progress_bar_manual.progress(ratio)
                 status_manual.text(text)
 
             with st.spinner("⏳ 正在解析并生成..."):
@@ -963,12 +994,9 @@ with tab_anki:
             )
 
 # ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
-# ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
-# ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
-# ----------------- Tab 3: 文本转语音 (TXT -> Anki) -----------------
 with tab_optimize:
     st.markdown("### 🗣️ 文本转语音 (TXT -> Anki)")
-    st.info("💡 适合大批量处理，将实时显示生成进度。")
+    st.info("💡 适合大批量处理，将实时显示生成进度。我们支持最多 4 列数据的映射，确保信息不遗漏。")
 
     up_txt = st.file_uploader("上传 .txt / .csv 文件", type=['txt', 'csv'], key="txt_audio_up")
     
@@ -1003,22 +1031,28 @@ with tab_optimize:
 
                 st.toast(f"成功读取 {len(df_preview)} 行数据", icon="✅")
                 
-                # === 2. 列映射配置 ===
+                # === 2. 列映射配置 (新增第4列映射) ===
                 st.write("#### 1. 核心步骤：请核对列名")
+                st.caption("提示：Prompt 生成了 4 列数据，请务必将“词源”也选上，防止丢失。")
                 st.dataframe(df_preview.head(3), use_container_width=True, hide_index=True)
                 
                 all_cols = list(df_preview.columns)
                 all_cols_options = ["(无)"] + all_cols
                 
-                c1, c2, c3 = st.columns(3)
+                # 使用 2x2 布局以容纳 4 个选择框
+                c1, c2 = st.columns(2)
+                c3, c4 = st.columns(2)
                 
+                # 智能尝试索引
                 idx_word = 0
                 idx_meaning = 1 if len(all_cols) > 1 else 0
                 idx_example = 2 if len(all_cols) > 2 else 0
+                idx_etym = 3 if len(all_cols) > 3 else 0
                 
-                col_word = c1.selectbox("📝 单词列 (正面+语音)", all_cols, index=idx_word)
+                col_word = c1.selectbox("📝 单词/短语列 (正面+语音)", all_cols, index=idx_word)
                 col_meaning = c2.selectbox("🇨🇳 释义列 (背面-不发音)", all_cols_options, index=idx_meaning + 1)
                 col_example = c3.selectbox("🗣️ 例句列 (背面+语音)", all_cols_options, index=idx_example + 1)
+                col_etym = c4.selectbox("🌱 词源/备注列 (背面-不发音)", all_cols_options, index=idx_etym + 1)
                 
                 # === 3. 语音配置 ===
                 st.write("#### 2. 生成配置")
@@ -1043,29 +1077,31 @@ with tab_optimize:
                             w_val = str(row[col_word]).strip()
                             m_val = str(row[col_meaning]).strip() if col_meaning != "(无)" else ""
                             e_val = str(row[col_example]).strip() if col_example != "(无)" else ""
+                            # 新增词源映射
+                            r_val = str(row[col_etym]).strip() if col_etym != "(无)" else ""
                             
                             if w_val:
-                                full_cards_list.append({'w': w_val, 'm': m_val, 'e': e_val, 'r': ''})
+                                full_cards_list.append({
+                                    'w': w_val, 
+                                    'm': m_val, 
+                                    'e': e_val, 
+                                    'r': r_val # 传递第4列数据
+                                })
                         
                         total_cards = len(full_cards_list)
                         if total_cards == 0:
                             st.warning("有效数据为空。")
                         else:
-                            # === 进度显示区域 ===
                             st.divider()
                             st.write(f"📊 任务总量: **{total_cards}** 张卡片")
                             
                             prog_container = st.container()
                             with prog_container:
                                 progress_bar = st.progress(0)
-                                status_text = st.empty() # 这是一个占位符，用于动态更新文字
+                                status_text = st.empty()
                             
-                            # === 关键：定义回调函数更新 UI ===
                             def visual_progress_callback(progress_ratio, status_message):
-                                # progress_ratio: 0.0 ~ 1.0
-                                # status_message: 来自底层函数的文字信息 (例如: "正在生成... (5/100)")
                                 progress_bar.progress(progress_ratio)
-                                # 使用 Markdown 加粗显示，更醒目
                                 status_text.markdown(f"### {status_message}")
                                 
                             try:
@@ -1078,7 +1114,6 @@ with tab_optimize:
                                         progress_callback=visual_progress_callback
                                     )
                                 
-                                # 读取并提供下载
                                 with open(f_path, "rb") as f:
                                     st.session_state['txt_pkg_data'] = f.read()
                                 st.session_state['txt_pkg_name'] = f"{txt_deck_name}.apkg"
