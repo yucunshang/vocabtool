@@ -13,6 +13,7 @@ import requests
 import shutil
 import zipfile
 import tempfile
+import traceback
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -412,9 +413,11 @@ def parse_anki_data(raw_text):
 
     return parsed_cards
 
-async def _generate_audio_batch(tasks, concurrency=2, progress_callback=None):
+async def _generate_audio_batch(tasks, concurrency=1, progress_callback=None):
     """
-    并发生成音频，显著降低并发数并增加延时，防止 3500 错误
+    极度稳健的音频生成逻辑。
+    1. 并发默认为 1 (串行)，防止触发 500 错误。
+    2. 捕获所有异常，绝不让主程序崩溃。
     """
     semaphore = asyncio.Semaphore(concurrency)
     total_files = len(tasks)
@@ -423,39 +426,47 @@ async def _generate_audio_batch(tasks, concurrency=2, progress_callback=None):
     async def worker(task):
         nonlocal completed_files
         async with semaphore:
-            # 增加随机延时，模拟真人请求，防止被识别为机器人
-            await asyncio.sleep(random.uniform(0.5, 1.5))
+            # 增加显著延时，微软TTS免费接口非常敏感
+            await asyncio.sleep(random.uniform(1.0, 2.5))
+            
+            success = False
+            error_msg = ""
             
             for attempt in range(3):
                 try:
                     if not os.path.exists(task['path']):
+                        # 关键：每次重试都重新创建对象，防止 socket 状态残留
                         comm = edge_tts.Communicate(task['text'], task['voice'])
                         await comm.save(task['path'])
                         
-                        # 关键修复：验证文件大小，小于1KB通常是错误文件
-                        if os.path.exists(task['path']) and os.path.getsize(task['path']) > 1024:
-                             pass 
+                        # 校验文件有效性
+                        if os.path.exists(task['path']) and os.path.getsize(task['path']) > 100:
+                             success = True
+                             break
                         else:
-                             raise Exception("Generated file is too small (likely rate limited)")
-                    break 
-                except Exception as e:
-                    if attempt == 2:
-                        print(f"TTS Failed for {task['text']}: {e}")
-                        # 删除坏文件
-                        if os.path.exists(task['path']):
-                            try: os.remove(task['path'])
-                            except: pass
+                             # 文件太小，可能是空文件
+                             if os.path.exists(task['path']): os.remove(task['path'])
+                             raise Exception("File size too small (empty response)")
                     else:
-                        await asyncio.sleep(2 * (attempt + 1)) 
+                        success = True
+                        break
+                except Exception as e:
+                    error_msg = str(e)
+                    # 失败后等待更长时间
+                    await asyncio.sleep(2 * (attempt + 1)) 
+            
+            if not success:
+                print(f"TTS Failed finally for: {task['text']} | Error: {error_msg}")
             
             completed_files += 1
             if progress_callback:
                 progress_callback(completed_files, total_files)
 
+    # 捕获所有任务异常，防止单个任务崩溃导致 gather 抛出
     jobs = [worker(t) for t in tasks]
-    await asyncio.gather(*jobs)
+    await asyncio.gather(*jobs, return_exceptions=True)
 
-def run_async_batch(tasks, concurrency=2, progress_callback=None):
+def run_async_batch(tasks, concurrency=1, progress_callback=None):
     if not tasks:
         return
     
@@ -574,7 +585,7 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
                     f"🔊 正在生成语音 ({current_word_idx}/{total_words_count})..."
                 )
 
-        run_async_batch(audio_tasks, concurrency=3, progress_callback=internal_progress)
+        run_async_batch(audio_tasks, concurrency=1, progress_callback=internal_progress)
 
     for note in notes_buffer:
         deck.add_note(note)
@@ -593,12 +604,9 @@ def generate_anki_package(cards_data, deck_name, enable_tts=False, tts_voice="en
         return tmp.name
 
 # ==========================================
-# 5. APKG 优化与语音注入逻辑 (修正版 - 极简UI)
+# 5. APKG 优化与语音注入逻辑 (防崩溃版)
 # ==========================================
 def load_anki_media_map(media_file_path):
-    """
-    鲁棒的读取 media 文件
-    """
     if not os.path.exists(media_file_path):
         return {}
     
@@ -622,11 +630,6 @@ def load_anki_media_map(media_file_path):
     return {}
 
 def process_apkg_with_audio(uploaded_file, audio_configs, progress_callback):
-    """
-    优化版逻辑：
-    1. 并发降低，防止被封。
-    2. 生成后检查文件大小，防止空文件。
-    """
     extract_dir = tempfile.mkdtemp()
     new_apkg_path = ""
     
@@ -648,7 +651,7 @@ def process_apkg_with_audio(uploaded_file, audio_configs, progress_callback):
         media_file_path = os.path.join(extract_dir, 'media')
         media_map = load_anki_media_map(media_file_path)
 
-        # 找最大 index (media map keys are string of int)
+        # 找最大 index
         existing_indices = []
         for k in media_map.keys():
             if k.isdigit():
@@ -658,7 +661,6 @@ def process_apkg_with_audio(uploaded_file, audio_configs, progress_callback):
         tasks = []
         note_updates_map = {} 
         
-        # 扫描任务
         for nid, flds_str in notes:
             fields = flds_str.split('\x1f')
             
@@ -670,12 +672,11 @@ def process_apkg_with_audio(uploaded_file, audio_configs, progress_callback):
                 if len(fields) > max(s_idx, t_idx):
                     src_text = fields[s_idx]
                     clean_text = re.sub(r'<[^>]+>', '', src_text).strip()
-                    # 只有当目标字段没有声音时才生成，避免重复
                     target_content = fields[t_idx]
                     
+                    # 生成条件：文本不为空，长度适中，且该位置没有音频
                     if clean_text and len(clean_text) < 1000 and "[sound:" not in target_content:
                         safe_text = re.sub(r'[^a-zA-Z0-9]', '_', clean_text)[:20]
-                        # 唯一文件名
                         fname = f"tts_{safe_text}_{nid}_{s_idx}.mp3"
                         fpath = os.path.join(extract_dir, fname)
                         
@@ -691,31 +692,25 @@ def process_apkg_with_audio(uploaded_file, audio_configs, progress_callback):
 
         def update_tts_prog(c, t):
             if progress_callback:
-                progress_callback(c/t * 0.8, f"🔊 正在生成音频 ({c}/{t}) - 速度限制中...")
+                progress_callback(c/t * 0.8, f"🔊 正在生成音频 ({c}/{t}) - 串行安全模式")
         
-        # ⚠️ 关键：并发降为 2，防止 "Unknown frame descriptor"
-        run_async_batch(tasks, concurrency=2, progress_callback=update_tts_prog)
+        # ⚠️ 关键设置：并发=1，极大降低被服务器拒绝的概率
+        run_async_batch(tasks, concurrency=1, progress_callback=update_tts_prog)
 
         if progress_callback: progress_callback(0.85, "💾 正在写入数据库...")
         
-        # 处理生成结果
         successful_tasks = 0
         for task in tasks:
-            # 再次检查文件是否存在且大小正常 (>1KB)
+            # 严格检查：只有文件生成成功了，才去修改数据库
             if os.path.exists(task['path']) and os.path.getsize(task['path']) > 500:
-                # 1. 移动并重命名为数字 ID
                 media_idx_str = str(next_media_idx)
                 final_path = os.path.join(extract_dir, media_idx_str)
                 
-                # 确保没有同名文件
                 if not os.path.exists(final_path):
                     shutil.move(task['path'], final_path)
-                    
-                    # 2. 更新 map
                     media_map[media_idx_str] = task['fname']
                     next_media_idx += 1
                     
-                    # 3. 记录更新
                     nid = task['nid']
                     tgt_idx = task['tgt_idx']
                     fname = task['fname']
@@ -726,20 +721,20 @@ def process_apkg_with_audio(uploaded_file, audio_configs, progress_callback):
                     audio_tag = f"[sound:{fname}]"
                     current_val = note_updates_map[nid][tgt_idx]
                     
+                    # 避免重复追加
                     if audio_tag not in current_val:
                         note_updates_map[nid][tgt_idx] = current_val + f" {audio_tag}"
                         successful_tasks += 1
             else:
-                # 删除无效文件
+                # 清理失败的垃圾文件
                 if os.path.exists(task['path']):
                     try: os.remove(task['path'])
                     except: pass
 
-        # 批量更新数据库
         db_updates = []
         for nid, new_fields_list in note_updates_map.items():
             new_flds_str = '\x1f'.join(new_fields_list)
-            # 必须更新 mod (modification time)，否则 Anki 导入时会忽略更新
+            # 关键：强制更新修改时间戳(mod)，确保 Anki 识别为更新
             db_updates.append((new_flds_str, int(time.time()), nid))
 
         if db_updates:
@@ -766,8 +761,7 @@ def process_apkg_with_audio(uploaded_file, audio_configs, progress_callback):
         return new_apkg_path, successful_tasks
 
     except Exception as e:
-        import traceback
-        return None, f"{str(e)} | {traceback.format_exc()}"
+        return None, f"Error: {str(e)}"
     finally:
         if os.path.exists(input_path): os.remove(input_path)
         shutil.rmtree(extract_dir, ignore_errors=True)
@@ -1129,15 +1123,14 @@ with tab_anki:
                 type="primary"
             )
 
-# ----------------- Tab 3: APKG 优化 (极简修复版) -----------------
+# ----------------- Tab 3: APKG 优化 (防崩溃稳定版) -----------------
 with tab_optimize:
-    st.markdown("### 🛠️ Anki 牌组优化 (极简版)")
-    st.info("💡 修复了 '3500 错误'，增加了防封号延时。支持同时为正面和背面添加语音。")
+    st.markdown("### 🛠️ Anki 牌组优化 (极简稳定版)")
+    st.info("💡 修复了 500 错误和合并问题。采用**安全慢速模式**（防止被封），生成时间稍长，请耐心等待。")
     
     up_apkg = st.file_uploader("上传 .apkg 文件", type=['apkg'], key="opt_apkg")
     
     if up_apkg:
-        # 1. 快速读取字段定义
         with tempfile.NamedTemporaryFile(delete=False, suffix=".apkg") as tmp_scan:
             tmp_scan.write(up_apkg.getvalue())
             scan_path = tmp_scan.name
@@ -1165,24 +1158,20 @@ with tab_optimize:
 
         if fields_found:
             st.divider()
-            
             audio_configs = []
             
-            # --- 极简 UI ---
             st.markdown("##### 🎙️ 语音配置")
             voice_choice = st.radio("选择发音人", list(VOICE_MAP.keys()), horizontal=True)
             voice_code = VOICE_MAP[voice_choice]
             
             st.write("---")
             
-            # 任务 1：正面
             use_front = st.checkbox("✅ 正面生成语音 (例如：单词)", value=True)
             if use_front:
                 c1_src, c1_tgt = st.columns(2)
                 f_src = c1_src.selectbox("正面-朗读来源", fields_found, index=0, key="fs")
                 f_tgt = c1_tgt.selectbox("正面-音频存放", fields_found, index=0, key="ft")
             
-            # 任务 2：背面
             use_back = st.checkbox("✅ 背面生成语音 (例如：例句)", value=False)
             if use_back:
                 c2_src, c2_tgt = st.columns(2)
@@ -1190,7 +1179,6 @@ with tab_optimize:
                 b_tgt = c2_tgt.selectbox("背面-音频存放", fields_found, index=min(1, len(fields_found)-1), key="bt")
             
             if st.button("🚀 开始注入语音", type="primary"):
-                # 组装任务
                 if use_front:
                     audio_configs.append({'src_idx': fields_found.index(f_src), 'tgt_idx': fields_found.index(f_tgt), 'voice': voice_code})
                 if use_back:
@@ -1204,7 +1192,7 @@ with tab_optimize:
                         opt_prog = st.progress(0)
                         opt_status = st.empty()
                     
-                    with st.spinner("正在缓慢生成以防止封号，请耐心等待..."):
+                    with st.spinner("正在以安全模式生成（每条约 1-2 秒），防止 500 错误..."):
                         new_path, count = process_apkg_with_audio(
                             up_apkg, 
                             audio_configs,
@@ -1213,12 +1201,14 @@ with tab_optimize:
                     
                     if new_path and isinstance(count, int):
                         opt_status.markdown(f"✅ **成功生成 {count} 条语音！**")
-                        st.balloons()
-                        
-                        with open(new_path, "rb") as f:
-                            st.session_state['opt_pkg_data'] = f.read()
-                        st.session_state['opt_pkg_name'] = f"Optimized_{up_apkg.name}"
-                        os.remove(new_path)
+                        if count == 0:
+                            st.warning("生成数量为 0。可能是所有卡片都已经有声音了，或者文本提取失败。")
+                        else:
+                            st.balloons()
+                            with open(new_path, "rb") as f:
+                                st.session_state['opt_pkg_data'] = f.read()
+                            st.session_state['opt_pkg_name'] = f"Optimized_{up_apkg.name}"
+                            os.remove(new_path)
                     else:
                         st.error(f"处理失败: {count}")
 
