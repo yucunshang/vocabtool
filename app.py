@@ -751,82 +751,84 @@ with tab_extract:
         with col_copy_hint:
             st.info("👈 点击左侧按钮自动生成。如使用第三方 AI，请复制下方 Prompt。")
 
-        # === 增强版：手动 Prompt 配置器 ===
+        # === 核心修改：手动 Prompt 区域 ===
         with st.expander("📌 手动复制 Prompt (第三方 AI 用)"):
-            st.write("⚙️ **Prompt 生成设置**")
-            p_c1, p_c2 = st.columns(2)
             
-            # 配置项
-            with p_c1:
-                p_front_type = st.selectbox("正面类型", ["Phrase (短语搭配)", "Word (仅单词)"], index=0)
-                p_def_lang = st.selectbox("释义语言", ["English (B2-C1)", "Simplified Chinese"], index=0)
-            with p_c2:
-                p_ex_count = st.number_input("例句数量", min_value=1, max_value=3, value=1)
-                p_etym_on = st.checkbox("包含词源 (Etymology)", value=True)
+            # 1. 自动分组设置
+            batch_size_prompt = st.number_input(
+                "🔢 分组大小 (Max 500)", 
+                min_value=10, 
+                max_value=500, 
+                value=50, 
+                step=10,
+                help="将单词列表切分为多个小块，避免 AI 上下文溢出。"
+            )
             
-            # 批量分组逻辑
-            batch_size_prompt = st.number_input("分组大小 (Max 500)", min_value=10, max_value=500, value=50, step=10)
-            
-            # 将 words_only 切片
+            # 2. 分组选择器
+            current_batch_words = []
             if words_only:
                 total_w = len(words_only)
                 num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
                 
                 batch_options = [f"第 {i+1} 组 ({i*batch_size_prompt+1} - {min((i+1)*batch_size_prompt, total_w)})" for i in range(num_batches)]
-                selected_batch_str = st.selectbox("选择要复制的分组", batch_options)
+                selected_batch_str = st.selectbox("📂 选择当前分组", batch_options)
                 
-                # 获取当前选中的单词列表
+                # 计算当前分组的单词
                 sel_idx = batch_options.index(selected_batch_str)
                 current_batch_words = words_only[sel_idx*batch_size_prompt : min((sel_idx+1)*batch_size_prompt, total_w)]
-                words_str = ", ".join(current_batch_words)
             else:
-                words_str = "[Words list is empty]"
+                st.warning("⚠️ 暂无单词数据，请先提取单词。")
 
-            # 动态生成 Prompt 文本
-            # 逻辑：根据用户选择调整 Prompt 内容
+            # 3. Prompt 占位符替换逻辑
+            # 我们直接使用您要求的“严格模板”，只替换 [INSERT YOUR WORD LIST HERE]
+            # 这样保证了“不要乱改，只改必要部分”的需求。
             
-            phrase_rule = "You MUST generate a high-frequency **collocation** or **short phrase** containing the target word." if "Phrase" in p_front_type else "Front must be the **Single Target Word** only."
-            phrase_eg = "heavy rain" if "Phrase" in p_front_type else "rain"
+            words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[WAITING FOR WORDS...]"
             
-            def_rule = "Define the phrase in concise **English (B2-C1 level)**." if "English" in p_def_lang else "Define in **Simplified Chinese** (Concise)."
-            def_eg = "water falling in drops from vapor condensed in the atmosphere" if "English" in p_def_lang else "雨，降雨"
-            
-            # 例句数量处理
-            ex_rule = f"{p_ex_count} short, authentic sentence(s) containing the phrase."
-            ex_eg_arr = ["It's raining heavily outside."] * p_ex_count
-            ex_eg_str = " ||| ".join(ex_eg_arr) if p_ex_count > 1 else ex_eg_arr[0]
-            
-            # 词源处理
-            etym_field_rule = "4. **Field 4: Roots/Etymology (Simplified Chinese)**\n   - Format: `prefix- + root + -suffix`." if p_etym_on else ""
-            etym_struct = " ||| `Etymology`" if p_etym_on else ""
-            etym_eg = " ||| rain (Germanic origin)" if p_etym_on else ""
-
-            dynamic_prompt = f"""# Role
-You are an expert English Lexicographer and Anki Card Designer.
+            # 您提供的严格模板
+            strict_prompt_template = f"""# Role
+You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
+Make sure to process everything in one go, without missing anything.
 # Input Data
-{words_str}
+{words_str_for_prompt}
 
-# Output Format
-1. **Container**: Strictly inside a single ```text code block.
+# Output Format Guidelines
+1. **Output Container**: Strictly inside a single ```text code block.
 2. **Layout**: One entry per line.
-3. **Separator**: `|||`
+3. **Separator**: Use `|||` as the delimiter.
 4. **Target Structure**:
-   `Front ({p_front_type.split()[0]})` ||| `Definition` ||| `Example(s)`{etym_struct}
+   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
 
-# Field Constraints
-1. **Field 1: Front**
-   - {phrase_rule}
-2. **Field 2: Definition**
-   - {def_rule}
+# Field Constraints (Strict)
+1. **Field 1: Phrase (CRITICAL)**
+   - DO NOT output the single target word.
+   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
+   - Example: If input is "rain", output "heavy rain" or "torrential rain".
+   
+2. **Field 2: Definition (English)**
+   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
+
 3. **Field 3: Example**
-   - {ex_rule}
-{etym_field_rule}
+   - A short, authentic sentence containing the phrase.
 
-# Example
-Input: rain
-Output: {phrase_eg} ||| {def_eg} ||| {ex_eg_str}{etym_eg}
-"""
-            st.code(dynamic_prompt, language="text")
+4. **Field 4: Roots/Etymology (Simplified Chinese)**
+   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
+   - If no classical roots exist, explain the origin briefly in Chinese.
+   - Use Simplified Chinese for meanings.
+
+# Valid Example (Follow this logic strictly)
+Input: altruism
+Output:
+motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
+
+Input: hectic
+Output:
+a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
+
+# Task
+Process the provided input list strictly adhering to the format above."""
+
+            st.code(strict_prompt_template, language="text")
 
 # ----------------- Tab 2: 卡片制作 (手动模式) -----------------
 with tab_anki:
