@@ -376,6 +376,50 @@ def extract_from_epub(uploaded_file: Any) -> str:
             except OSError as e:
                 logger.warning(f"Could not remove temp file: {e}")
 
+def extract_from_csv(uploaded_file: Any) -> str:
+    """Extract text from CSV file."""
+    try:
+        # Try to detect encoding
+        bytes_data = uploaded_file.getvalue()
+        encoding = detect_file_encoding(bytes_data)
+        
+        # Read CSV
+        uploaded_file.seek(0)  # Reset file pointer
+        df = pd.read_csv(uploaded_file, encoding=encoding)
+        
+        # Convert all columns to string and join
+        text_parts = []
+        for col in df.columns:
+            # Add column values as text
+            col_text = df[col].astype(str).str.strip()
+            # Filter out NaN and empty strings
+            col_text = col_text[col_text.notna() & (col_text != '') & (col_text != 'nan')]
+            text_parts.extend(col_text.tolist())
+        
+        return " ".join(text_parts)
+    except Exception as e:
+        return ErrorHandler.handle_file_error(e, "CSV")
+
+def extract_from_excel(uploaded_file: Any) -> str:
+    """Extract text from Excel file (xlsx, xls)."""
+    try:
+        # Read Excel file (supports both .xlsx and .xls)
+        df = pd.read_excel(uploaded_file, sheet_name=None)  # Read all sheets
+        
+        text_parts = []
+        # Iterate through all sheets
+        for sheet_name, sheet_df in df.items():
+            # Convert all columns to string and join
+            for col in sheet_df.columns:
+                col_text = sheet_df[col].astype(str).str.strip()
+                # Filter out NaN and empty strings
+                col_text = col_text[col_text.notna() & (col_text != '') & (col_text != 'nan')]
+                text_parts.extend(col_text.tolist())
+        
+        return " ".join(text_parts)
+    except Exception as e:
+        return ErrorHandler.handle_file_error(e, "Excel")
+
 def extract_from_sqlite(uploaded_file: Any) -> str:
     """Extract text from SQLite database file."""
     tmp_db_path = None
@@ -425,6 +469,9 @@ def extract_text_from_file(uploaded_file: Any) -> str:
         'epub': extract_from_epub,
         'db': extract_from_sqlite,
         'sqlite': extract_from_sqlite,
+        'csv': extract_from_csv,
+        'xlsx': extract_from_excel,
+        'xls': extract_from_excel,
     }
     
     extractor = extractors.get(file_type)
@@ -914,8 +961,14 @@ if not VOCAB_DICT:
 with st.expander("📖 使用指南 & 支持格式"):
     st.markdown("""
     **🚀 极速工作流**
-    1. **提取**：支持 URL、PDF, ePub, Docx, txt 等格式。
+    1. **提取**：支持 URL、PDF、ePub、Docx、TXT、CSV、Excel (xlsx/xls) 等格式。
     2. **生成**：自动完成文本生成、**并发语音合成**并打包下载。
+    
+    **📄 支持的文件格式**
+    - 📝 文本：TXT
+    - 📄 文档：PDF, DOCX, EPUB
+    - 📊 表格：CSV, XLSX, XLS
+    - 🗄️ 数据库：DB, SQLite
     """)
 
 tab_extract, tab_anki = st.tabs([
@@ -948,7 +1001,7 @@ with tab_extract:
         
         uploaded_file = st.file_uploader(
             "或直接上传文件",
-            type=['txt', 'pdf', 'docx', 'epub', 'db', 'sqlite'],
+            type=['txt', 'pdf', 'docx', 'epub', 'csv', 'xlsx', 'xls', 'db', 'sqlite'],
             key=st.session_state['uploader_id'],
             label_visibility="collapsed"
         )
