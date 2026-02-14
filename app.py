@@ -264,7 +264,7 @@ def analyze_logic(text, current_lvl, target_lvl, include_unknown):
     return final_candidates, total_raw_count, stats_info
 
 # ==========================================
-# 3. AI 调用逻辑 (内置 AI - 简单模式)
+# 3. AI 调用逻辑
 # ==========================================
 def process_ai_in_batches(words_list, progress_callback=None):
     if not OpenAI:
@@ -285,7 +285,6 @@ def process_ai_in_batches(words_list, progress_callback=None):
     total_words = len(words_list)
     full_results = []
     
-    # 内置 AI 保持简单：Word ||| CN Meaning ||| EN Example
     system_prompt = "You are a helpful assistant for vocabulary learning."
     
     for i in range(0, total_words, BATCH_SIZE):
@@ -362,7 +361,6 @@ def parse_anki_data(raw_text):
         if len(parts) < 2: 
             continue
         
-        # 兼容 3段式 和 4段式
         w = parts[0].strip()
         m = parts[1].strip()
         e = parts[2].strip() if len(parts) > 2 else ""
@@ -751,7 +749,7 @@ with tab_extract:
         with col_copy_hint:
             st.info("👈 点击左侧按钮自动生成。如使用第三方 AI，请复制下方 Prompt。")
 
-        # === 核心修改：手动 Prompt 区域 ===
+        # === 核心修改：手动 Prompt 区域 (严格模板) ===
         with st.expander("📌 手动复制 Prompt (第三方 AI 用)"):
             
             # 1. 自动分组设置
@@ -780,9 +778,6 @@ with tab_extract:
                 st.warning("⚠️ 暂无单词数据，请先提取单词。")
 
             # 3. Prompt 占位符替换逻辑
-            # 我们直接使用您要求的“严格模板”，只替换 [INSERT YOUR WORD LIST HERE]
-            # 这样保证了“不要乱改，只改必要部分”的需求。
-            
             words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[WAITING FOR WORDS...]"
             
             # 您提供的严格模板
@@ -900,7 +895,8 @@ with tab_anki:
                         with open(f_path, "rb") as f:
                             st.session_state['anki_pkg_data'] = f.read()
                         st.session_state['anki_pkg_name'] = f"{deck_name}.apkg"
-                        status_manual.text("✅ 生成完毕！")
+                        status_manual.markdown(f"✅ **生成完毕！共制作 {len(parsed_data)} 张卡片**")
+                        st.balloons()
                         st.toast("任务完成！", icon="🎉")
                     except Exception as e:
                         st.error(f"生成文件出错: {e}")
