@@ -230,44 +230,91 @@ def get_genanki() -> Tuple[Any, Any]:
     return genanki, tempfile
 
 @st.cache_data
-def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame]]:
-    """Load vocabulary data from pickle or CSV files."""
-    # Try pickle first
+@st.cache_data
+def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame], str]:
+    """
+    加载词库并提供详细的数据健康报告 (Debug版)
+    Returns: (字典, DataFrame, 调试信息字符串)
+    """
+    debug_logs = []
+    
+    def log(msg):
+        debug_logs.append(msg)
+        logger.info(msg)
+
+    # 1. 尝试加载 Pickle
     if os.path.exists("vocab.pkl"):
         try:
             df = pd.read_pickle("vocab.pkl")
             vocab_dict = pd.Series(df['rank'].values, index=df['word']).to_dict()
-            return vocab_dict, df
-        except (FileNotFoundError, pd.errors.PickleError, KeyError) as e:
-            logger.warning(f"Could not load pickle file: {e}")
+            return vocab_dict, df, "✅ 已加载缓存文件 vocab.pkl (极速模式)"
+        except Exception as e:
+            log(f"缓存文件加载失败，转为读取CSV: {e}")
 
-    # Fallback to CSV files
+    # 2. 尝试加载 CSV
     possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next((f for f in possible_files if os.path.exists(f)), None)
     
     if file_path:
         try:
-            df = pd.read_csv(file_path)
-            df.columns = [c.strip().lower() for c in df.columns]
-            
-            word_col = next((c for c in df.columns if 'word' in c), df.columns[0])
-            rank_col = next((c for c in df.columns if 'rank' in c), df.columns[1])
-            
-            df = df.dropna(subset=[word_col])
-            df[word_col] = df[word_col].astype(str).str.lower().str.strip()
-            df[rank_col] = pd.to_numeric(df[rank_col], errors='coerce')
-            df = df.sort_values(rank_col).drop_duplicates(subset=[word_col], keep='first')
-            
-            vocab_dict = pd.Series(df[rank_col].values, index=df[word_col]).to_dict()
-            return vocab_dict, df
-        except Exception as e:
-            logger.error(f"Error loading CSV file {file_path}: {e}")
-            return {}, None
-    
-    logger.warning("No vocabulary data files found")
-    return {}, None
+            log(f"📂 正在读取文件: {file_path}")
+            # 读取原始数据
+            df_raw = pd.read_csv(file_path)
+            raw_count = len(df_raw)
+            log(f"📊 原始行数: {raw_count}")
 
-VOCAB_DICT, FULL_DF = load_vocab_data()
+            # 规范化列名
+            df_raw.columns = [c.strip().lower() for c in df_raw.columns]
+            
+            # 智能寻找列
+            word_col = next((c for c in df_raw.columns if 'word' in c), df_raw.columns[0])
+            rank_col = next((c for c in df_raw.columns if 'rank' in c), df_raw.columns[1])
+            
+            # --- 步骤 A: 清洗无效数据 ---
+            # 丢弃单词为空的行
+            df_clean = df_raw.dropna(subset=[word_col]).copy()
+            dropped_nan = raw_count - len(df_clean)
+            
+            # 强制转为小写并去空格
+            df_clean[word_col] = df_clean[word_col].astype(str).str.lower().str.strip()
+            # 强制Rank为数字，非数字转为NaN并填充为99999
+            df_clean[rank_col] = pd.to_numeric(df_clean[rank_col], errors='coerce').fillna(99999).astype(int)
+            
+            # --- 步骤 B: 处理重复 (这是单词减少的主要原因) ---
+            # 统计去重前的数量
+            before_dedup_count = len(df_clean)
+            
+            # 按排名排序，保留排名最靠前（数字最小）的那个
+            # 比如: "bank" 排名 500 和 "bank" 排名 2000，系统保留 500 的那个
+            df_final = df_clean.sort_values(rank_col).drop_duplicates(subset=[word_col], keep='first')
+            
+            final_count = len(df_final)
+            duplicates_dropped = before_dedup_count - final_count
+            
+            # --- 生成报告 ---
+            report = (
+                f"✅ 词库加载成功!\n"
+                f"📥 原始数据: {raw_count} 行\n"
+                f"🗑️ 无效/空行: {dropped_nan} 行\n"
+                f"👯 重复单词: {duplicates_dropped} 行 (已合并，保留最优排名)\n"
+                f"✨ 最终有效: {final_count} 个单词"
+            )
+            log(report)
+            
+            vocab_dict = pd.Series(df_final[rank_col].values, index=df_final[word_col]).to_dict()
+            return vocab_dict, df_final, report
+            
+        except Exception as e:
+            err_msg = f"❌ CSV加载严重错误: {e}"
+            logger.error(err_msg)
+            return {}, None, err_msg
+    
+    return {}, None, "⚠️ 未找到词库文件 (csv/data.csv)"
+
+# 修改全局变量接收部分 (在 app.py 的后面一点点)
+# 原代码: VOCAB_DICT, FULL_DF = load_vocab_data()
+# 新代码:
+VOCAB_DICT, FULL_DF, LOAD_REPORT = load_vocab_data()
 
 # ==========================================
 # State Management
