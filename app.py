@@ -347,23 +347,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def _make_words_clickable(text: str) -> str:
-    """Wrap English words (3+ letters) with clickable spans.
-
-    Uses class ``cw`` and ``data-word`` attribute.  The parent
-    ``components.html`` block attaches JS click handlers that navigate
-    the *top-level* window via ``window.top.location``.
-    """
-    def _replace_word(m: re.Match) -> str:
-        word = m.group(0)
-        if len(word) >= 3 and word.isascii() and word.isalpha():
-            escaped = html.escape(word)
-            return f'<span class="cw" data-word="{escaped}">{escaped}</span>'
-        return html.escape(word)
-
-    return re.sub(r"[a-zA-Z]+", _replace_word, text)
-
-
 def _do_lookup(query_word: str) -> None:
     """Execute AI lookup for a word, populating session state cache and result."""
     st.session_state["quick_lookup_is_loading"] = True
@@ -447,28 +430,6 @@ def render_quick_lookup() -> None:
     result = st.session_state.get("quick_lookup_last_result")
     if result and 'error' not in result:
         raw_content = result['result']
-        lines = raw_content.split('\n')
-        formatted_lines = []
-
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-
-            if line.startswith("🌱"):
-                clickable = _make_words_clickable(line)
-                formatted_lines.append(f'<div class="ql-line ql-ety">{clickable}</div>')
-            elif "|" in line and len(line) < 50:
-                clickable = _make_words_clickable(line)
-                formatted_lines.append(f'<div class="ql-line ql-def">{clickable}</div>')
-            elif line.startswith("•"):
-                clickable = _make_words_clickable(line)
-                formatted_lines.append(f'<div class="ql-line ql-ex">{clickable}</div>')
-            else:
-                safe_line = html.escape(line)
-                formatted_lines.append(f'<div class="ql-line ql-cn">{safe_line}</div>')
-
-        display_html = "".join(formatted_lines).replace('\n', '<br>')
         rank = result.get('rank', 99999)
 
         if rank <= 5000:
@@ -487,62 +448,51 @@ def render_quick_lookup() -> None:
             rank_color = "#6b7280"
             rank_label = "未收录"
 
-        card_html = f"""
-        <style>
-            body {{ margin: 0; padding: 0; background: transparent;
-                   font-family: 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif; }}
-            .qlc {{
-                font-family: 'Noto Sans CJK SC', 'Noto Sans SC', 'WenQuanYi Micro Hei',
-                             'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
-                font-size: 16px; line-height: 1.7; color: #1f2937; font-weight: 400;
-                -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
-                padding: 6px 2px;
-            }}
-            .ql-line {{ font-size: 16px; line-height: 1.7; font-weight: 400; }}
-            .ql-def {{ color: #1e3a8a; margin-bottom: 6px; }}
-            .ql-ety {{ color: #065f46; background: #ecfdf5; padding: 6px 10px; border-radius: 8px; margin: 8px 0; }}
-            .ql-ex {{ color: #374151; margin-top: 6px; }}
-            .ql-cn {{ color: #6b7280; margin-bottom: 8px; }}
-            .ql-rank {{ margin-top: 12px; }}
-            .ql-rank span {{
-                display: inline-block; background: {rank_color}; color: white;
-                padding: 3px 10px; border-radius: 5px; font-size: 13px; font-weight: 600;
-            }}
-            .cw {{
-                cursor: pointer; border-bottom: 1px dashed #93c5fd;
-                transition: all 0.15s ease; border-radius: 2px; padding: 0 1px;
-                text-decoration: none; color: inherit; background: none;
-                border-top: none; border-left: none; border-right: none;
-                font: inherit;
-            }}
-            .cw:hover {{
-                background-color: #dbeafe; border-bottom-color: #3b82f6; color: #1d4ed8;
-            }}
-        </style>
-        <div class="qlc">
-            {display_html}
-            <div class="ql-rank">
-                <span>📊 {rank} · {rank_label}</span>
-            </div>
-        </div>
-        <script>
-        document.querySelectorAll('.cw').forEach(function(el) {{
-            el.addEventListener('click', function(e) {{
-                e.preventDefault();
-                var w = el.getAttribute('data-word');
-                if (!w) return;
-                var top = window.top || window.parent;
-                try {{
-                    var base = top.location.href.split('?')[0];
-                    top.location.href = base + '?lookup_word=' + encodeURIComponent(w);
-                }} catch(err) {{
-                    window.open('/?lookup_word=' + encodeURIComponent(w), '_top');
-                }}
-            }});
-        }});
-        </script>
-        """
-        components.html(card_html, height=320, scrolling=True)
+        # Build styled HTML lines (no iframe needed)
+        lines = raw_content.split('\n')
+        formatted_lines = []
+        clickable_words: list[str] = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith("🌱"):
+                safe = html.escape(line)
+                formatted_lines.append(f'<div style="color:#065f46;background:#ecfdf5;padding:6px 10px;border-radius:8px;margin:8px 0;line-height:1.7;">{safe}</div>')
+            elif "|" in line and len(line) < 50:
+                safe = html.escape(line)
+                formatted_lines.append(f'<div style="color:#1e3a8a;margin-bottom:6px;font-size:16px;line-height:1.7;">{safe}</div>')
+            elif line.startswith("•"):
+                safe = html.escape(line)
+                formatted_lines.append(f'<div style="color:#374151;margin-top:6px;font-size:16px;line-height:1.7;">{safe}</div>')
+                # Collect English words from examples for clickable pills
+                for w in re.findall(r'[a-zA-Z]{3,}', line):
+                    wl = w.lower()
+                    if wl not in _DIRECT_INPUT_STOPWORDS and wl not in clickable_words:
+                        clickable_words.append(wl)
+            else:
+                safe = html.escape(line)
+                formatted_lines.append(f'<div style="color:#6b7280;margin-bottom:8px;font-size:16px;line-height:1.7;">{safe}</div>')
+
+        display_html = "".join(formatted_lines)
+        rank_badge = f'<span style="display:inline-block;background:{rank_color};color:white;padding:3px 10px;border-radius:5px;font-size:13px;font-weight:600;">📊 {rank} · {rank_label}</span>'
+
+        st.markdown(f"""<div style="padding:4px 0;">{display_html}<div style="margin-top:10px;">{rank_badge}</div></div>""", unsafe_allow_html=True)
+
+        # Clickable word pills for continuing lookup (pure Streamlit, no iframe)
+        if clickable_words:
+            picked = st.pills(
+                "点击单词继续查询",
+                options=clickable_words[:20],
+                key="ql_word_pills",
+                label_visibility="collapsed",
+            )
+            if picked:
+                st.session_state["quick_lookup_word"] = picked
+                st.session_state["_auto_lookup_word"] = picked
+                st.rerun()
 
     elif result and 'error' in result:
         st.error(f"❌ 查询失败：{result.get('error', '未知错误')}")
@@ -1004,28 +954,14 @@ with tab_anki:
         st.session_state['anki_pkg_name'] = ""
         st.session_state['anki_input_text'] = ""
 
-    col_input, col_act = st.columns([3, 1])
-    with col_input:
-        beijing_time_str = get_beijing_time_str()
-        deck_name = st.text_input("🏷️ 牌组名称", f"Vocab_{beijing_time_str}")
-
-    card_fmt_tab2 = render_card_format_selector("tab2")
-
-    with st.expander("📌 生成 Prompt 模板（复制给第三方 AI）", expanded=False):
-        manual_words_input = st.text_input(
-            "输入单词（逗号分隔）",
-            placeholder="altruism, hectic, serendipity...",
-            key="tab2_words_for_prompt"
-        )
-        words_str_tab2 = manual_words_input.strip() if manual_words_input.strip() else "[INSERT YOUR WORD LIST HERE]"
-        tab2_prompt = build_card_prompt(words_str_tab2, card_fmt_tab2)
-        st.code(tab2_prompt, language="text")
+    beijing_time_str = get_beijing_time_str()
+    deck_name = st.text_input("🏷️ 牌组名称", f"Vocab_{beijing_time_str}")
 
     ai_response = st.text_area(
         "粘贴 AI 返回内容",
         height=300,
         key="anki_input_text",
-        placeholder='hectic ||| 忙乱的 ||| She has a hectic schedule today.'
+        placeholder='hectic ||| 忙乱的 ||| She has a hectic schedule today.',
     )
 
     manual_voice_label = st.radio(
@@ -1033,7 +969,7 @@ with tab_anki:
         options=list(constants.VOICE_MAP.keys()),
         index=0,
         horizontal=True,
-        key="sel_voice_manual"
+        key="sel_voice_manual",
     )
     manual_voice_code = constants.VOICE_MAP[manual_voice_label]
 
