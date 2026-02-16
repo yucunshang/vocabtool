@@ -388,7 +388,14 @@ def render_quick_lookup() -> None:
     in_cooldown = now_ts < st.session_state["quick_lookup_block_until"]
     lookup_disabled = st.session_state["quick_lookup_is_loading"] or in_cooldown
 
-    # Auto-lookup from clicked word (query param or word-block)
+    # Apply pending lookup word before text_input widget is created.
+    # This avoids mutating an already-instantiated widget state key.
+    pending_word = st.session_state.pop("_quick_lookup_pending_word", "")
+    if pending_word:
+        st.session_state["quick_lookup_word"] = pending_word
+        st.session_state["_auto_lookup_word"] = pending_word
+
+    # Auto-lookup from clicked word (query param, pills, or word-block)
     auto_word = st.session_state.pop("_auto_lookup_word", "")
     if auto_word and not in_cooldown:
         _do_lookup(auto_word)
@@ -453,10 +460,21 @@ def render_quick_lookup() -> None:
         formatted_lines = []
         clickable_words: list[str] = []
 
+        current_query = st.session_state.get("quick_lookup_last_query", "").lower().strip()
+
         for line in lines:
             line = line.strip()
             if not line:
                 continue
+
+            # Collect English words from all result lines so users can
+            # continue lookup from definitions, etymology, and examples.
+            for w in re.findall(r"[a-zA-Z]{3,}", line):
+                wl = w.lower()
+                if wl == current_query:
+                    continue
+                if wl not in _DIRECT_INPUT_STOPWORDS and wl not in clickable_words:
+                    clickable_words.append(wl)
 
             if line.startswith("🌱"):
                 safe = html.escape(line)
@@ -467,11 +485,6 @@ def render_quick_lookup() -> None:
             elif line.startswith("•"):
                 safe = html.escape(line)
                 formatted_lines.append(f'<div style="color:#374151;margin-top:6px;font-size:16px;line-height:1.7;">{safe}</div>')
-                # Collect English words from examples for clickable pills
-                for w in re.findall(r'[a-zA-Z]{3,}', line):
-                    wl = w.lower()
-                    if wl not in _DIRECT_INPUT_STOPWORDS and wl not in clickable_words:
-                        clickable_words.append(wl)
             else:
                 safe = html.escape(line)
                 formatted_lines.append(f'<div style="color:#6b7280;margin-bottom:8px;font-size:16px;line-height:1.7;">{safe}</div>')
@@ -489,9 +502,11 @@ def render_quick_lookup() -> None:
                 key="ql_word_pills",
                 label_visibility="collapsed",
             )
-            if picked:
-                st.session_state["quick_lookup_word"] = picked
-                st.session_state["_auto_lookup_word"] = picked
+            if "ql_word_pills_last" not in st.session_state:
+                st.session_state["ql_word_pills_last"] = ""
+            if picked and picked != st.session_state["ql_word_pills_last"]:
+                st.session_state["ql_word_pills_last"] = picked
+                st.session_state["_quick_lookup_pending_word"] = picked
                 st.rerun()
 
     elif result and 'error' in result:
