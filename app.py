@@ -8,7 +8,6 @@ import logging
 import os
 import re
 import time
-from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
@@ -737,61 +736,19 @@ with tab_extract:
 
         st.markdown(f"### ✅ 提取成功！")
 
-        # Word blocks view: styled blocks with double-click to query
+        # Word blocks view: click in place to query (no URL jump)
         st.markdown("#### 🏷️ 词汇一览")
-        st.caption("💡 点击单词方块可快速查询释义")
+        st.caption("💡 直接点击单词方块可快速查询释义（不跳转）")
 
-        word_blocks_html_parts = []
-        for word, _ in data:
-            safe_word = html.escape(word)
-            safe_href = quote(word.strip())
-            word_blocks_html_parts.append(
-                f'<a class="word-block-link" href="?lookup_word={safe_href}" '
-                f'title="查询 {safe_word}">{safe_word}</a>'
-            )
-
-        word_blocks_inner = "".join(word_blocks_html_parts)
-        word_blocks_html = f"""
-        <style>
-            .word-blocks-container {{
-                display: flex;
-                flex-wrap: wrap;
-                gap: 10px;
-                padding: 12px 0;
-            }}
-            .word-block-link {{
-                display: inline-flex;
-                align-items: center;
-                padding: 8px 18px;
-                background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-                border: 1px solid #bae6fd;
-                border-radius: 10px;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 16px;
-                color: #0c4a6e;
-                cursor: pointer;
-                user-select: none;
-                transition: all 0.2s ease;
-                font-weight: 500;
-                text-decoration: none;
-            }}
-            .word-block-link:hover {{
-                background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-                border-color: #93c5fd;
-                transform: translateY(-1px);
-                box-shadow: 0 2px 6px rgba(59, 130, 246, 0.18);
-                text-decoration: none;
-                color: #0c4a6e;
-            }}
-            .word-block-link:visited {{
-                color: #0c4a6e;
-            }}
-        </style>
-        <div class="word-blocks-container">
-            {word_blocks_inner}
-        </div>
-        """
-        st.markdown(word_blocks_html, unsafe_allow_html=True)
+        cols_per_row = 6
+        for i in range(0, len(data), cols_per_row):
+            row = data[i:i + cols_per_row]
+            cols = st.columns(cols_per_row)
+            for j, (word, _) in enumerate(row):
+                with cols[j]:
+                    if st.button(word, key=f"wb_{i + j}", use_container_width=True):
+                        st.session_state["_quick_lookup_pending_word"] = word
+                        st.rerun()
 
         words_only = [w for w, r in data]
         words_text = "\n".join(words_only)
@@ -823,8 +780,6 @@ with tab_extract:
 
         st.markdown("---")
         st.markdown("### 🤖 AI 生成 Anki 卡片")
-
-        card_fmt = render_card_format_selector("tab1")
 
         col_ai_btn, col_copy_hint = st.columns([1, 2])
 
@@ -860,7 +815,6 @@ with tab_extract:
                 ai_result = process_ai_in_batches(
                     words_only,
                     progress_callback=update_ai_progress,
-                    card_format=card_fmt
                 )
 
                 if ai_result:
@@ -909,7 +863,8 @@ with tab_extract:
             st.info("👈 点击左侧按钮自动生成。如使用第三方 AI，请复制下方 Prompt。")
 
         with st.expander("📌 手动复制 Prompt (第三方 AI 用)"):
-            batch_size_prompt = st.number_input("🔢 分组大小 (Max 500)", 10, 500, 50, step=10)
+            card_fmt = render_card_format_selector("tab1_prompt")
+            batch_size_prompt = int(st.number_input("🔢 分组大小", min_value=1, value=50, step=10))
             current_batch_words = []
 
             if words_only:
