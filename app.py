@@ -767,16 +767,15 @@ with tab_extract:
         st.markdown("---")
         st.markdown("### 🤖 AI 生成 Anki 卡片")
 
-        col_ai_btn, col_copy_hint = st.columns([1, 2])
+        col_ai_btn, col_copy_hint = st.columns([1, 1.35], vertical_alignment="top")
 
         with col_ai_btn:
             ai_model_label = get_config()["openai_model"]
 
-            selected_voice_label = st.radio(
+            selected_voice_label = st.selectbox(
                 "🎙️ 发音人",
                 options=list(constants.VOICE_MAP.keys()),
                 index=0,
-                horizontal=True,
                 key="sel_voice_auto"
             )
             selected_voice_code = constants.VOICE_MAP[selected_voice_label]
@@ -787,7 +786,10 @@ with tab_extract:
             words_for_auto_ai = words_only
             current_word_count = len(words_for_auto_ai)
             if current_word_count > constants.MAX_AUTO_LIMIT:
-                st.warning(f"⚠️ 单词数超过 {constants.MAX_AUTO_LIMIT}，内置 AI 仅处理前 {constants.MAX_AUTO_LIMIT} 个。建议使用手动 Prompt 分批处理。")
+                st.caption(
+                    f"⚠️ 当前 {current_word_count} 词；内置 AI 最多处理前 {constants.MAX_AUTO_LIMIT} 词。"
+                    " 如需全部处理，请使用右侧第三方 Prompt 分批。"
+                )
                 words_for_auto_ai = words_for_auto_ai[:constants.MAX_AUTO_LIMIT]
 
             if st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", use_container_width=True):
@@ -839,45 +841,46 @@ with tab_extract:
                 else:
                     st.error("AI 生成失败，请检查 API Key 或网络连接。")
 
-            st.caption("⚠️ AI 生成内容可能存在错误，请人工复核。")
-
-        render_anki_download_button(
-            f"📥 立即下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
-            button_type="primary",
-            use_container_width=True
-        )
+            render_anki_download_button(
+                f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
+                button_type="primary",
+                use_container_width=True
+            )
+            st.caption("⚠️ AI 结果请人工复核后再学习。")
 
         with col_copy_hint:
-            st.info("👈 点击左侧按钮自动生成。如使用第三方 AI，请复制下方 Prompt。")
+            st.markdown("#### 第三方 AI Prompt")
+            st.caption("内置 AI 适合快速生成；需要更大批量时，使用下方 Prompt 到第三方 AI。")
 
-        with st.expander("📌 手动复制 Prompt (第三方 AI 用)"):
-            card_fmt = render_card_format_selector("tab1_prompt")
-            batch_size_prompt = int(st.number_input("🔢 分组大小 (最大 500)", min_value=1, max_value=500, value=50, step=10))
-            current_batch_words = []
+            with st.expander("📌 复制 Prompt（第三方 AI）", expanded=True):
+                card_fmt = render_card_format_selector("tab1_prompt")
+                batch_size_prompt = int(
+                    st.number_input("🔢 分组大小 (最大 500)", min_value=1, max_value=500, value=50, step=10)
+                )
+                current_batch_words = []
 
-            if words_only:
-                total_w = len(words_only)
-                if total_w <= 500:
-                    st.caption(f"💡 当前共 {total_w} 个单词（≤500），已全部放入一个 Prompt。")
-                    current_batch_words = words_only
+                if words_only:
+                    total_w = len(words_only)
+                    if total_w <= 500:
+                        st.caption(f"💡 当前共 {total_w} 个单词（≤500），已全部放入一个 Prompt。")
+                        current_batch_words = words_only
+                    else:
+                        num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
+                        batch_options = [
+                            f"第 {i+1} 组 ({i*batch_size_prompt+1} - {min((i+1)*batch_size_prompt, total_w)})"
+                            for i in range(num_batches)
+                        ]
+                        selected_batch_str = st.selectbox("📂 选择当前分组", batch_options)
+                        sel_idx = batch_options.index(selected_batch_str)
+                        current_batch_words = words_only[
+                            sel_idx*batch_size_prompt:min((sel_idx+1)*batch_size_prompt, total_w)
+                        ]
                 else:
-                    num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
-                    batch_options = [
-                        f"第 {i+1} 组 ({i*batch_size_prompt+1} - {min((i+1)*batch_size_prompt, total_w)})"
-                        for i in range(num_batches)
-                    ]
-                    selected_batch_str = st.selectbox("📂 选择当前分组", batch_options)
-                    sel_idx = batch_options.index(selected_batch_str)
-                    current_batch_words = words_only[
-                        sel_idx*batch_size_prompt:min((sel_idx+1)*batch_size_prompt, total_w)
-                    ]
-            else:
-                st.warning("⚠️ 暂无单词数据，请先提取单词。")
+                    st.warning("⚠️ 暂无单词数据，请先提取单词。")
 
-            words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[INSERT YOUR WORD LIST HERE]"
-
-            strict_prompt_template = build_card_prompt(words_str_for_prompt, card_fmt)
-            st.code(strict_prompt_template, language="text")
+                words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[INSERT YOUR WORD LIST HERE]"
+                strict_prompt_template = build_card_prompt(words_str_for_prompt, card_fmt)
+                st.code(strict_prompt_template, language="text")
 
 # ==========================================
 # Tab 2: Manual Anki Card Creation
