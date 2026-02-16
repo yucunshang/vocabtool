@@ -69,16 +69,23 @@ def get_genanki() -> Tuple[Any, Any]:
 @st.cache_data
 def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame]]:
     """Load vocabulary data from pickle or CSV files."""
-    if os.path.exists("vocab.pkl"):
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+
+    pkl_path = os.path.join(root_dir, "vocab.pkl")
+    if os.path.exists(pkl_path):
         try:
-            df = pd.read_pickle("vocab.pkl")
+            df = pd.read_pickle(pkl_path)
             vocab_dict = pd.Series(df['rank'].values, index=df['word']).to_dict()
             return vocab_dict, df
         except (FileNotFoundError, pd.errors.PickleError, KeyError) as e:
             logger.warning(f"Could not load pickle file: {e}")
 
-    possible_files = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
-    file_path = next((f for f in possible_files if os.path.exists(f)), None)
+    possible_names = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
+    file_path = next(
+        (os.path.join(root_dir, f) for f in possible_names
+         if os.path.exists(os.path.join(root_dir, f))),
+        None
+    )
 
     if file_path:
         try:
@@ -99,5 +106,5 @@ def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame]]:
             logger.error(f"Error loading CSV file {file_path}: {e}")
             return {}, None
 
-    logger.warning("No vocabulary data files found")
+    logger.warning("No vocabulary data files found (searched in %s)", root_dir)
     return {}, None
