@@ -505,7 +505,7 @@ def _do_lookup(query_word: str) -> None:
                     unsafe_allow_html=True,
                 )
 
-            with st.spinner("🔍 查询中（流式返回）..."):
+            with st.spinner("🔍 查询中..."):
                 st.session_state[cache_key] = get_word_quick_definition(
                     query_word,
                     stream_callback=_on_stream,
@@ -527,7 +527,7 @@ def _do_lookup(query_word: str) -> None:
 
 def render_quick_lookup() -> None:
     st.markdown("### AI 极速查词")
-    st.caption("输入单词后按回车或点击查询 · 结果流式输出")
+    st.caption("输入单词后按回车或点击查询")
 
     if "quick_lookup_last_query" not in st.session_state:
         st.session_state["quick_lookup_last_query"] = ""
@@ -652,7 +652,7 @@ with st.expander("使用指南 & 支持格式", expanded=False):
 tab_lookup, tab_extract, tab_anki = st.tabs([
     "查词",
     "重点词",
-    "制卡",
+    "制卡 Anki",
 ])
 
 with tab_lookup:
