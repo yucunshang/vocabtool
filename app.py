@@ -203,26 +203,9 @@ st.markdown("""
         color: #64748b; font-size: 0.9rem; margin: 0;
     }
 
-    /* ===== Word blocks for filtered words ===== */
-    .word-blocks-container {
-        display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0;
-    }
-    .word-block {
-        display: inline-block; padding: 6px 14px;
-        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-        border: 1px solid #bae6fd; border-radius: 8px;
-        font-family: 'Consolas', 'Monaco', monospace;
-        font-size: 14px; color: #0c4a6e;
-        cursor: pointer; user-select: none;
-        transition: all 0.2s ease; font-weight: 500;
-    }
-    .word-block:hover {
-        background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-        border-color: #93c5fd; transform: translateY(-1px);
-        box-shadow: 0 2px 6px rgba(59,130,246,0.15);
-    }
-    .word-block .word-rank {
-        font-size: 11px; color: #64748b; margin-left: 6px; font-weight: 400;
+    /* ===== Seamless iframes for components.html ===== */
+    iframe[title="streamlit_components.v1.components.html"] {
+        border: none !important;
     }
 
     /* ===== Radio buttons: chip style ===== */
@@ -506,38 +489,40 @@ def render_quick_lookup() -> None:
 
         card_html = f"""
         <style>
-            body {{ margin: 0; padding: 0; font-family: 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif; }}
+            body {{ margin: 0; padding: 0; background: transparent;
+                   font-family: 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif; }}
             .qlc {{
-                font-family: 'Noto Sans CJK SC', 'Noto Sans SC', 'WenQuanYi Micro Hei', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
-                font-size: 16px; line-height: 1.65; color: #1f2937; font-weight: 400;
+                font-family: 'Noto Sans CJK SC', 'Noto Sans SC', 'WenQuanYi Micro Hei',
+                             'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+                font-size: 16px; line-height: 1.7; color: #1f2937; font-weight: 400;
                 -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+                padding: 6px 2px;
             }}
-            .qlc .ql-line {{ font-size: 16px; line-height: 1.65; font-weight: 400; }}
-            .qlc .ql-def {{ color: #1e3a8a; margin-bottom: 6px; }}
-            .qlc .ql-ety {{ color: #065f46; background: #ecfdf5; padding: 6px 10px; border-radius: 8px; margin: 6px 0; }}
-            .qlc .ql-ex {{ color: #374151; margin-top: 6px; }}
-            .qlc .ql-cn {{ color: #6b7280; margin-bottom: 8px; }}
+            .ql-line {{ font-size: 16px; line-height: 1.7; font-weight: 400; }}
+            .ql-def {{ color: #1e3a8a; margin-bottom: 6px; }}
+            .ql-ety {{ color: #065f46; background: #ecfdf5; padding: 6px 10px; border-radius: 8px; margin: 8px 0; }}
+            .ql-ex {{ color: #374151; margin-top: 6px; }}
+            .ql-cn {{ color: #6b7280; margin-bottom: 8px; }}
+            .ql-rank {{ margin-top: 12px; }}
+            .ql-rank span {{
+                display: inline-block; background: {rank_color}; color: white;
+                padding: 3px 10px; border-radius: 5px; font-size: 13px; font-weight: 600;
+            }}
             .cw {{
                 cursor: pointer; border-bottom: 1px dashed #93c5fd;
                 transition: all 0.15s ease; border-radius: 2px; padding: 0 1px;
-                text-decoration: none; color: inherit; background: none; border-top: none; border-left: none; border-right: none;
+                text-decoration: none; color: inherit; background: none;
+                border-top: none; border-left: none; border-right: none;
                 font: inherit;
             }}
             .cw:hover {{
                 background-color: #dbeafe; border-bottom-color: #3b82f6; color: #1d4ed8;
-                text-decoration: none;
             }}
         </style>
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 3px; border-radius: 12px; margin: 4px 0;">
-            <div style="background: white; padding: 25px; border-radius: 10px;">
-                <div class="qlc">
-                    {display_html}
-                </div>
-                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
-                    <span style="display: inline-block; background: {rank_color}; color: white; padding: 4px 12px; border-radius: 6px; font-size: 14px; font-weight: 600;">
-                        📊 Rank: {rank} ({rank_label})
-                    </span>
-                </div>
+        <div class="qlc">
+            {display_html}
+            <div class="ql-rank">
+                <span>📊 {rank} · {rank_label}</span>
             </div>
         </div>
         <script>
@@ -557,7 +542,7 @@ def render_quick_lookup() -> None:
         }});
         </script>
         """
-        components.html(card_html, height=350, scrolling=True)
+        components.html(card_html, height=320, scrolling=True)
 
     elif result and 'error' in result:
         st.error(f"❌ 查询失败：{result.get('error', '未知错误')}")
@@ -799,10 +784,8 @@ with tab_extract:
         word_blocks_html_parts = []
         for word, rank in data:
             safe_word = html.escape(word)
-            rank_display = f"#{rank}" if rank < 99999 else ""
-            rank_span = f'<span class="word-rank">{rank_display}</span>' if rank_display else ""
             word_blocks_html_parts.append(
-                f'<span class="word-block" data-word="{safe_word}">{safe_word}{rank_span}</span>'
+                f'<span class="word-block" data-word="{safe_word}">{safe_word}</span>'
             )
 
         word_blocks_inner = "".join(word_blocks_html_parts)
@@ -814,18 +797,18 @@ with tab_extract:
             .word-blocks-container {{
                 display: flex;
                 flex-wrap: wrap;
-                gap: 8px;
+                gap: 10px;
                 padding: 12px 0;
             }}
             .word-block {{
                 display: inline-flex;
                 align-items: center;
-                padding: 6px 14px;
+                padding: 8px 18px;
                 background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
                 border: 1px solid #bae6fd;
-                border-radius: 8px;
+                border-radius: 10px;
                 font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 14px;
+                font-size: 16px;
                 color: #0c4a6e;
                 cursor: pointer;
                 user-select: none;
@@ -836,13 +819,7 @@ with tab_extract:
                 background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
                 border-color: #93c5fd;
                 transform: translateY(-1px);
-                box-shadow: 0 2px 4px rgba(59, 130, 246, 0.15);
-            }}
-            .word-block .word-rank {{
-                font-size: 11px;
-                color: #64748b;
-                margin-left: 6px;
-                font-weight: 400;
+                box-shadow: 0 2px 6px rgba(59, 130, 246, 0.18);
             }}
         </style>
         <script>
@@ -863,8 +840,8 @@ with tab_extract:
         </script>
         """
         block_count = len(data)
-        estimated_rows = (block_count // 6) + 1
-        block_height = min(max(estimated_rows * 42, 100), 500)
+        estimated_rows = (block_count // 5) + 1
+        block_height = min(max(estimated_rows * 48, 120), 500)
         components.html(word_blocks_component, height=block_height, scrolling=True)
 
         words_only = [w for w, r in data]
