@@ -12,11 +12,6 @@ MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 QUICK_LOOKUP_COOLDOWN_SECONDS = 1.2
 QUICK_LOOKUP_CACHE_MAX = 100
 
-# API abuse protection – per-session rolling window limits.
-# Generous enough for real users, prevents runaway scripts.
-API_HOURLY_LIMIT = 200       # max API calls per rolling hour
-API_DAILY_LIMIT = 1000       # max API calls per rolling 24 h
-
 # Temp .apkg files: subdir under system temp, cleanup files older than this
 APKG_TEMP_SUBDIR = "vocabflow_apkg"
 APKG_CLEANUP_MAX_AGE_SECONDS = 24 * 3600  # 24 hours

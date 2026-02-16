@@ -20,42 +20,6 @@ except ImportError:
     logger.warning("OpenAI library not available")
 
 
-# ---------------------------------------------------------------------------
-# API abuse protection – rolling-window rate limiter (per Streamlit session)
-# ---------------------------------------------------------------------------
-
-def _init_rate_limiter() -> None:
-    """Ensure rate-limiter state exists in session."""
-    if "_api_call_timestamps" not in st.session_state:
-        st.session_state["_api_call_timestamps"] = []
-
-
-def _record_api_call() -> None:
-    """Record a single API call timestamp."""
-    _init_rate_limiter()
-    st.session_state["_api_call_timestamps"].append(time.time())
-
-
-def _check_rate_limit() -> Optional[str]:
-    """Return an error message if the rate limit is exceeded, else None."""
-    _init_rate_limiter()
-    now = time.time()
-    timestamps: list = st.session_state["_api_call_timestamps"]
-
-    # Prune entries older than 24 h to keep the list bounded
-    cutoff_daily = now - 86400
-    timestamps[:] = [t for t in timestamps if t > cutoff_daily]
-
-    hourly_count = sum(1 for t in timestamps if t > now - 3600)
-    daily_count = len(timestamps)
-
-    if hourly_count >= constants.API_HOURLY_LIMIT:
-        return f"已达到每小时 API 调用上限 ({constants.API_HOURLY_LIMIT} 次)，请稍后再试。"
-    if daily_count >= constants.API_DAILY_LIMIT:
-        return f"已达到每日 API 调用上限 ({constants.API_DAILY_LIMIT} 次)，请明天再试。"
-    return None
-
-
 class CardFormat(TypedDict, total=False):
     front: str        # "word" | "phrase"
     definition: str   # "cn" | "en" | "both"
@@ -212,10 +176,6 @@ def get_openai_client() -> Optional[Any]:
 
 def get_word_quick_definition(word: str) -> Dict[str, Any]:
     """Get ultra-concise word definition using AI, with rank info."""
-    rate_err = _check_rate_limit()
-    if rate_err:
-        return {"error": rate_err}
-
     word_lower = word.lower().strip()
     vocab_dict = get_vocab_dict()
     rank = vocab_dict.get(word_lower, 99999)
@@ -287,7 +247,6 @@ express
             temperature=0.3
         )
 
-        _record_api_call()
         content = response.choices[0].message.content
         return {"result": content, "rank": rank}
 
@@ -302,11 +261,6 @@ def process_ai_in_batches(
     card_format: Optional[CardFormat] = None
 ) -> Optional[str]:
     """Process words in batches using AI with progress reporting."""
-    rate_err = _check_rate_limit()
-    if rate_err:
-        st.error(f"⚠️ {rate_err}")
-        return None
-
     client = get_openai_client()
     if not client:
         return None
@@ -318,12 +272,6 @@ def process_ai_in_batches(
     system_prompt = "You are a helpful assistant for vocabulary learning."
 
     for i in range(0, total_words, constants.AI_BATCH_SIZE):
-        # Re-check rate limit before each batch
-        rate_err = _check_rate_limit()
-        if rate_err:
-            st.warning(f"⚠️ {rate_err} 已完成 {len(full_results)} 批。")
-            break
-
         batch = words_list[i:i + constants.AI_BATCH_SIZE]
         current_batch_str = ", ".join(batch)
 
@@ -339,7 +287,6 @@ def process_ai_in_batches(
                     ],
                     temperature=0.7
                 )
-                _record_api_call()
                 content = response.choices[0].message.content
                 full_results.append(content)
 

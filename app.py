@@ -203,33 +203,6 @@ st.markdown("""
         color: #64748b; font-size: 0.9rem; margin: 0;
     }
 
-    /* ===== Quick lookup card (inside main page CSS, not iframe) ===== */
-    .quick-lookup-card {
-        font-family: 'Noto Sans CJK SC', 'Noto Sans SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
-        font-size: 15.5px; line-height: 1.7; color: #1f2937; font-weight: 400;
-        -webkit-font-smoothing: antialiased;
-    }
-    .quick-lookup-line { font-size: 15.5px; line-height: 1.7; }
-    .quick-lookup-def { color: #1e3a8a; margin-bottom: 4px; }
-    .quick-lookup-ety {
-        color: #065f46; background: #ecfdf5;
-        padding: 6px 10px; border-radius: 8px; margin: 6px 0;
-    }
-    .quick-lookup-ex { color: #374151; margin-top: 4px; }
-    .quick-lookup-cn { color: #6b7280; margin-bottom: 6px; }
-
-    /* ===== Clickable words in lookup results ===== */
-    .clickable-word {
-        cursor: pointer; border-bottom: 1px dashed #93c5fd;
-        transition: all 0.15s ease; border-radius: 2px; padding: 0 1px;
-        text-decoration: none; color: inherit;
-    }
-    .clickable-word:hover {
-        background-color: #dbeafe; border-bottom-color: #3b82f6; color: #1d4ed8;
-        text-decoration: none;
-    }
-    .clickable-word:visited { color: inherit; }
-
     /* ===== Word blocks for filtered words ===== */
     .word-blocks-container {
         display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0;
@@ -392,19 +365,17 @@ st.markdown("""
 
 
 def _make_words_clickable(text: str) -> str:
-    """Wrap English words (3+ letters) with clickable <a> links.
+    """Wrap English words (3+ letters) with clickable spans.
 
-    Uses target="_top" so the navigation works even inside an iframe.
-    Keeps Chinese text, punctuation, and short words untouched.
+    Uses class ``cw`` and ``data-word`` attribute.  The parent
+    ``components.html`` block attaches JS click handlers that navigate
+    the *top-level* window via ``window.top.location``.
     """
     def _replace_word(m: re.Match) -> str:
         word = m.group(0)
         if len(word) >= 3 and word.isascii() and word.isalpha():
             escaped = html.escape(word)
-            return (
-                f'<a class="clickable-word" href="?lookup_word={escaped}" '
-                f'target="_top" title="查询 {escaped}">{escaped}</a>'
-            )
+            return f'<span class="cw" data-word="{escaped}">{escaped}</span>'
         return html.escape(word)
 
     return re.sub(r"[a-zA-Z]+", _replace_word, text)
@@ -503,16 +474,16 @@ def render_quick_lookup() -> None:
 
             if line.startswith("🌱"):
                 clickable = _make_words_clickable(line)
-                formatted_lines.append(f'<div class="quick-lookup-line quick-lookup-ety">{clickable}</div>')
+                formatted_lines.append(f'<div class="ql-line ql-ety">{clickable}</div>')
             elif "|" in line and len(line) < 50:
                 clickable = _make_words_clickable(line)
-                formatted_lines.append(f'<div class="quick-lookup-line quick-lookup-def">{clickable}</div>')
+                formatted_lines.append(f'<div class="ql-line ql-def">{clickable}</div>')
             elif line.startswith("•"):
                 clickable = _make_words_clickable(line)
-                formatted_lines.append(f'<div class="quick-lookup-line quick-lookup-ex">{clickable}</div>')
+                formatted_lines.append(f'<div class="ql-line ql-ex">{clickable}</div>')
             else:
                 safe_line = html.escape(line)
-                formatted_lines.append(f'<div class="quick-lookup-line quick-lookup-cn">{safe_line}</div>')
+                formatted_lines.append(f'<div class="ql-line ql-cn">{safe_line}</div>')
 
         display_html = "".join(formatted_lines).replace('\n', '<br>')
         rank = result.get('rank', 99999)
@@ -536,30 +507,30 @@ def render_quick_lookup() -> None:
         card_html = f"""
         <style>
             body {{ margin: 0; padding: 0; font-family: 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif; }}
-            .quick-lookup-card {{
+            .qlc {{
                 font-family: 'Noto Sans CJK SC', 'Noto Sans SC', 'WenQuanYi Micro Hei', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
                 font-size: 16px; line-height: 1.65; color: #1f2937; font-weight: 400;
                 -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
             }}
-            .quick-lookup-line {{ font-size: 16px; line-height: 1.65; font-weight: 400; }}
-            .quick-lookup-def {{ color: #1e3a8a; margin-bottom: 6px; }}
-            .quick-lookup-ety {{ color: #065f46; background: #ecfdf5; padding: 6px 10px; border-radius: 8px; margin: 6px 0; }}
-            .quick-lookup-ex {{ color: #374151; margin-top: 6px; }}
-            .quick-lookup-cn {{ color: #6b7280; margin-bottom: 8px; }}
-            .clickable-word {{
+            .qlc .ql-line {{ font-size: 16px; line-height: 1.65; font-weight: 400; }}
+            .qlc .ql-def {{ color: #1e3a8a; margin-bottom: 6px; }}
+            .qlc .ql-ety {{ color: #065f46; background: #ecfdf5; padding: 6px 10px; border-radius: 8px; margin: 6px 0; }}
+            .qlc .ql-ex {{ color: #374151; margin-top: 6px; }}
+            .qlc .ql-cn {{ color: #6b7280; margin-bottom: 8px; }}
+            .cw {{
                 cursor: pointer; border-bottom: 1px dashed #93c5fd;
                 transition: all 0.15s ease; border-radius: 2px; padding: 0 1px;
-                text-decoration: none; color: inherit;
+                text-decoration: none; color: inherit; background: none; border-top: none; border-left: none; border-right: none;
+                font: inherit;
             }}
-            .clickable-word:hover {{
+            .cw:hover {{
                 background-color: #dbeafe; border-bottom-color: #3b82f6; color: #1d4ed8;
                 text-decoration: none;
             }}
-            .clickable-word:visited {{ color: inherit; }}
         </style>
-        <div id="lookup-result-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 3px; border-radius: 12px; margin: 4px 0;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 3px; border-radius: 12px; margin: 4px 0;">
             <div style="background: white; padding: 25px; border-radius: 10px;">
-                <div class="quick-lookup-card">
+                <div class="qlc">
                     {display_html}
                 </div>
                 <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
@@ -569,8 +540,24 @@ def render_quick_lookup() -> None:
                 </div>
             </div>
         </div>
+        <script>
+        document.querySelectorAll('.cw').forEach(function(el) {{
+            el.addEventListener('click', function(e) {{
+                e.preventDefault();
+                var w = el.getAttribute('data-word');
+                if (!w) return;
+                var top = window.top || window.parent;
+                try {{
+                    var base = top.location.href.split('?')[0];
+                    top.location.href = base + '?lookup_word=' + encodeURIComponent(w);
+                }} catch(err) {{
+                    window.open('/?lookup_word=' + encodeURIComponent(w), '_top');
+                }}
+            }});
+        }});
+        </script>
         """
-        components.html(card_html, height=320, scrolling=True)
+        components.html(card_html, height=350, scrolling=True)
 
     elif result and 'error' in result:
         st.error(f"❌ 查询失败：{result.get('error', '未知错误')}")
@@ -815,8 +802,7 @@ with tab_extract:
             rank_display = f"#{rank}" if rank < 99999 else ""
             rank_span = f'<span class="word-rank">{rank_display}</span>' if rank_display else ""
             word_blocks_html_parts.append(
-                f'<a class="word-block" href="?lookup_word={safe_word}" target="_top"'
-                f' title="查询 {safe_word}">{safe_word}{rank_span}</a>'
+                f'<span class="word-block" data-word="{safe_word}">{safe_word}{rank_span}</span>'
             )
 
         word_blocks_inner = "".join(word_blocks_html_parts)
@@ -845,17 +831,13 @@ with tab_extract:
                 user-select: none;
                 transition: all 0.2s ease;
                 font-weight: 500;
-                text-decoration: none;
             }}
             .word-block:hover {{
                 background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
                 border-color: #93c5fd;
                 transform: translateY(-1px);
                 box-shadow: 0 2px 4px rgba(59, 130, 246, 0.15);
-                text-decoration: none;
-                color: #0c4a6e;
             }}
-            .word-block:visited {{ color: #0c4a6e; text-decoration: none; }}
             .word-block .word-rank {{
                 font-size: 11px;
                 color: #64748b;
@@ -863,6 +845,22 @@ with tab_extract:
                 font-weight: 400;
             }}
         </style>
+        <script>
+        document.querySelectorAll('.word-block').forEach(function(el) {{
+            el.addEventListener('click', function(e) {{
+                e.preventDefault();
+                var w = el.getAttribute('data-word');
+                if (!w) return;
+                var top = window.top || window.parent;
+                try {{
+                    var base = top.location.href.split('?')[0];
+                    top.location.href = base + '?lookup_word=' + encodeURIComponent(w);
+                }} catch(err) {{
+                    window.open('/?lookup_word=' + encodeURIComponent(w), '_top');
+                }}
+            }});
+        }});
+        </script>
         """
         block_count = len(data)
         estimated_rows = (block_count // 6) + 1
