@@ -512,8 +512,6 @@ def render_quick_lookup() -> None:
 if hasattr(st, "fragment"):
     render_quick_lookup = st.fragment(render_quick_lookup)
 
-render_quick_lookup()
-
 if not VOCAB_DICT:
     st.error("⚠️ 缺失 `coca_cleaned.csv` 或 `vocab.pkl` 文件，请检查目录。")
 
@@ -528,22 +526,28 @@ with st.expander("使用指南 & 支持格式", expanded=False):
     TXT · PDF · DOCX · EPUB · CSV · XLSX · XLS · DB · SQLite · Anki 导出 (.txt)
     """)
 
-tab_extract, tab_anki = st.tabs([
-    "单词提取",
-    "卡片制作"
+tab_lookup, tab_extract, tab_anki = st.tabs([
+    "1 快速查词（内置 deepseek）",
+    "2 生成重点单词",
+    "3 粘贴AI生成的卡片内容制卡（语音）",
 ])
+
+with tab_lookup:
+    render_quick_lookup()
 
 # ==========================================
 # Tab 1: Word Extraction
 # ==========================================
 with tab_extract:
-    mode_context, mode_direct, mode_rank = st.tabs([
-        "语境分析",
-        "直接输入",
-        "词频列表"
+    mode_paste, mode_url, mode_upload, mode_rank, mode_manual = st.tabs([
+        "2.1 粘贴文本",
+        "2.2 文章链接",
+        "2.3 上传文件",
+        "2.4 词库生成",
+        "2.5 粘贴整理词表（不筛 rank）",
     ])
 
-    with mode_context:
+    with mode_paste:
         col1, col2 = st.columns(2)
         current_rank = col1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100)
         target_rank = col2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
@@ -551,46 +555,20 @@ with tab_extract:
         if target_rank < current_rank:
             st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
 
-        st.markdown("#### 📥 导入内容")
-
-        input_url = st.text_input(
-            "🔗 输入文章 URL (自动抓取)",
-            placeholder="https://www.economist.com/...",
-            key="url_input_key"
-        )
-
-        uploaded_file = st.file_uploader(
-            "或直接上传文件",
-            type=['txt', 'pdf', 'docx', 'epub', 'csv', 'xlsx', 'xls', 'db', 'sqlite'],
-            key=st.session_state['uploader_id'],
-            label_visibility="collapsed"
-        )
-        if uploaded_file and is_upload_too_large(uploaded_file):
-            st.error(f"❌ 文件过大，已限制为 {constants.MAX_UPLOAD_MB}MB。请缩小文件后重试。")
-            uploaded_file = None
-
         pasted_text = st.text_area(
-            "或在此粘贴文本",
+            "粘贴文章文本",
             height=100,
-            key="paste_key",
+            key="paste_key_2_1",
             placeholder="支持直接粘贴文章内容..."
         )
 
-        if st.button("🚀 开始分析", type="primary"):
+        if st.button("🚀 从文本生成重点词", type="primary", key="btn_mode_2_1"):
             if target_rank < current_rank:
                 st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
             else:
                 with st.status("🔍 正在加载资源并分析文本...", expanded=True) as status:
                     start_time = time.time()
-                    raw_text = ""
-
-                    if input_url:
-                        status.write(f"🌐 正在抓取 URL: {input_url}...")
-                        raw_text = extract_text_from_url(input_url)
-                    elif uploaded_file:
-                        raw_text = extract_text_from_file(uploaded_file)
-                    else:
-                        raw_text = pasted_text
+                    raw_text = pasted_text
 
                     if len(raw_text) > 2:
                         status.write("🧠 正在进行 NLP 词形还原与分级...")
@@ -605,37 +583,91 @@ with tab_extract:
                     else:
                         status.update(label="⚠️ 内容为空或太短", state="error")
 
-    with mode_direct:
-        st.markdown("#### 📤 导入 Anki 牌组导出文件 (可选)")
-        st.caption("💡 提示：在 Anki 导出时，推荐选择 **'Notes in Plain Text'** (笔记纯文本)。但如果您选择了 **'Cards in Plain Text'**，系统也会尝试自动解析。")
+    with mode_url:
+        col1, col2 = st.columns(2)
+        current_rank_url = col1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100, key="min_rank_2_2")
+        target_rank_url = col2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500, key="max_rank_2_2")
 
-        anki_export_file = st.file_uploader(
-            "上传 Anki 导出的 .txt 文件",
-            type=['txt'],
-            key="anki_import_uploader"
+        if target_rank_url < current_rank_url:
+            st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
+
+        input_url = st.text_input(
+            "🔗 输入文章 URL（自动抓取）",
+            placeholder="https://www.economist.com/...",
+            key="url_input_key_2_2"
         )
-        if anki_export_file and is_upload_too_large(anki_export_file):
+
+        if st.button("🌐 从链接生成重点词", type="primary", key="btn_mode_2_2"):
+            if target_rank_url < current_rank_url:
+                st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
+            elif not input_url.strip():
+                st.warning("⚠️ 请输入有效链接。")
+            else:
+                with st.status("🌐 正在抓取并分析网页文本...", expanded=True) as status:
+                    start_time = time.time()
+                    status.write(f"正在抓取：{input_url}")
+                    raw_text = extract_text_from_url(input_url)
+                    if len(raw_text) > 2:
+                        final_data, raw_count, stats_info = analyze_logic(
+                            raw_text, current_rank_url, target_rank_url, False
+                        )
+                        set_generated_words_state(final_data, raw_count, stats_info)
+                        st.session_state['process_time'] = time.time() - start_time
+                        run_gc()
+                        status.update(label="✅ 生成完成", state="complete", expanded=False)
+                    else:
+                        status.update(label="⚠️ 抓取内容为空或过短", state="error")
+
+    with mode_upload:
+        col1, col2 = st.columns(2)
+        current_rank_upload = col1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100, key="min_rank_2_3")
+        target_rank_upload = col2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500, key="max_rank_2_3")
+
+        if target_rank_upload < current_rank_upload:
+            st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
+
+        uploaded_file = st.file_uploader(
+            "上传文件（TXT/PDF/DOCX/EPUB/CSV/Excel/DB）",
+            type=['txt', 'pdf', 'docx', 'epub', 'csv', 'xlsx', 'xls', 'db', 'sqlite'],
+            key="upload_2_3",
+        )
+        if uploaded_file and is_upload_too_large(uploaded_file):
             st.error(f"❌ 文件过大，已限制为 {constants.MAX_UPLOAD_MB}MB。请缩小文件后重试。")
-            anki_export_file = None
+            uploaded_file = None
 
-        prefilled_text = ""
-        if anki_export_file:
-            with st.spinner("正在智能解析 Anki 导出文件..."):
-                prefilled_text = parse_anki_txt_export(anki_export_file)
-                if prefilled_text:
-                    st.success(f"✅ 成功提取 {len(prefilled_text.splitlines())} 个单词")
+        if st.button("📁 从文件生成重点词", type="primary", key="btn_mode_2_3"):
+            if target_rank_upload < current_rank_upload:
+                st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
+            elif uploaded_file is None:
+                st.warning("⚠️ 请先上传文件。")
+            else:
+                with st.status("📄 正在解析文件并提取重点词...", expanded=True) as status:
+                    start_time = time.time()
+                    raw_text = extract_text_from_file(uploaded_file)
+                    if len(raw_text) > 2:
+                        final_data, raw_count, stats_info = analyze_logic(
+                            raw_text, current_rank_upload, target_rank_upload, False
+                        )
+                        set_generated_words_state(final_data, raw_count, stats_info)
+                        st.session_state['process_time'] = time.time() - start_time
+                        run_gc()
+                        status.update(label="✅ 生成完成", state="complete", expanded=False)
+                    else:
+                        status.update(label="⚠️ 文件内容为空或过短", state="error")
 
-        raw_input = st.text_area(
-            "✍️ 粘贴单词列表 (每行一个 或 逗号分隔)",
-            height=200,
-            value=prefilled_text,
-            placeholder="altruism\nhectic\nserendipity"
+    with mode_manual:
+        st.markdown("#### 直接粘贴整理好的词表（不做 rank 筛选）")
+        manual_words_text = st.text_area(
+            "✍️ 单词列表（每行一个或逗号分隔）",
+            height=220,
+            key="manual_words_2_5",
+            placeholder="altruism\nhectic\nserendipity",
         )
 
-        if st.button("🚀 生成列表", key="btn_direct", type="primary"):
+        if st.button("🧾 生成词表（不筛 rank）", key="btn_mode_2_5", type="primary"):
             with st.spinner("正在解析列表..."):
-                if raw_input.strip():
-                    words = [w.strip() for w in re.split(r'[,\n\t]+', raw_input) if w.strip()]
+                if manual_words_text.strip():
+                    words = [w.strip() for w in re.split(r'[,\n\t]+', manual_words_text) if w.strip()]
                     unique_words = []
                     seen = set()
 
@@ -643,25 +675,16 @@ with tab_extract:
                         w_lower = word.lower().strip()
                         if not w_lower or w_lower in seen:
                             continue
-                        # Skip non-alphabetic tokens
-                        if not re.match(r'^[a-zA-Z]+(?:[-\' ][a-zA-Z]+)*$', w_lower):
-                            continue
-                        # Skip single characters and very short stop words
-                        if len(w_lower) <= 1:
-                            continue
-                        # Skip common stop words / function words
-                        if w_lower in _DIRECT_INPUT_STOPWORDS:
-                            continue
                         seen.add(w_lower)
                         unique_words.append(word)
 
                     raw_count = len(words)
                     data_list = [(w, VOCAB_DICT.get(w.lower(), 99999)) for w in unique_words]
                     set_generated_words_state(data_list, raw_count, None)
-                    filtered = raw_count - len(unique_words)
-                    msg = f"✅ 已加载 {len(unique_words)} 个单词"
-                    if filtered > 0:
-                        msg += f"（已过滤 {filtered} 个无关词）"
+                    duplicated = raw_count - len(unique_words)
+                    msg = f"✅ 已加载 {len(unique_words)} 个单词（不筛 rank）"
+                    if duplicated > 0:
+                        msg += f"（去重 {duplicated} 个）"
                     st.toast(msg, icon="🎉")
                 else:
                     st.warning("⚠️ 内容为空。")
