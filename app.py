@@ -183,10 +183,13 @@ st.markdown("""
     .clickable-word {
         cursor: pointer; border-bottom: 1px dashed #93c5fd;
         transition: all 0.15s ease; border-radius: 2px; padding: 0 1px;
+        text-decoration: none; color: inherit;
     }
     .clickable-word:hover {
         background-color: #dbeafe; border-bottom-color: #3b82f6; color: #1d4ed8;
+        text-decoration: none;
     }
+    .clickable-word:visited { color: inherit; }
 
     /* ===== Word blocks for filtered words ===== */
     .word-blocks-container {
@@ -350,15 +353,19 @@ st.markdown("""
 
 
 def _make_words_clickable(text: str) -> str:
-    """Wrap English words (2+ letters) in a line with clickable spans.
+    """Wrap English words (3+ letters) with clickable <a> links.
 
+    Uses target="_top" so the navigation works even inside an iframe.
     Keeps Chinese text, punctuation, and short words untouched.
     """
     def _replace_word(m: re.Match) -> str:
         word = m.group(0)
         if len(word) >= 3 and word.isascii() and word.isalpha():
             escaped = html.escape(word)
-            return f'<span class="clickable-word" data-word="{escaped}">{escaped}</span>'
+            return (
+                f'<a class="clickable-word" href="?lookup_word={escaped}" '
+                f'target="_top" title="查询 {escaped}">{escaped}</a>'
+            )
         return html.escape(word)
 
     return re.sub(r"[a-zA-Z]+", _replace_word, text)
@@ -503,10 +510,13 @@ def render_quick_lookup() -> None:
             .clickable-word {{
                 cursor: pointer; border-bottom: 1px dashed #93c5fd;
                 transition: all 0.15s ease; border-radius: 2px; padding: 0 1px;
+                text-decoration: none; color: inherit;
             }}
             .clickable-word:hover {{
                 background-color: #dbeafe; border-bottom-color: #3b82f6; color: #1d4ed8;
+                text-decoration: none;
             }}
+            .clickable-word:visited {{ color: inherit; }}
         </style>
         <div id="lookup-result-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 3px; border-radius: 12px; margin: 4px 0;">
             <div style="background: white; padding: 25px; border-radius: 10px;">
@@ -520,22 +530,6 @@ def render_quick_lookup() -> None:
                 </div>
             </div>
         </div>
-        <script>
-        (function() {{
-            const card = document.getElementById('lookup-result-card');
-            if (!card) return;
-            card.querySelectorAll('.clickable-word').forEach(function(el) {{
-                el.addEventListener('click', function() {{
-                    const word = el.getAttribute('data-word');
-                    if (word) {{
-                        const url = new URL(window.parent.location.href);
-                        url.searchParams.set('lookup_word', word);
-                        window.parent.location.href = url.toString();
-                    }}
-                }});
-            }});
-        }})();
-        </script>
         """
         components.html(card_html, height=320, scrolling=True)
 
@@ -758,7 +752,7 @@ with tab_extract:
 
         # Word blocks view: styled blocks with double-click to query
         st.markdown("#### 🏷️ 词汇一览")
-        st.caption("💡 双击单词方块可快速查询释义")
+        st.caption("💡 点击单词方块可快速查询释义")
 
         word_blocks_html_parts = []
         for word, rank in data:
@@ -766,7 +760,8 @@ with tab_extract:
             rank_display = f"#{rank}" if rank < 99999 else ""
             rank_span = f'<span class="word-rank">{rank_display}</span>' if rank_display else ""
             word_blocks_html_parts.append(
-                f'<span class="word-block" data-word="{safe_word}">{safe_word}{rank_span}</span>'
+                f'<a class="word-block" href="?lookup_word={safe_word}" target="_top"'
+                f' title="查询 {safe_word}">{safe_word}{rank_span}</a>'
             )
 
         word_blocks_inner = "".join(word_blocks_html_parts)
@@ -782,7 +777,8 @@ with tab_extract:
                 padding: 12px 0;
             }}
             .word-block {{
-                display: inline-block;
+                display: inline-flex;
+                align-items: center;
                 padding: 6px 14px;
                 background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
                 border: 1px solid #bae6fd;
@@ -794,13 +790,17 @@ with tab_extract:
                 user-select: none;
                 transition: all 0.2s ease;
                 font-weight: 500;
+                text-decoration: none;
             }}
             .word-block:hover {{
                 background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
                 border-color: #93c5fd;
                 transform: translateY(-1px);
                 box-shadow: 0 2px 4px rgba(59, 130, 246, 0.15);
+                text-decoration: none;
+                color: #0c4a6e;
             }}
+            .word-block:visited {{ color: #0c4a6e; text-decoration: none; }}
             .word-block .word-rank {{
                 font-size: 11px;
                 color: #64748b;
@@ -808,23 +808,6 @@ with tab_extract:
                 font-weight: 400;
             }}
         </style>
-        <script>
-        (function() {{
-            const container = document.getElementById('word-blocks-area');
-            if (!container) return;
-            container.querySelectorAll('.word-block').forEach(function(el) {{
-                el.addEventListener('dblclick', function(e) {{
-                    e.preventDefault();
-                    const word = el.getAttribute('data-word');
-                    if (word) {{
-                        const url = new URL(window.parent.location.href);
-                        url.searchParams.set('lookup_word', word);
-                        window.parent.location.href = url.toString();
-                    }}
-                }});
-            }});
-        }})();
-        </script>
         """
         block_count = len(data)
         estimated_rows = (block_count // 6) + 1
