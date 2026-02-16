@@ -620,7 +620,9 @@ def render_quick_lookup() -> None:
                 st.rerun()
 
     elif result and 'error' in result:
+        # Show lookup errors once to avoid repeating red banners on every rerun.
         st.error(f"❌ 查询失败：{result.get('error', '未知错误')}")
+        st.session_state["quick_lookup_last_result"] = None
 
     st.markdown("---")
 
