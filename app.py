@@ -8,10 +8,10 @@ import logging
 import os
 import re
 import time
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 import constants
 import resources
@@ -201,11 +201,6 @@ st.markdown("""
     }
     .app-hero p {
         color: #64748b; font-size: 0.9rem; margin: 0;
-    }
-
-    /* ===== Seamless iframes for components.html ===== */
-    iframe[title="streamlit_components.v1.components.html"] {
-        border: none !important;
     }
 
     /* ===== Radio buttons: chip style ===== */
@@ -747,17 +742,16 @@ with tab_extract:
         st.caption("💡 点击单词方块可快速查询释义")
 
         word_blocks_html_parts = []
-        for word, rank in data:
+        for word, _ in data:
             safe_word = html.escape(word)
+            safe_href = quote(word.strip())
             word_blocks_html_parts.append(
-                f'<span class="word-block" data-word="{safe_word}">{safe_word}</span>'
+                f'<a class="word-block-link" href="?lookup_word={safe_href}" '
+                f'title="查询 {safe_word}">{safe_word}</a>'
             )
 
         word_blocks_inner = "".join(word_blocks_html_parts)
-        word_blocks_component = f"""
-        <div class="word-blocks-container" id="word-blocks-area">
-            {word_blocks_inner}
-        </div>
+        word_blocks_html = f"""
         <style>
             .word-blocks-container {{
                 display: flex;
@@ -765,7 +759,7 @@ with tab_extract:
                 gap: 10px;
                 padding: 12px 0;
             }}
-            .word-block {{
+            .word-block-link {{
                 display: inline-flex;
                 align-items: center;
                 padding: 8px 18px;
@@ -779,35 +773,25 @@ with tab_extract:
                 user-select: none;
                 transition: all 0.2s ease;
                 font-weight: 500;
+                text-decoration: none;
             }}
-            .word-block:hover {{
+            .word-block-link:hover {{
                 background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
                 border-color: #93c5fd;
                 transform: translateY(-1px);
                 box-shadow: 0 2px 6px rgba(59, 130, 246, 0.18);
+                text-decoration: none;
+                color: #0c4a6e;
+            }}
+            .word-block-link:visited {{
+                color: #0c4a6e;
             }}
         </style>
-        <script>
-        document.querySelectorAll('.word-block').forEach(function(el) {{
-            el.addEventListener('click', function(e) {{
-                e.preventDefault();
-                var w = el.getAttribute('data-word');
-                if (!w) return;
-                var top = window.top || window.parent;
-                try {{
-                    var base = top.location.href.split('?')[0];
-                    top.location.href = base + '?lookup_word=' + encodeURIComponent(w);
-                }} catch(err) {{
-                    window.open('/?lookup_word=' + encodeURIComponent(w), '_top');
-                }}
-            }});
-        }});
-        </script>
+        <div class="word-blocks-container">
+            {word_blocks_inner}
+        </div>
         """
-        block_count = len(data)
-        estimated_rows = (block_count // 5) + 1
-        block_height = min(max(estimated_rows * 48, 120), 500)
-        components.html(word_blocks_component, height=block_height, scrolling=True)
+        st.markdown(word_blocks_html, unsafe_allow_html=True)
 
         words_only = [w for w, r in data]
         words_text = "\n".join(words_only)
