@@ -108,6 +108,17 @@ st.markdown("""
     .stApp {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
                      'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-size-adjust: 100%;
+        -webkit-text-size-adjust: 100%;
+    }
+
+    /* iOS safe-area support */
+    .main .block-container {
+        padding-left: max(1rem, env(safe-area-inset-left));
+        padding-right: max(1rem, env(safe-area-inset-right));
+        padding-bottom: max(1rem, env(safe-area-inset-bottom));
     }
 
     /* ===== Smooth transitions on all interactive elements ===== */
@@ -120,6 +131,7 @@ st.markdown("""
         border-radius: 10px; font-weight: 600; width: 100%; margin-top: 4px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         letter-spacing: 0.01em;
+        min-height: 44px;
     }
     .stButton>button:hover {
         transform: translateY(-1px);
@@ -130,7 +142,8 @@ st.markdown("""
     /* ===== Text areas ===== */
     .stTextArea textarea {
         font-family: 'Consolas', 'SF Mono', 'Monaco', monospace;
-        font-size: 14px; border-radius: 10px;
+        font-size: 16px; border-radius: 10px;
+        -webkit-overflow-scrolling: touch;
     }
 
     /* ===== Form cards ===== */
@@ -215,6 +228,10 @@ st.markdown("""
 
     /* ===== Number inputs ===== */
     .stNumberInput input { border-radius: 10px; }
+    .stTextInput input, .stSelectbox input, .stNumberInput input {
+        min-height: 42px;
+        font-size: 16px;
+    }
 
     /* ===== Toast / info / warning boxes ===== */
     .stAlert { border-radius: 10px; }
@@ -223,6 +240,105 @@ st.markdown("""
     .stDownloadButton > button {
         border-radius: 10px; font-weight: 600;
         box-shadow: 0 2px 8px rgba(59,130,246,0.15);
+        min-height: 44px;
+    }
+
+    /* ===== Dark mode refinement ===== */
+    @media (prefers-color-scheme: dark) {
+        .stApp { background: #0b1220; color: #e5e7eb; }
+        .stForm {
+            background: #111827;
+            border-color: #1f2937;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+        }
+        [data-testid="stMetric"] {
+            background: linear-gradient(135deg, #0f172a 0%, #111827 100%);
+            border-color: #1f2937;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            background: #0f172a;
+            border-color: #1f2937;
+        }
+        .stTabs [data-baseweb="tab"] {
+            color: #cbd5e1;
+        }
+        .stTabs [data-baseweb="tab"][aria-selected="true"] {
+            background: #111827;
+            color: #e5e7eb;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+        }
+        .stExpander {
+            border-color: #1f2937;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.35);
+        }
+        .stAlert {
+            background: #0f172a;
+            border-color: #1f2937;
+            color: #e5e7eb;
+        }
+        hr { background: #1f2937; }
+        .app-footer {
+            color: #94a3b8;
+            border-top-color: #1f2937;
+        }
+        .app-hero p { color: #94a3b8; }
+        .stRadio > div > label {
+            border-color: #334155;
+            color: #e5e7eb;
+            background: #0f172a;
+        }
+        .stRadio > div > label:hover {
+            border-color: #3b82f6;
+            background: #172554;
+        }
+    }
+
+    /* ===== Mobile (iOS/Android) ===== */
+    @media (max-width: 768px) {
+        .main .block-container {
+            padding-top: 0.8rem;
+            padding-left: max(0.75rem, env(safe-area-inset-left));
+            padding-right: max(0.75rem, env(safe-area-inset-right));
+            padding-bottom: max(1rem, env(safe-area-inset-bottom));
+        }
+        .app-hero {
+            padding: 0.9rem 0 0.2rem;
+        }
+        .app-hero h1 {
+            font-size: 1.35rem;
+        }
+        .app-hero p {
+            font-size: 0.82rem;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            overflow-x: auto;
+            white-space: nowrap;
+            scrollbar-width: none;
+        }
+        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
+            display: none;
+        }
+        .stTabs [data-baseweb="tab"] {
+            padding: 0.5rem 0.7rem;
+            font-size: 0.82rem;
+            min-height: 40px;
+        }
+        .stButton>button,
+        .stDownloadButton > button {
+            min-height: 46px;
+            border-radius: 12px;
+        }
+        /* Avoid hover lift on touch devices */
+        .stButton>button:hover {
+            transform: none;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .stTextArea textarea {
+            font-size: 16px !important;
+        }
+        .stCaption {
+            font-size: 0.78rem;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
