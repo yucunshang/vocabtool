@@ -795,31 +795,19 @@ with tab_extract:
 
             if st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", use_container_width=True):
                 progress_title = st.empty()
-                stage_text = st.empty()
-                overall_bar = st.progress(0.0)
-                ai_bar = st.progress(0.0)
-                ai_text = st.empty()
-                pkg_bar = st.progress(0.0)
-                pkg_text = st.empty()
-
-                def render_stages(ai_status: str, parse_status: str, pkg_status: str) -> None:
-                    stage_text.markdown(
-                        f"**流程进度**  \n"
-                        f"1) AI 批量生成：{ai_status}  \n"
-                        f"2) 结果解析：{parse_status}  \n"
-                        f"3) 打包/语音：{pkg_status}"
-                    )
+                card_text = st.empty()
+                card_bar = st.progress(0.0)
+                audio_text = st.empty()
+                audio_bar = st.progress(0.0)
 
                 progress_title.markdown("#### ⏳ 内置 AI 制卡进度")
-                render_stages("进行中", "等待中", "等待中")
-                ai_text.text("AI 生成：准备中...")
-                pkg_text.text("打包/语音：等待中...")
+                card_text.markdown("**制卡进度**：AI 生成中...")
+                audio_text.markdown("**音频进度**：等待制卡完成...")
 
                 def update_ai_progress(current: int, total: int) -> None:
                     ratio = current / total if total > 0 else 0.0
-                    ai_bar.progress(ratio)
-                    overall_bar.progress(min(0.70, ratio * 0.70))
-                    ai_text.text(f"AI 生成：已处理 {current}/{total}")
+                    card_bar.progress(min(0.9, ratio * 0.9))
+                    card_text.markdown(f"**制卡进度**：AI 生成中（{current}/{total}）")
 
                 ai_result = process_ai_in_batches(
                     words_for_auto_ai,
@@ -827,24 +815,20 @@ with tab_extract:
                 )
 
                 if ai_result:
-                    ai_bar.progress(1.0)
-                    overall_bar.progress(0.75)
-                    render_stages("完成", "进行中", "等待中")
-                    ai_text.text("AI 生成：完成")
-                    pkg_text.text("打包/语音：等待中...")
+                    card_text.markdown("**制卡进度**：正在解析 AI 结果...")
                     parsed_data = parse_anki_data(ai_result)
 
                     if parsed_data:
                         try:
-                            overall_bar.progress(0.80)
-                            render_stages("完成", "完成", "进行中")
-                            pkg_text.text("打包/语音：正在生成 Anki 包...")
+                            card_bar.progress(1.0)
+                            card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
+                            audio_text.markdown("**音频进度**：进行中...")
+                            audio_bar.progress(0.0)
                             deck_name = f"Vocab_{get_beijing_time_str()}"
 
                             def update_pkg_progress(ratio: float, text: str) -> None:
-                                pkg_bar.progress(ratio)
-                                overall_bar.progress(min(1.0, 0.80 + ratio * 0.20))
-                                pkg_text.text(f"打包/语音：{text}")
+                                audio_bar.progress(ratio)
+                                audio_text.markdown(f"**音频进度**：{text}")
 
                             file_path = generate_anki_package(
                                 parsed_data,
@@ -856,21 +840,21 @@ with tab_extract:
 
                             set_anki_pkg(file_path, deck_name)
 
-                            pkg_bar.progress(1.0)
-                            overall_bar.progress(1.0)
-                            render_stages("完成", "完成", "完成")
-                            pkg_text.markdown(f"✅ **处理完成！共生成 {len(parsed_data)} 张卡片**")
+                            audio_bar.progress(1.0)
+                            audio_text.markdown("**音频进度**：✅ 完成")
                             st.balloons()
                             run_gc()
                         except Exception as e:
-                            render_stages("完成", "完成", "失败")
+                            audio_text.markdown("**音频进度**：❌ 失败")
                             from errors import ErrorHandler
                             ErrorHandler.handle(e, "生成出错")
                     else:
-                        render_stages("完成", "失败", "未开始")
+                        card_text.markdown("**制卡进度**：❌ 解析失败")
+                        audio_text.markdown("**音频进度**：未开始")
                         st.error("解析失败，AI 返回内容为空或格式错误。")
                 else:
-                    render_stages("失败", "未开始", "未开始")
+                    card_text.markdown("**制卡进度**：❌ AI 生成失败")
+                    audio_text.markdown("**音频进度**：未开始")
                     st.error("AI 生成失败，请检查 API Key 或网络连接。")
 
             render_anki_download_button(
