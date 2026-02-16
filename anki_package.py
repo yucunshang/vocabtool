@@ -74,7 +74,7 @@ def generate_anki_package(
         border-radius: 4px;
         color: #444;
         font-style: italic;
-        font-size: 16px;
+        font-size: 18px;
         line-height: 1.5;
         text-align: left;
         margin-bottom: 15px;
