@@ -6,6 +6,7 @@ resources, extraction, vocab, ai, anki_parse, tts, anki_package, state.
 import html
 import logging
 import os
+import random
 import re
 import time
 
@@ -81,7 +82,7 @@ logger = logging.getLogger(__name__)
 # Page Configuration
 # ==========================================
 st.set_page_config(
-    page_title="Vocab Flow Ultra",
+    page_title="马到成功 · 新春词汇助手",
     page_icon="⚡️",
     layout="centered",
     initial_sidebar_state="collapsed"
@@ -208,13 +209,24 @@ st.markdown("""
         text-align: center; padding: 1.5rem 0 0.5rem;
     }
     .app-hero h1 {
-        font-size: 1.75rem; font-weight: 800; letter-spacing: -0.03em;
-        background: linear-gradient(135deg, #6366f1 0%, #3b82f6 50%, #06b6d4 100%);
+        font-size: 2.45rem; font-weight: 900; letter-spacing: -0.03em;
+        background: linear-gradient(135deg, #b91c1c 0%, #dc2626 45%, #f59e0b 100%);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        background-clip: text; margin-bottom: 0.25rem;
+        background-clip: text; margin-bottom: 0.2rem;
+        text-shadow: 0 1px 2px rgba(185,28,28,0.15);
     }
     .app-hero p {
-        color: #64748b; font-size: 0.9rem; margin: 0;
+        color: #9a3412; font-size: 1.02rem; margin: 0;
+        font-weight: 600;
+    }
+    .festive-fire-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid #f59e0b; color: #7c2d12;
+        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+        border-radius: 999px; padding: 0.42rem 0.95rem;
+        font-weight: 700; font-size: 0.92rem;
+        box-shadow: 0 2px 8px rgba(245,158,11,0.2);
+        margin-top: 0.6rem;
     }
 
     /* ===== Radio buttons: chip style ===== */
@@ -310,7 +322,7 @@ st.markdown("""
             padding: 0.9rem 0 0.2rem;
         }
         .app-hero h1 {
-            font-size: 1.5rem;
+            font-size: 1.95rem;
         }
         .app-hero p {
             font-size: 0.92rem;
@@ -478,10 +490,61 @@ def _analyze_and_set_words(raw_text: str, min_rank: int, max_rank: int) -> bool:
 
 st.markdown("""
 <div class="app-hero">
-    <h1>Vocab Flow Ultra</h1>
-    <p>文本 → 词表 → Anki 牌组，一步到位 · AI 释义 · 词源拆解 · 并发语音</p>
+    <h1>🐎 马到成功 · 新春词汇助手</h1>
+    <p>新年进步，词汇升级 · 查词、筛词、制卡一体化</p>
 </div>
 """, unsafe_allow_html=True)
+
+
+def _render_fireworks_overlay() -> None:
+    """Render a fullscreen festive fireworks overlay."""
+    colors = ["#f43f5e", "#f97316", "#f59e0b", "#22c55e", "#06b6d4", "#a855f7", "#ef4444", "#eab308"]
+    particles = []
+    for _ in range(64):
+        left = random.randint(2, 98)
+        top = random.randint(8, 88)
+        size = random.randint(4, 10)
+        delay = random.uniform(0, 0.9)
+        duration = random.uniform(1.2, 2.2)
+        color = random.choice(colors)
+        particles.append(
+            f'<span class="fw-particle" style="left:{left}vw;top:{top}vh;'
+            f'width:{size}px;height:{size}px;background:{color};'
+            f'animation-delay:{delay:.2f}s;animation-duration:{duration:.2f}s;"></span>'
+        )
+
+    st.markdown(
+        f"""
+        <style>
+            .fw-overlay {{
+                position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+                overflow: hidden;
+            }}
+            .fw-particle {{
+                position: fixed; border-radius: 999px; opacity: 0;
+                box-shadow: 0 0 12px currentColor, 0 0 24px rgba(255,255,255,0.28);
+                animation-name: fw-burst;
+                animation-timing-function: ease-out;
+            }}
+            @keyframes fw-burst {{
+                0%   {{ transform: translate(0, 0) scale(0.25); opacity: 0; }}
+                16%  {{ opacity: 1; }}
+                100% {{ transform: translate(calc((50 - (var(--x, 25))) * 1px), -110px) scale(1.8); opacity: 0; }}
+            }}
+        </style>
+        <div class="fw-overlay">
+            {''.join(particles)}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+col_fire_l, col_fire_c, col_fire_r = st.columns([3, 2, 3])
+with col_fire_c:
+    if st.button("🎆 全局放烟花", key="btn_global_fireworks", use_container_width=True):
+        _render_fireworks_overlay()
+        st.toast("新春快乐，马到成功！", icon="🐎")
 
 
 def _do_lookup(query_word: str) -> None:
