@@ -449,6 +449,28 @@ def render_card_format_selector(key_prefix: str) -> CardFormat:
     )
 
 
+def _rank_badge_style(rank: int) -> tuple[str, str]:
+    """Map numeric rank to badge color and label."""
+    if rank <= 5000:
+        return "#10b981", "高频词"
+    if rank <= 10000:
+        return "#3b82f6", "常用词"
+    if rank <= 20000:
+        return "#f59e0b", "进阶词"
+    if rank < 99999:
+        return "#ef4444", "专业词"
+    return "#6b7280", "未收录"
+
+
+def _analyze_and_set_words(raw_text: str, min_rank: int, max_rank: int) -> bool:
+    """Run rank-based analysis and update session state. Returns success."""
+    if len(raw_text) <= 2:
+        return False
+    final_data, raw_count, stats_info = analyze_logic(raw_text, min_rank, max_rank, False)
+    set_generated_words_state(final_data, raw_count, stats_info)
+    return True
+
+
 st.markdown("""
 <div class="app-hero">
     <h1>Vocab Flow Ultra</h1>
@@ -549,26 +571,13 @@ def render_quick_lookup() -> None:
         raw_content = result['result']
         rank = result.get('rank', 99999)
 
-        if rank <= 5000:
-            rank_color = "#10b981"
-            rank_label = "高频词"
-        elif rank <= 10000:
-            rank_color = "#3b82f6"
-            rank_label = "常用词"
-        elif rank <= 20000:
-            rank_color = "#f59e0b"
-            rank_label = "进阶词"
-        elif rank < 99999:
-            rank_color = "#ef4444"
-            rank_label = "专业词"
-        else:
-            rank_color = "#6b7280"
-            rank_label = "未收录"
+        rank_color, rank_label = _rank_badge_style(rank)
 
         # Build styled HTML lines (no iframe needed)
         lines = raw_content.split('\n')
         formatted_lines = []
         clickable_words: list[str] = []
+        clickable_words_seen: set[str] = set()
 
         current_query = st.session_state.get("quick_lookup_last_query", "").lower().strip()
 
@@ -583,7 +592,8 @@ def render_quick_lookup() -> None:
                 wl = w.lower()
                 if wl == current_query:
                     continue
-                if wl not in _DIRECT_INPUT_STOPWORDS and wl not in clickable_words:
+                if wl not in _DIRECT_INPUT_STOPWORDS and wl not in clickable_words_seen:
+                    clickable_words_seen.add(wl)
                     clickable_words.append(wl)
 
             if line.startswith("🌱"):
@@ -688,13 +698,8 @@ with tab_extract:
                     start_time = time.time()
                     raw_text = pasted_text
 
-                    if len(raw_text) > 2:
-                        status.write("🧠 正在进行 NLP 词形还原与分级...")
-                        final_data, raw_count, stats_info = analyze_logic(
-                            raw_text, current_rank, target_rank, False
-                        )
-
-                        set_generated_words_state(final_data, raw_count, stats_info)
+                    status.write("🧠 正在进行 NLP 词形还原与分级...")
+                    if _analyze_and_set_words(raw_text, current_rank, target_rank):
                         st.session_state['process_time'] = time.time() - start_time
                         run_gc()
                         status.update(label="✅ 分析完成", state="complete", expanded=False)
@@ -725,11 +730,7 @@ with tab_extract:
                     start_time = time.time()
                     status.write(f"正在抓取：{input_url}")
                     raw_text = extract_text_from_url(input_url)
-                    if len(raw_text) > 2:
-                        final_data, raw_count, stats_info = analyze_logic(
-                            raw_text, current_rank_url, target_rank_url, False
-                        )
-                        set_generated_words_state(final_data, raw_count, stats_info)
+                    if _analyze_and_set_words(raw_text, current_rank_url, target_rank_url):
                         st.session_state['process_time'] = time.time() - start_time
                         run_gc()
                         status.update(label="✅ 生成完成", state="complete", expanded=False)
@@ -762,11 +763,7 @@ with tab_extract:
                 with st.status("📄 正在解析文件并提取重点词...", expanded=True) as status:
                     start_time = time.time()
                     raw_text = extract_text_from_file(uploaded_file)
-                    if len(raw_text) > 2:
-                        final_data, raw_count, stats_info = analyze_logic(
-                            raw_text, current_rank_upload, target_rank_upload, False
-                        )
-                        set_generated_words_state(final_data, raw_count, stats_info)
+                    if _analyze_and_set_words(raw_text, current_rank_upload, target_rank_upload):
                         st.session_state['process_time'] = time.time() - start_time
                         run_gc()
                         status.update(label="✅ 生成完成", state="complete", expanded=False)

@@ -287,13 +287,16 @@ def process_ai_in_batches(
     card_format: Optional[CardFormat] = None
 ) -> Optional[str]:
     """Process words in batches using AI with progress reporting."""
+    if not words_list:
+        return ""
+
     client = get_openai_client()
     if not client:
         return None
 
     model_name = get_config()["openai_model"]
     total_words = len(words_list)
-    full_results = []
+    full_results: List[str] = []
 
     system_prompt = "You are a helpful assistant for vocabulary learning."
 
@@ -313,7 +316,9 @@ def process_ai_in_batches(
                     ],
                     temperature=0.7
                 )
-                content = response.choices[0].message.content
+                content = (response.choices[0].message.content or "").strip()
+                if not content:
+                    raise ValueError("Empty AI batch response")
                 full_results.append(content)
 
                 if progress_callback:
