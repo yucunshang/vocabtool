@@ -496,146 +496,192 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def _render_fireworks_overlay() -> None:
-    """Render a true fullscreen fireworks animation with canvas."""
+def _mount_fireworks_launcher() -> None:
+    """Mount a client-side launcher button for fullscreen fireworks."""
     components_html(
         """
         <script>
         (function () {
             const hostDoc = (window.parent && window.parent.document) ? window.parent.document : document;
-            const old = hostDoc.getElementById("ny-fireworks-overlay");
-            if (old) old.remove();
-
-            const overlay = hostDoc.createElement("div");
-            overlay.id = "ny-fireworks-overlay";
-            overlay.style.position = "fixed";
-            overlay.style.inset = "0";
-            overlay.style.pointerEvents = "none";
-            overlay.style.zIndex = "2147483647";
-            overlay.style.background = "transparent";
-
-            const canvas = hostDoc.createElement("canvas");
-            canvas.style.width = "100%";
-            canvas.style.height = "100%";
-            overlay.appendChild(canvas);
-            hostDoc.body.appendChild(overlay);
-
-            const ctx = canvas.getContext("2d");
-            let width = 0;
-            let height = 0;
-
-            function resize() {
-                width = hostDoc.documentElement.clientWidth || window.innerWidth || 1280;
-                height = hostDoc.documentElement.clientHeight || window.innerHeight || 720;
-                const dpr = Math.max(1, window.devicePixelRatio || 1);
-                canvas.width = Math.floor(width * dpr);
-                canvas.height = Math.floor(height * dpr);
-                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            }
-            resize();
-            window.addEventListener("resize", resize);
-
-            const colors = ["#ff4d4f", "#ff7a45", "#ffa940", "#fadb14", "#73d13d", "#36cfc9", "#597ef7", "#b37feb"];
-            const sparks = [];
-            const rockets = [];
-            const gravity = 0.05;
-
-            function random(min, max) {
-                return Math.random() * (max - min) + min;
+            if (!hostDoc.getElementById("ny-fireworks-launcher-style")) {
+                const style = hostDoc.createElement("style");
+                style.id = "ny-fireworks-launcher-style";
+                style.textContent = `
+                    #ny-fireworks-launcher {
+                        position: fixed;
+                        right: 18px;
+                        bottom: 18px;
+                        z-index: 2147483000;
+                        border: 1px solid #f59e0b;
+                        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+                        color: #7c2d12;
+                        border-radius: 999px;
+                        padding: 10px 14px;
+                        font-size: 14px;
+                        font-weight: 700;
+                        line-height: 1;
+                        cursor: pointer;
+                        box-shadow: 0 6px 16px rgba(245, 158, 11, 0.28);
+                    }
+                    #ny-fireworks-launcher:hover {
+                        transform: translateY(-1px);
+                        box-shadow: 0 8px 20px rgba(245, 158, 11, 0.34);
+                    }
+                `;
+                hostDoc.head.appendChild(style);
             }
 
-            function launchRocket() {
-                rockets.push({
-                    x: random(width * 0.1, width * 0.9),
-                    y: height + 10,
-                    vx: random(-0.6, 0.6),
-                    vy: random(-12.5, -9.5),
-                    color: colors[Math.floor(Math.random() * colors.length)],
-                    life: random(38, 58)
-                });
+            if (!hostDoc.getElementById("ny-fireworks-launcher")) {
+                const btn = hostDoc.createElement("button");
+                btn.id = "ny-fireworks-launcher";
+                btn.type = "button";
+                btn.textContent = "🎆 全屏烟花";
+                hostDoc.body.appendChild(btn);
             }
 
-            function burst(x, y, baseColor) {
-                const n = Math.floor(random(45, 78));
-                for (let i = 0; i < n; i++) {
-                    const angle = random(0, Math.PI * 2);
-                    const speed = random(1.2, 5.6);
-                    sparks.push({
-                        x, y,
-                        vx: Math.cos(angle) * speed,
-                        vy: Math.sin(angle) * speed,
-                        alpha: 1,
-                        size: random(1.5, 3.8),
-                        color: baseColor || colors[Math.floor(Math.random() * colors.length)],
-                        decay: random(0.010, 0.022)
+            function playFireworks() {
+                const old = hostDoc.getElementById("ny-fireworks-overlay");
+                if (old) old.remove();
+
+                const overlay = hostDoc.createElement("div");
+                overlay.id = "ny-fireworks-overlay";
+                overlay.style.position = "fixed";
+                overlay.style.inset = "0";
+                overlay.style.pointerEvents = "none";
+                overlay.style.zIndex = "2147483647";
+                overlay.style.background = "transparent";
+
+                const canvas = hostDoc.createElement("canvas");
+                canvas.style.width = "100%";
+                canvas.style.height = "100%";
+                overlay.appendChild(canvas);
+                hostDoc.body.appendChild(overlay);
+
+                const ctx = canvas.getContext("2d");
+                let width = 0;
+                let height = 0;
+
+                function resize() {
+                    width = hostDoc.documentElement.clientWidth || window.innerWidth || 1280;
+                    height = hostDoc.documentElement.clientHeight || window.innerHeight || 720;
+                    const dpr = Math.max(1, window.devicePixelRatio || 1);
+                    canvas.width = Math.floor(width * dpr);
+                    canvas.height = Math.floor(height * dpr);
+                    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                }
+                resize();
+                window.addEventListener("resize", resize);
+
+                const colors = ["#ff4d4f", "#ff7a45", "#ffa940", "#fadb14", "#73d13d", "#36cfc9", "#597ef7", "#b37feb"];
+                const sparks = [];
+                const rockets = [];
+                const gravity = 0.05;
+
+                function random(min, max) {
+                    return Math.random() * (max - min) + min;
+                }
+
+                function launchRocket() {
+                    rockets.push({
+                        x: random(width * 0.1, width * 0.9),
+                        y: height + 10,
+                        vx: random(-0.6, 0.6),
+                        vy: random(-12.5, -9.5),
+                        color: colors[Math.floor(Math.random() * colors.length)],
+                        life: random(38, 58)
                     });
                 }
-            }
 
-            let frame = 0;
-            const launchInterval = setInterval(launchRocket, 180);
-            for (let i = 0; i < 6; i++) launchRocket();
-
-            function animate() {
-                frame += 1;
-                ctx.fillStyle = "rgba(0, 0, 0, 0.16)";
-                ctx.fillRect(0, 0, width, height);
-
-                for (let i = rockets.length - 1; i >= 0; i--) {
-                    const r = rockets[i];
-                    r.x += r.vx;
-                    r.y += r.vy;
-                    r.vy += gravity * 0.35;
-                    r.life -= 1;
-
-                    ctx.beginPath();
-                    ctx.arc(r.x, r.y, 2.2, 0, Math.PI * 2);
-                    ctx.fillStyle = r.color;
-                    ctx.fill();
-
-                    if (r.life <= 0 || r.vy >= -1.0) {
-                        burst(r.x, r.y, r.color);
-                        rockets.splice(i, 1);
+                function burst(x, y, baseColor) {
+                    const n = Math.floor(random(45, 78));
+                    for (let i = 0; i < n; i++) {
+                        const angle = random(0, Math.PI * 2);
+                        const speed = random(1.2, 5.6);
+                        sparks.push({
+                            x, y,
+                            vx: Math.cos(angle) * speed,
+                            vy: Math.sin(angle) * speed,
+                            alpha: 1,
+                            size: random(1.5, 3.8),
+                            color: baseColor || colors[Math.floor(Math.random() * colors.length)],
+                            decay: random(0.010, 0.022)
+                        });
                     }
                 }
 
-                for (let i = sparks.length - 1; i >= 0; i--) {
-                    const p = sparks[i];
-                    p.x += p.vx;
-                    p.y += p.vy;
-                    p.vy += gravity;
-                    p.vx *= 0.985;
-                    p.vy *= 0.992;
-                    p.alpha -= p.decay;
+                let frame = 0;
+                const launchInterval = setInterval(launchRocket, 180);
+                for (let i = 0; i < 6; i++) launchRocket();
 
-                    if (p.alpha <= 0) {
-                        sparks.splice(i, 1);
-                        continue;
+                function animate() {
+                    frame += 1;
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.16)";
+                    ctx.fillRect(0, 0, width, height);
+
+                    for (let i = rockets.length - 1; i >= 0; i--) {
+                        const r = rockets[i];
+                        r.x += r.vx;
+                        r.y += r.vy;
+                        r.vy += gravity * 0.35;
+                        r.life -= 1;
+
+                        ctx.beginPath();
+                        ctx.arc(r.x, r.y, 2.2, 0, Math.PI * 2);
+                        ctx.fillStyle = r.color;
+                        ctx.fill();
+
+                        if (r.life <= 0 || r.vy >= -1.0) {
+                            burst(r.x, r.y, r.color);
+                            rockets.splice(i, 1);
+                        }
                     }
 
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-                    ctx.fillStyle = p.color;
-                    ctx.globalAlpha = Math.max(0, p.alpha);
-                    ctx.fill();
-                    ctx.globalAlpha = 1;
+                    for (let i = sparks.length - 1; i >= 0; i--) {
+                        const p = sparks[i];
+                        p.x += p.vx;
+                        p.y += p.vy;
+                        p.vy += gravity;
+                        p.vx *= 0.985;
+                        p.vy *= 0.992;
+                        p.alpha -= p.decay;
+
+                        if (p.alpha <= 0) {
+                            sparks.splice(i, 1);
+                            continue;
+                        }
+
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                        ctx.fillStyle = p.color;
+                        ctx.globalAlpha = Math.max(0, p.alpha);
+                        ctx.fill();
+                        ctx.globalAlpha = 1;
+                    }
+
+                    if (frame < 420 || rockets.length > 0 || sparks.length > 0) {
+                        requestAnimationFrame(animate);
+                    } else {
+                        cleanup();
+                    }
                 }
 
-                if (frame < 420 || rockets.length > 0 || sparks.length > 0) {
-                    requestAnimationFrame(animate);
-                } else {
-                    cleanup();
+                function cleanup() {
+                    clearInterval(launchInterval);
+                    window.removeEventListener("resize", resize);
+                    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
                 }
+
+                animate();
+                setTimeout(cleanup, 7800);
             }
 
-            function cleanup() {
-                clearInterval(launchInterval);
-                window.removeEventListener("resize", resize);
-                if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            const launcher = hostDoc.getElementById("ny-fireworks-launcher");
+            if (launcher && !launcher.dataset.bound) {
+                launcher.dataset.bound = "1";
+                launcher.addEventListener("click", function () {
+                    playFireworks();
+                });
             }
-
-            animate();
-            setTimeout(cleanup, 7800);
         })();
         </script>
         """,
@@ -643,11 +689,7 @@ def _render_fireworks_overlay() -> None:
     )
 
 
-col_fire_l, col_fire_c, col_fire_r = st.columns([3, 2, 3])
-with col_fire_c:
-    if st.button("🎆 全屏烟花", key="btn_global_fireworks", use_container_width=True):
-        _render_fireworks_overlay()
-        st.toast("新春快乐！", icon="🎆")
+_mount_fireworks_launcher()
 
 
 def _do_lookup(query_word: str) -> None:
