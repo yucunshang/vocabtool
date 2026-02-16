@@ -885,7 +885,60 @@ with tab_extract:
             st.caption("内置 AI 适合快速生成；需要更大批量时，使用下方 Prompt 到第三方 AI。")
 
             with st.expander("📌 复制 Prompt（第三方 AI）", expanded=False):
-                card_fmt = render_card_format_selector("tab1_prompt")
+                st.markdown("#### ⚙️ 卡片格式自定义")
+                col_front, col_def = st.columns(2)
+                with col_front:
+                    front_val = st.radio(
+                        "正面内容",
+                        options=["word", "phrase"],
+                        format_func=lambda v: "📝 单词" if v == "word" else "📝 短语/搭配",
+                        index=1,
+                        horizontal=True,
+                        key="tab1_prompt_front_v2",
+                    )
+                with col_def:
+                    def_val = st.radio(
+                        "释义语言",
+                        options=["cn", "en", "both"],
+                        format_func=lambda v: {
+                            "cn": "🇨🇳 中文释义",
+                            "en": "🇬🇧 英文释义",
+                            "both": "🇨🇳🇬🇧 中英双语",
+                        }[v],
+                        index=0,
+                        horizontal=True,
+                        key="tab1_prompt_def_v2",
+                    )
+
+                col_ex, col_ety = st.columns(2)
+                with col_ex:
+                    ex_val = st.radio(
+                        "例句数量",
+                        options=[1, 2, 3],
+                        format_func=lambda v: f"{v} 个例句",
+                        index=0,
+                        horizontal=True,
+                        key="tab1_prompt_ex_v2",
+                    )
+                with col_ety:
+                    ety_val = st.radio(
+                        "词源词根",
+                        options=[True, False],
+                        format_func=lambda v: "✅ 包含词源" if v else "❌ 不含词源",
+                        index=0,
+                        horizontal=True,
+                        key="tab1_prompt_ety_v2",
+                    )
+
+                card_fmt: CardFormat = {
+                    "front": front_val,
+                    "definition": def_val,
+                    "examples": ex_val,
+                    "etymology": ety_val,
+                }
+                st.caption(
+                    f"当前格式：正面={front_val} ｜ 释义={def_val} ｜ 例句={ex_val} ｜ 词源={'on' if ety_val else 'off'}"
+                )
                 batch_size_prompt = int(
                     st.number_input("🔢 分组大小 (最大 500)", min_value=1, max_value=500, value=50, step=10)
                 )
