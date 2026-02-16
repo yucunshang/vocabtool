@@ -650,9 +650,9 @@ with st.expander("使用指南 & 支持格式", expanded=False):
     """)
 
 tab_lookup, tab_extract, tab_anki = st.tabs([
-    "查词",
-    "重点词",
-    "制卡 Anki",
+    "AI查词",
+    "筛选单词",
+    "anki制卡",
 ])
 
 with tab_lookup:
