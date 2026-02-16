@@ -29,10 +29,10 @@ class CardFormat(TypedDict, total=False):
 
 
 DEFAULT_CARD_FORMAT: CardFormat = {
-    "front": "phrase",
-    "definition": "en",
+    "front": "word",
+    "definition": "cn",
     "examples": 1,
-    "etymology": True,
+    "etymology": False,
 }
 
 # Fast in-memory cache for quick lookup to match vocabtool behavior.
