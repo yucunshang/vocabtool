@@ -783,10 +783,12 @@ with tab_extract:
 
             enable_audio_auto = st.checkbox("启用语音", value=True, key="chk_audio_auto")
 
-            current_word_count = len(words_only)
+            # Keep full list for third-party prompt; only cap built-in AI path.
+            words_for_auto_ai = words_only
+            current_word_count = len(words_for_auto_ai)
             if current_word_count > constants.MAX_AUTO_LIMIT:
                 st.warning(f"⚠️ 单词数超过 {constants.MAX_AUTO_LIMIT}，内置 AI 仅处理前 {constants.MAX_AUTO_LIMIT} 个。建议使用手动 Prompt 分批处理。")
-                words_only = words_only[:constants.MAX_AUTO_LIMIT]
+                words_for_auto_ai = words_for_auto_ai[:constants.MAX_AUTO_LIMIT]
 
             if st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", use_container_width=True):
                 progress_bar = st.progress(0)
@@ -799,7 +801,7 @@ with tab_extract:
 
                 status_text.text("🧠 正在请求 AI 生成...")
                 ai_result = process_ai_in_batches(
-                    words_only,
+                    words_for_auto_ai,
                     progress_callback=update_ai_progress,
                 )
 
@@ -850,21 +852,25 @@ with tab_extract:
 
         with st.expander("📌 手动复制 Prompt (第三方 AI 用)"):
             card_fmt = render_card_format_selector("tab1_prompt")
-            batch_size_prompt = int(st.number_input("🔢 分组大小", min_value=1, value=50, step=10))
+            batch_size_prompt = int(st.number_input("🔢 分组大小 (最大 500)", min_value=1, max_value=500, value=50, step=10))
             current_batch_words = []
 
             if words_only:
                 total_w = len(words_only)
-                num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
-                batch_options = [
-                    f"第 {i+1} 组 ({i*batch_size_prompt+1} - {min((i+1)*batch_size_prompt, total_w)})"
-                    for i in range(num_batches)
-                ]
-                selected_batch_str = st.selectbox("📂 选择当前分组", batch_options)
-                sel_idx = batch_options.index(selected_batch_str)
-                current_batch_words = words_only[
-                    sel_idx*batch_size_prompt:min((sel_idx+1)*batch_size_prompt, total_w)
-                ]
+                if total_w <= 500:
+                    st.caption(f"💡 当前共 {total_w} 个单词（≤500），已全部放入一个 Prompt。")
+                    current_batch_words = words_only
+                else:
+                    num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
+                    batch_options = [
+                        f"第 {i+1} 组 ({i*batch_size_prompt+1} - {min((i+1)*batch_size_prompt, total_w)})"
+                        for i in range(num_batches)
+                    ]
+                    selected_batch_str = st.selectbox("📂 选择当前分组", batch_options)
+                    sel_idx = batch_options.index(selected_batch_str)
+                    current_batch_words = words_only[
+                        sel_idx*batch_size_prompt:min((sel_idx+1)*batch_size_prompt, total_w)
+                    ]
             else:
                 st.warning("⚠️ 暂无单词数据，请先提取单词。")
 

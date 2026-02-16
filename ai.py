@@ -2,6 +2,7 @@
 
 import logging
 import time
+from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 import streamlit as st
@@ -33,6 +34,60 @@ DEFAULT_CARD_FORMAT: CardFormat = {
     "examples": 1,
     "etymology": True,
 }
+
+# Fast in-memory cache for quick lookup to match vocabtool behavior.
+_QUERY_CACHE: OrderedDict[str, str] = OrderedDict()
+_QUERY_CACHE_MAX = 500
+_OPENAI_CLIENT: Any | None = None
+
+LOOKUP_SYSTEM_PROMPT = """# Role
+Atomic Dictionary.
+
+# Goal
+Output ONE core meaning, ONE etymology, and TWO matching examples.
+
+# Critical Constraint: ATOMIC SINGLE SENSE
+- **Force Single Sense**: Regardless of how many meanings a word has, pick ONLY the #1 most common one.
+- **Strict Alignment**: The Definition, Etymology, and BOTH Examples must strictly support this single meaning.
+- **Format**: Follow the 4-line structure below perfectly.
+
+# Output Format
+[word] (lowercase)
+[CN Meaning] | [Short EN Definition (<8 words)]
+🌱 词源: [root (CN) + affix (CN)] (Explain origin briefly)
+• [English Example 1] ([CN Trans])
+• [English Example 2] ([CN Trans])
+
+# Few-Shot Examples (Demonstrating Selection)
+**User Input:**
+spring
+
+**Model Output:**
+spring
+春天 | The season after winter
+🌱 词源: spring- (涌出/生长) → 万物复苏
+• Flowers bloom in spring. (花朵在春天绽放。)
+• I love the fresh air of spring. (我喜欢春天清新的空气。)
+
+**User Input:**
+date
+
+**Model Output:**
+date
+日期 | Specific day of the month
+🌱 词源: dat- (给予/指定) + -e (名词后缀)
+• What is today's date? (今天是几号？)
+• Please sign and date the form. (请在表格上签名并注明日期的。)
+
+**User Input:**
+express
+
+**Model Output:**
+express
+表达；表示 | Convey a thought or feeling
+🌱 词源: ex- (向外) + press (压/挤)
+• She expressed her thanks to us. (她向我们表达了谢意。)
+• Words cannot express my feelings. (言语无法表达我的感受。)"""
 
 
 def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
@@ -157,6 +212,10 @@ Process the provided input list strictly adhering to the format above."""
 
 def get_openai_client() -> Optional[Any]:
     """Get configured OpenAI client with proper error handling."""
+    global _OPENAI_CLIENT
+    if _OPENAI_CLIENT is not None:
+        return _OPENAI_CLIENT
+
     if not OpenAI:
         st.error("❌ 未安装 OpenAI 库，无法使用内置 AI 功能。")
         return None
@@ -168,7 +227,12 @@ def get_openai_client() -> Optional[Any]:
         return None
 
     try:
-        return OpenAI(api_key=api_key, base_url=cfg["openai_base_url"])
+        _OPENAI_CLIENT = OpenAI(
+            api_key=api_key,
+            base_url=cfg["openai_base_url"],
+            timeout=30.0,
+        )
+        return _OPENAI_CLIENT
     except Exception as e:
         ErrorHandler.handle(e, "Failed to initialize OpenAI client")
         return None
@@ -186,68 +250,30 @@ def get_word_quick_definition(word: str) -> Dict[str, Any]:
 
     model_name = get_config()["openai_model"]
 
-    system_prompt = """# Role
-Atomic Dictionary.
-
-# Goal
-Output ONE core meaning, ONE etymology, and TWO matching examples.
-
-# Critical Constraint: ATOMIC SINGLE SENSE
-- **Force Single Sense**: Regardless of how many meanings a word has, pick ONLY the #1 most common one.
-- **Strict Alignment**: The Definition, Etymology, and BOTH Examples must strictly support this single meaning.
-- **Format**: Follow the 4-line structure below perfectly.
-
-# Output Format
-[word] (lowercase)
-[CN Meaning] | [Short EN Definition (<8 words)]
-🌱 词源: [root (CN) + affix (CN)] (Explain origin briefly)
-• [English Example 1] ([CN Trans])
-• [English Example 2] ([CN Trans])
-
-# Few-Shot Examples (Demonstrating Selection)
-**User Input:**
-spring
-
-**Model Output:**
-spring
-春天 | The season after winter
-🌱 词源: spring- (涌出/生长) → 万物复苏
-• Flowers bloom in spring. (花朵在春天绽放。)
-• I love the fresh air of spring. (我喜欢春天清新的空气。)
-
-**User Input:**
-date
-
-**Model Output:**
-date
-日期 | Specific day of the month
-🌱 词源: dat- (给予/指定) + -e (名词后缀)
-• What is today's date? (今天是几号？)
-• Please sign and date the form. (请在表格上签名并注明日期的。)
-
-**User Input:**
-express
-
-**Model Output:**
-express
-表达；表示 | Convey a thought or feeling
-🌱 词源: ex- (向外) + press (压/挤)
-• She expressed her thanks to us. (她向我们表达了谢意。)
-• Words cannot express my feelings. (言语无法表达我的感受。)"""
-
-    user_prompt = word
+    cache_key = word_lower
+    if cache_key in _QUERY_CACHE:
+        _QUERY_CACHE.move_to_end(cache_key)
+        return {"result": _QUERY_CACHE[cache_key], "rank": rank, "cached": True}
 
     try:
         response = client.chat.completions.create(
             model=model_name,
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "system", "content": LOOKUP_SYSTEM_PROMPT},
+                {"role": "user", "content": word}
             ],
-            temperature=0.3
+            temperature=0.3,
+            max_tokens=300,
         )
 
-        content = response.choices[0].message.content
+        content = (response.choices[0].message.content or "").strip()
+        if not content:
+            return {"error": "AI 返回为空"}
+
+        _QUERY_CACHE[cache_key] = content
+        if len(_QUERY_CACHE) > _QUERY_CACHE_MAX:
+            _QUERY_CACHE.popitem(last=False)
+
         return {"result": content, "rank": rank}
 
     except Exception as e:
