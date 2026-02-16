@@ -772,10 +772,11 @@ with tab_extract:
         with col_ai_btn:
             ai_model_label = get_config()["openai_model"]
 
-            selected_voice_label = st.selectbox(
+            selected_voice_label = st.radio(
                 "🎙️ 发音人",
                 options=list(constants.VOICE_MAP.keys()),
                 index=0,
+                horizontal=False,
                 key="sel_voice_auto"
             )
             selected_voice_code = constants.VOICE_MAP[selected_voice_label]
@@ -883,7 +884,7 @@ with tab_extract:
             st.markdown("#### 第三方 AI Prompt")
             st.caption("内置 AI 适合快速生成；需要更大批量时，使用下方 Prompt 到第三方 AI。")
 
-            with st.expander("📌 复制 Prompt（第三方 AI）", expanded=True):
+            with st.expander("📌 复制 Prompt（第三方 AI）", expanded=False):
                 card_fmt = render_card_format_selector("tab1_prompt")
                 batch_size_prompt = int(
                     st.number_input("🔢 分组大小 (最大 500)", min_value=1, max_value=500, value=50, step=10)
@@ -1001,7 +1002,7 @@ with tab_anki:
 
     if st.session_state['anki_cards_cache']:
         cards = st.session_state['anki_cards_cache']
-        with st.expander(f"👀 预览卡片 (前 {constants.MAX_PREVIEW_CARDS} 张)", expanded=True):
+        with st.expander(f"👀 预览卡片 (前 {constants.MAX_PREVIEW_CARDS} 张)", expanded=False):
             df_view = pd.DataFrame(cards)
             display_cols = ['w', 'm', 'e', 'r']
             df_view = df_view[[c for c in display_cols if c in df_view.columns]]
