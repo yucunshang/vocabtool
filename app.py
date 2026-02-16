@@ -37,6 +37,45 @@ resources.FULL_DF = FULL_DF
 # Clean old .apkg files from our temp subdir (e.g. from previous sessions)
 cleanup_old_apkg_files()
 
+# Stop words to filter out in direct-input mode (articles, pronouns,
+# prepositions, conjunctions, auxiliary verbs, determiners, etc.).
+_DIRECT_INPUT_STOPWORDS: set = {
+    # Articles & determiners
+    "a", "an", "the", "this", "that", "these", "those",
+    # Pronouns
+    "i", "me", "my", "mine", "myself",
+    "you", "your", "yours", "yourself", "yourselves",
+    "he", "him", "his", "himself",
+    "she", "her", "hers", "herself",
+    "it", "its", "itself",
+    "we", "us", "our", "ours", "ourselves",
+    "they", "them", "their", "theirs", "themselves",
+    "who", "whom", "whose", "which", "what",
+    # Prepositions
+    "in", "on", "at", "to", "for", "of", "with", "by", "from",
+    "up", "out", "off", "into", "onto", "upon", "about", "over",
+    "under", "after", "before", "between", "through", "during",
+    "above", "below", "around", "against", "along", "across",
+    "behind", "beyond", "within", "without", "toward", "towards",
+    # Conjunctions
+    "and", "but", "or", "nor", "so", "yet", "for",
+    "both", "either", "neither", "whether",
+    # Auxiliary / common verbs
+    "is", "am", "are", "was", "were", "be", "been", "being",
+    "do", "did", "does", "done", "doing",
+    "has", "had", "have", "having",
+    "will", "would", "shall", "should",
+    "can", "could", "may", "might", "must",
+    # Very common adverbs / particles
+    "not", "no", "yes", "very", "too", "also", "just",
+    "then", "than", "now", "here", "there",
+    "how", "when", "where", "why",
+    # Other function words
+    "if", "as", "all", "each", "every", "any", "some",
+    "such", "more", "most", "much", "many", "few",
+    "other", "own", "same", "only",
+}
+
 logger = logging.getLogger(__name__)
 
 # ==========================================
@@ -670,13 +709,29 @@ with tab_extract:
                     seen = set()
 
                     for word in words:
-                        if word.lower() not in seen:
-                            seen.add(word.lower())
-                            unique_words.append(word)
+                        w_lower = word.lower().strip()
+                        if not w_lower or w_lower in seen:
+                            continue
+                        # Skip non-alphabetic tokens
+                        if not re.match(r'^[a-zA-Z]+(?:[-\' ][a-zA-Z]+)*$', w_lower):
+                            continue
+                        # Skip single characters and very short stop words
+                        if len(w_lower) <= 1:
+                            continue
+                        # Skip common stop words / function words
+                        if w_lower in _DIRECT_INPUT_STOPWORDS:
+                            continue
+                        seen.add(w_lower)
+                        unique_words.append(word)
 
+                    raw_count = len(words)
                     data_list = [(w, VOCAB_DICT.get(w.lower(), 99999)) for w in unique_words]
-                    set_generated_words_state(data_list, len(unique_words), None)
-                    st.toast(f"✅ 已加载 {len(unique_words)} 个单词", icon="🎉")
+                    set_generated_words_state(data_list, raw_count, None)
+                    filtered = raw_count - len(unique_words)
+                    msg = f"✅ 已加载 {len(unique_words)} 个单词"
+                    if filtered > 0:
+                        msg += f"（已过滤 {filtered} 个无关词）"
+                    st.toast(msg, icon="🎉")
                 else:
                     st.warning("⚠️ 内容为空。")
 
