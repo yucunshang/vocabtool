@@ -112,6 +112,7 @@ st.markdown("""
         -moz-osx-font-smoothing: grayscale;
         text-size-adjust: 100%;
         -webkit-text-size-adjust: 100%;
+        font-size: 17px;
     }
 
     /* iOS safe-area support */
@@ -132,6 +133,7 @@ st.markdown("""
         box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         letter-spacing: 0.01em;
         min-height: 44px;
+        font-size: 16px;
     }
     .stButton>button:hover {
         transform: translateY(-1px);
@@ -162,7 +164,7 @@ st.markdown("""
         box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }
     [data-testid="stMetric"] [data-testid="stMetricValue"] {
-        font-weight: 700; letter-spacing: -0.02em;
+        font-weight: 700; letter-spacing: -0.02em; font-size: 1.45rem;
     }
 
     /* ===== Tabs: segmented-control style ===== */
@@ -172,7 +174,7 @@ st.markdown("""
     }
     .stTabs [data-baseweb="tab"] {
         padding: 0.55rem 1rem; border-radius: 10px;
-        font-weight: 500; font-size: 0.9rem;
+        font-weight: 600; font-size: 1rem;
     }
     .stTabs [data-baseweb="tab"][aria-selected="true"] {
         background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
@@ -235,6 +237,9 @@ st.markdown("""
 
     /* ===== Toast / info / warning boxes ===== */
     .stAlert { border-radius: 10px; }
+    .stMarkdown p, .stCaption, label, .stRadio label, .stCheckbox label {
+        font-size: 1rem;
+    }
 
     /* ===== Download button ===== */
     .stDownloadButton > button {
@@ -305,10 +310,10 @@ st.markdown("""
             padding: 0.9rem 0 0.2rem;
         }
         .app-hero h1 {
-            font-size: 1.35rem;
+            font-size: 1.5rem;
         }
         .app-hero p {
-            font-size: 0.82rem;
+            font-size: 0.92rem;
         }
         .stTabs [data-baseweb="tab-list"] {
             overflow-x: auto;
@@ -319,8 +324,8 @@ st.markdown("""
             display: none;
         }
         .stTabs [data-baseweb="tab"] {
-            padding: 0.5rem 0.7rem;
-            font-size: 0.82rem;
+            padding: 0.55rem 0.75rem;
+            font-size: 0.9rem;
             min-height: 40px;
         }
         .stButton>button,
@@ -337,7 +342,7 @@ st.markdown("""
             font-size: 16px !important;
         }
         .stCaption {
-            font-size: 0.78rem;
+            font-size: 0.9rem;
         }
     }
 </style>
@@ -485,8 +490,27 @@ def _do_lookup(query_word: str) -> None:
     try:
         cache_key = f"lookup_cache_{query_word.lower()}"
         if cache_key not in st.session_state:
-            with st.spinner("🔍 查询中..."):
-                st.session_state[cache_key] = get_word_quick_definition(query_word)
+            stream_box = st.empty()
+
+            def _on_stream(text: str) -> None:
+                safe = html.escape(text).replace("\n", "<br>")
+                stream_box.markdown(
+                    (
+                        '<div style="padding:10px 12px;border:1px solid #dbeafe;'
+                        'background:#f8fbff;border-radius:10px;color:#1f2937;'
+                        'line-height:1.7;font-size:16px;">'
+                        f'{safe}'
+                        '</div>'
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+            with st.spinner("🔍 查询中（流式返回）..."):
+                st.session_state[cache_key] = get_word_quick_definition(
+                    query_word,
+                    stream_callback=_on_stream,
+                )
+            stream_box.empty()
             keys = st.session_state["quick_lookup_cache_keys"]
             keys.append(cache_key)
             while len(keys) > constants.QUICK_LOOKUP_CACHE_MAX:
@@ -503,7 +527,7 @@ def _do_lookup(query_word: str) -> None:
 
 def render_quick_lookup() -> None:
     st.markdown("### AI 极速查词")
-    st.caption("输入单词后按回车或点击查询 · 释义中英文单词可点击继续查询")
+    st.caption("输入单词后按回车或点击查询 · 结果流式输出")
 
     if "quick_lookup_last_query" not in st.session_state:
         st.session_state["quick_lookup_last_query"] = ""
@@ -576,25 +600,11 @@ def render_quick_lookup() -> None:
         # Build styled HTML lines (no iframe needed)
         lines = raw_content.split('\n')
         formatted_lines = []
-        clickable_words: list[str] = []
-        clickable_words_seen: set[str] = set()
-
-        current_query = st.session_state.get("quick_lookup_last_query", "").lower().strip()
 
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-
-            # Collect English words from all result lines so users can
-            # continue lookup from definitions, etymology, and examples.
-            for w in re.findall(r"[a-zA-Z]{3,}", line):
-                wl = w.lower()
-                if wl == current_query:
-                    continue
-                if wl not in _DIRECT_INPUT_STOPWORDS and wl not in clickable_words_seen:
-                    clickable_words_seen.add(wl)
-                    clickable_words.append(wl)
 
             if line.startswith("🌱"):
                 safe = html.escape(line)
@@ -613,21 +623,6 @@ def render_quick_lookup() -> None:
         rank_badge = f'<span style="display:inline-block;background:{rank_color};color:white;padding:3px 10px;border-radius:5px;font-size:13px;font-weight:600;">📊 {rank} · {rank_label}</span>'
 
         st.markdown(f"""<div style="padding:4px 0;">{display_html}<div style="margin-top:10px;">{rank_badge}</div></div>""", unsafe_allow_html=True)
-
-        # Clickable word pills for continuing lookup (pure Streamlit, no iframe)
-        if clickable_words:
-            picked = st.pills(
-                "点击单词继续查询",
-                options=clickable_words[:20],
-                key="ql_word_pills",
-                label_visibility="collapsed",
-            )
-            if "ql_word_pills_last" not in st.session_state:
-                st.session_state["ql_word_pills_last"] = ""
-            if picked and picked != st.session_state["ql_word_pills_last"]:
-                st.session_state["ql_word_pills_last"] = picked
-                st.session_state["_quick_lookup_pending_word"] = picked
-                st.rerun()
 
     elif result and 'error' in result:
         # Avoid flashing red error blocks on reruns/refresh.
@@ -655,9 +650,9 @@ with st.expander("使用指南 & 支持格式", expanded=False):
     """)
 
 tab_lookup, tab_extract, tab_anki = st.tabs([
-    "1 快速查词（内置 deepseek）",
-    "2 生成重点单词",
-    "3 粘贴AI生成的卡片内容制卡（语音）",
+    "查词",
+    "重点词",
+    "制卡",
 ])
 
 with tab_lookup:
@@ -668,11 +663,11 @@ with tab_lookup:
 # ==========================================
 with tab_extract:
     mode_paste, mode_url, mode_upload, mode_rank, mode_manual = st.tabs([
-        "2.1 粘贴文本",
-        "2.2 文章链接",
-        "2.3 上传文件",
-        "2.4 词库生成",
-        "2.5 粘贴整理词表（不筛 rank）",
+        "文本",
+        "链接",
+        "文件",
+        "词库",
+        "词表",
     ])
 
     with mode_paste:

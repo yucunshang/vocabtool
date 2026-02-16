@@ -238,8 +238,14 @@ def get_openai_client() -> Optional[Any]:
         return None
 
 
-def get_word_quick_definition(word: str) -> Dict[str, Any]:
-    """Get ultra-concise word definition using AI, with rank info."""
+def get_word_quick_definition(
+    word: str,
+    stream_callback: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """Get ultra-concise word definition using AI, with rank info.
+
+    If ``stream_callback`` is provided, tokens are streamed incrementally.
+    """
     word_lower = word.lower().strip()
     vocab_dict = get_vocab_dict()
     rank = vocab_dict.get(word_lower, 99999)
@@ -256,17 +262,37 @@ def get_word_quick_definition(word: str) -> Dict[str, Any]:
         return {"result": _QUERY_CACHE[cache_key], "rank": rank, "cached": True}
 
     try:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": LOOKUP_SYSTEM_PROMPT},
-                {"role": "user", "content": word}
-            ],
-            temperature=0.3,
-            max_tokens=300,
-        )
-
-        content = (response.choices[0].message.content or "").strip()
+        if stream_callback is not None:
+            stream = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": LOOKUP_SYSTEM_PROMPT},
+                    {"role": "user", "content": word}
+                ],
+                temperature=0.3,
+                max_tokens=300,
+                stream=True,
+            )
+            chunks: List[str] = []
+            for event in stream:
+                delta = ""
+                if getattr(event, "choices", None):
+                    delta = (event.choices[0].delta.content or "")
+                if delta:
+                    chunks.append(delta)
+                    stream_callback("".join(chunks))
+            content = "".join(chunks).strip()
+        else:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": LOOKUP_SYSTEM_PROMPT},
+                    {"role": "user", "content": word}
+                ],
+                temperature=0.3,
+                max_tokens=300,
+            )
+            content = (response.choices[0].message.content or "").strip()
         if not content:
             return {"error": "AI 返回为空"}
 
