@@ -1,0 +1,37 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- 虚拟环境 ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- 敏感信息 (API Key 等，严禁上传) ---
+.env
+.env.local
+.streamlit/secrets.toml
+
+# --- 构建产物 ---
+dist/
+build/
+*.egg-info/
+
+# --- 编辑器 & IDE ---
+.idea/
+.vscode/
+.cursor/
+*.swp
+
+# --- 测试 & 覆盖率 ---
+.ipynb_checkpoints
+.coverage
+htmlcov/
+.pytest_cache/
+
+# --- 临时 / 生成文件 ---
+*.apkg
+nltk_data/
+test_vocab.db
