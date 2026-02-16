@@ -77,11 +77,11 @@ streamlit run app.py
 
 ## 词库数据文件
 
-项目启动时会尝试读取：
-- `vocab.pkl`（优先）
-- `coca_cleaned.csv`（兜底）
+项目启动时会读取 CSV 词库文件：
+- `coca_cleaned.csv`（推荐）
+- `data.csv` / `vocab.csv`（兼容兜底）
 
-若两者都缺失，页面会提示词库数据缺失。
+若上述文件都缺失，页面会提示词库数据缺失。
 
 ## 测试
 

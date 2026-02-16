@@ -68,17 +68,8 @@ def get_genanki() -> Tuple[Any, Any]:
 
 @st.cache_data
 def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame]]:
-    """Load vocabulary data from pickle or CSV files."""
+    """Load vocabulary data from CSV files only."""
     root_dir = os.path.dirname(os.path.abspath(__file__))
-
-    pkl_path = os.path.join(root_dir, "vocab.pkl")
-    if os.path.exists(pkl_path):
-        try:
-            df = pd.read_pickle(pkl_path)
-            vocab_dict = pd.Series(df['rank'].values, index=df['word']).to_dict()
-            return vocab_dict, df
-        except (FileNotFoundError, pd.errors.PickleError, KeyError) as e:
-            logger.warning(f"Could not load pickle file: {e}")
 
     possible_names = ["coca_cleaned.csv", "data.csv", "vocab.csv"]
     file_path = next(
