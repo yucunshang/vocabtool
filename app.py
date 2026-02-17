@@ -349,11 +349,19 @@ st.markdown("""
             min-height: 46px;
             border-radius: 12px;
         }
-        /* Ensure form submit (lookup) button is wide enough to tap */
+        /* Force lookup form columns to stay side-by-side on mobile */
+        .stForm [data-testid="stColumns"] {
+            flex-wrap: nowrap !important;
+            gap: 6px !important;
+        }
         .stForm [data-testid="stFormSubmitButton"] button {
-            min-width: 90px;
+            min-width: 72px;
             min-height: 46px;
-            font-size: 15px;
+            font-size: 14px;
+            padding: 0 8px;
+        }
+        .stForm .stTextInput input {
+            min-height: 46px;
         }
         /* Avoid hover lift on touch devices */
         .stButton>button:hover {
@@ -534,9 +542,13 @@ def render_quick_lookup() -> None:
         _do_lookup(auto_word)
 
     _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else "🔍 deepseek"
+    _has_content = bool(st.session_state.get("quick_lookup_word") or st.session_state.get("quick_lookup_last_result"))
 
     with st.form("quick_lookup_form", clear_on_submit=False, border=False):
-        col_word, col_btn = st.columns([3, 1])
+        if _has_content:
+            col_word, col_btn, col_clear = st.columns([5, 2, 1])
+        else:
+            col_word, col_btn = st.columns([5, 2])
         with col_word:
             lookup_word = st.text_input(
                 "输入单词或短语",
@@ -552,6 +564,14 @@ def render_quick_lookup() -> None:
                 use_container_width=True,
                 disabled=lookup_disabled
             )
+        if _has_content:
+            with col_clear:
+                clear_submit = st.form_submit_button("✕", use_container_width=True)
+            if clear_submit:
+                st.session_state["quick_lookup_word"] = ""
+                st.session_state["quick_lookup_last_query"] = ""
+                st.session_state["quick_lookup_last_result"] = None
+                st.rerun()
 
     if in_cooldown:
         wait_seconds = max(0.0, st.session_state["quick_lookup_block_until"] - now_ts)
@@ -607,13 +627,6 @@ def render_quick_lookup() -> None:
         # Avoid flashing red error blocks on reruns/refresh.
         st.toast(f"查词失败：{result.get('error', '未知错误')}", icon="⚠️")
         st.session_state["quick_lookup_last_result"] = None
-
-    if st.session_state.get("quick_lookup_last_result") or st.session_state.get("quick_lookup_word"):
-        if st.button("✕ 清空", key="btn_clear_lookup", type="secondary"):
-            st.session_state["quick_lookup_word"] = ""
-            st.session_state["quick_lookup_last_query"] = ""
-            st.session_state["quick_lookup_last_result"] = None
-            st.rerun()
 
     st.markdown("---")
 
