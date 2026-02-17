@@ -699,7 +699,15 @@ with tab_extract:
             placeholder="支持直接粘贴文章内容..."
         )
 
-        if st.button("🚀 从文本生成重点词", type="primary", key="btn_mode_2_1"):
+        col_gen_p, col_clr_p = st.columns([4, 1])
+        with col_gen_p:
+            btn_paste = st.button("🚀 从文本生成重点词", type="primary", key="btn_mode_2_1", use_container_width=True)
+        with col_clr_p:
+            if st.button("清空", key="clr_paste", use_container_width=True):
+                st.session_state["paste_key_2_1"] = ""
+                st.rerun()
+
+        if btn_paste:
             if target_rank < current_rank:
                 st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
             elif len(pasted_text) > constants.MAX_PASTE_TEXT_LENGTH:
@@ -731,7 +739,15 @@ with tab_extract:
             key="url_input_key_2_2"
         )
 
-        if st.button("🌐 从链接生成重点词", type="primary", key="btn_mode_2_2"):
+        col_gen_u, col_clr_u = st.columns([4, 1])
+        with col_gen_u:
+            btn_url = st.button("🌐 从链接生成重点词", type="primary", key="btn_mode_2_2", use_container_width=True)
+        with col_clr_u:
+            if st.button("清空", key="clr_url", use_container_width=True):
+                st.session_state["url_input_key_2_2"] = ""
+                st.rerun()
+
+        if btn_url:
             if target_rank_url < current_rank_url:
                 st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
             elif not input_url.strip():
@@ -799,28 +815,51 @@ with tab_extract:
             placeholder="altruism\nhectic\nserendipity",
         )
 
-        if st.button("🧾 生成词表（不筛 rank）", key="btn_mode_2_5", type="primary"):
+        col_gen_m, col_clr_m = st.columns([4, 1])
+        with col_gen_m:
+            btn_gen_manual = st.button("🧾 生成词表（不筛 rank）", key="btn_mode_2_5", type="primary", use_container_width=True)
+        with col_clr_m:
+            if st.button("清空", key="clr_manual_words", use_container_width=True):
+                st.session_state["manual_words_2_5"] = ""
+                st.rerun()
+
+        if btn_gen_manual:
             with st.spinner("正在解析列表..."):
                 if manual_words_text.strip():
-                    words = [w.strip() for w in re.split(r'[,\n\t]+', manual_words_text) if w.strip()]
-                    unique_words = []
-                    seen = set()
+                    raw_items = [w.strip() for w in re.split(r'[,\n\t]+', manual_words_text) if w.strip()]
+                    valid_words = []
+                    invalid_items = []
+                    for item in raw_items:
+                        if re.match(r"^[a-zA-Z]+(?:[-'][a-zA-Z]+)*$", item):
+                            valid_words.append(item)
+                        else:
+                            invalid_items.append(item)
 
-                    for word in words:
-                        w_lower = word.lower().strip()
-                        if not w_lower or w_lower in seen:
-                            continue
-                        seen.add(w_lower)
-                        unique_words.append(word)
+                    if invalid_items:
+                        preview = ", ".join(invalid_items[:10])
+                        suffix = f" 等共 {len(invalid_items)} 项" if len(invalid_items) > 10 else ""
+                        st.warning(f"⚠️ 已跳过格式不正确的条目：{preview}{suffix}")
 
-                    raw_count = len(words)
-                    data_list = [(w, VOCAB_DICT.get(w.lower(), 99999)) for w in unique_words]
-                    set_generated_words_state(data_list, raw_count, None)
-                    duplicated = raw_count - len(unique_words)
-                    msg = f"✅ 已加载 {len(unique_words)} 个单词（不筛 rank）"
-                    if duplicated > 0:
-                        msg += f"（去重 {duplicated} 个）"
-                    st.toast(msg, icon="🎉")
+                    if not valid_words:
+                        st.error("❌ 没有识别到有效的英文单词，请检查输入格式（每行一个单词或逗号分隔）。")
+                    else:
+                        unique_words = []
+                        seen = set()
+                        for word in valid_words:
+                            w_lower = word.lower().strip()
+                            if not w_lower or w_lower in seen:
+                                continue
+                            seen.add(w_lower)
+                            unique_words.append(word)
+
+                        raw_count = len(valid_words)
+                        data_list = [(w, VOCAB_DICT.get(w.lower(), 99999)) for w in unique_words]
+                        set_generated_words_state(data_list, raw_count, None)
+                        duplicated = raw_count - len(unique_words)
+                        msg = f"✅ 已加载 {len(unique_words)} 个单词（不筛 rank）"
+                        if duplicated > 0:
+                            msg += f"（去重 {duplicated} 个）"
+                        st.toast(msg, icon="🎉")
                 else:
                     st.warning("⚠️ 内容为空。")
 
