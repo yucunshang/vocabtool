@@ -61,11 +61,11 @@ def generate_anki_package(
     media_files: List[str] = []
 
     CSS = """
-    .card { font-family: 'Arial', sans-serif; font-size: 20px; text-align: center; color: #333; background-color: white; padding: 20px; }
-    .phrase { font-size: 28px; font-weight: 700; color: #0056b3; margin-bottom: 20px; }
+    .card { font-family: 'Arial', sans-serif; font-size: 24px; text-align: center; color: #333; background-color: white; padding: 20px; }
+    .phrase { font-size: 32px; font-weight: 700; color: #0056b3; margin-bottom: 20px; }
     .nightMode .phrase { color: #66b0ff; }
     hr { border: 0; height: 1px; background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0)); margin-bottom: 15px; }
-    .meaning { font-size: 20px; font-weight: bold; color: #222; margin-bottom: 15px; text-align: left; }
+    .meaning { font-size: 24px; font-weight: bold; color: #222; margin-bottom: 15px; text-align: left; }
     .nightMode .meaning { color: #e0e0e0; }
     .example {
         background: #f7f9fa;
@@ -74,13 +74,13 @@ def generate_anki_package(
         border-radius: 4px;
         color: #444;
         font-style: italic;
-        font-size: 21px;
-        line-height: 1.6;
+        font-size: 24px;
+        line-height: 1.65;
         text-align: left;
         margin-bottom: 15px;
     }
     .nightMode .example { background: #383838; color: #ccc; border-left-color: #66b0ff; }
-    .etymology { display: block; font-size: 16px; color: #555; background-color: #fffdf5; padding: 10px; border-radius: 6px; margin-bottom: 5px; border: 1px solid #fef3c7; }
+    .etymology { display: block; font-size: 20px; color: #555; background-color: #fffdf5; padding: 10px; border-radius: 6px; margin-bottom: 5px; border: 1px solid #fef3c7; }
     .nightMode .etymology { background-color: #333; color: #aaa; border-color: #444; }
     """
 

@@ -117,7 +117,7 @@ st.markdown("""
         -moz-osx-font-smoothing: grayscale;
         text-size-adjust: 100%;
         -webkit-text-size-adjust: 100%;
-        font-size: 17px;
+        font-size: 19px;
     }
 
     /* iOS safe-area support */
@@ -137,8 +137,8 @@ st.markdown("""
         border-radius: 10px; font-weight: 600; width: 100%; margin-top: 4px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         letter-spacing: 0.01em;
-        min-height: 44px;
-        font-size: 16px;
+        min-height: 48px;
+        font-size: 18px;
         position: relative;
         overflow: hidden;
     }
@@ -178,7 +178,7 @@ st.markdown("""
     /* ===== Text areas ===== */
     .stTextArea textarea {
         font-family: 'Consolas', 'SF Mono', 'Monaco', monospace;
-        font-size: 16px; border-radius: 10px;
+        font-size: 18px; border-radius: 10px;
         -webkit-overflow-scrolling: touch;
     }
 
@@ -191,8 +191,8 @@ st.markdown("""
 
     /* ===== Text input: comfortable height ===== */
     .stTextInput input {
-        min-height: 48px;
-        font-size: 17px;
+        min-height: 50px;
+        font-size: 19px;
     }
 
     /* ===== Metric cards ===== */
@@ -203,7 +203,7 @@ st.markdown("""
         box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }
     [data-testid="stMetric"] [data-testid="stMetricValue"] {
-        font-weight: 700; letter-spacing: -0.02em; font-size: 1.45rem;
+        font-weight: 700; letter-spacing: -0.02em; font-size: 1.6rem;
     }
 
     /* ===== Tabs: segmented-control style ===== */
@@ -212,8 +212,8 @@ st.markdown("""
         border-radius: 12px; border: 1px solid #e2e8f0;
     }
     .stTabs [data-baseweb="tab"] {
-        padding: 0.55rem 1rem; border-radius: 10px;
-        font-weight: 600; font-size: 1rem;
+        padding: 0.6rem 1.1rem; border-radius: 10px;
+        font-weight: 600; font-size: 1.1rem;
     }
     .stTabs [data-baseweb="tab"][aria-selected="true"] {
         background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
@@ -253,14 +253,14 @@ st.markdown("""
         background-clip: text; margin-bottom: 0.2rem;
     }
     .app-hero p {
-        color: #64748b; font-size: 1.02rem; margin: 0;
+        color: #64748b; font-size: 1.12rem; margin: 0;
         font-weight: 600;
     }
     /* ===== Radio buttons: chip style ===== */
     .stRadio > div { gap: 0.4rem; }
     .stRadio > div > label {
         border: 1px solid #e2e8f0; border-radius: 8px;
-        padding: 0.3rem 0.75rem; font-size: 0.85rem;
+        padding: 0.35rem 0.85rem; font-size: 0.95rem;
         transition: all 0.15s ease;
     }
     .stRadio > div > label:hover {
@@ -270,21 +270,22 @@ st.markdown("""
     /* ===== Number inputs ===== */
     .stNumberInput input { border-radius: 10px; }
     .stTextInput input, .stSelectbox input, .stNumberInput input {
-        min-height: 42px;
-        font-size: 16px;
+        min-height: 46px;
+        font-size: 18px;
     }
 
     /* ===== Toast / info / warning boxes ===== */
     .stAlert { border-radius: 10px; }
     .stMarkdown p, .stCaption, label, .stRadio label, .stCheckbox label {
-        font-size: 1rem;
+        font-size: 1.08rem;
     }
 
     /* ===== Download button ===== */
     .stDownloadButton > button {
         border-radius: 10px; font-weight: 600;
         box-shadow: 0 2px 8px rgba(59,130,246,0.15);
-        min-height: 44px;
+        min-height: 48px;
+        font-size: 18px;
     }
 
     /* ===== Dark mode refinement ===== */
