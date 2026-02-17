@@ -6,12 +6,12 @@ resources, extraction, vocab, ai, anki_parse, tts, anki_package, state.
 import html
 import logging
 import os
+import random
 import re
 import time
 
 import pandas as pd
 import streamlit as st
-from streamlit.components.v1 import html as components_html
 
 import constants
 import resources
@@ -501,175 +501,79 @@ def _analyze_and_set_words(raw_text: str, min_rank: int, max_rank: int) -> bool:
     return True
 
 
-st.markdown("""
-<div class="app-hero">
-    <div class="app-hero-title-row">
+hero_title_col, hero_btn_col = st.columns([6, 1])
+with hero_title_col:
+    st.markdown("""
+    <div class="app-hero" style="padding-bottom:0;">
         <h1>马年新春词汇助手</h1>
-        <button type="button" id="ny-fireworks-btn" class="festive-fire-btn">烟花</button>
     </div>
+    """, unsafe_allow_html=True)
+with hero_btn_col:
+    _fireworks_clicked = st.button("烟花", key="hero_fireworks_btn", use_container_width=True)
+
+st.markdown("""
+<div class="app-hero" style="padding-top:0;">
     <p>新年进步，词汇升级 · 查词、筛词、制卡一体化</p>
 </div>
 """, unsafe_allow_html=True)
 
 
-def _mount_fireworks_launcher() -> None:
-    """Mount a client-side launcher button for fullscreen fireworks."""
-    components_html(
-        """
-        <script>
-        (function () {
-            const hostDoc = (window.parent && window.parent.document) ? window.parent.document : document;
-            function playFireworks() {
-                const old = hostDoc.getElementById("ny-fireworks-overlay");
-                if (old) old.remove();
+def _render_fireworks_overlay() -> None:
+    """Render fullscreen fireworks overlay in current page."""
+    particles = []
+    colors = ["#ff4d4f", "#ff7a45", "#ffa940", "#fadb14", "#73d13d", "#36cfc9", "#597ef7", "#b37feb"]
+    for _ in range(120):
+        left = random.randint(4, 96)
+        top = random.randint(8, 82)
+        size = random.randint(3, 8)
+        dx = random.randint(-180, 180)
+        dy = random.randint(-180, 180)
+        delay = random.uniform(0, 1.0)
+        duration = random.uniform(0.9, 1.8)
+        color = random.choice(colors)
+        particles.append(
+            f'<span class="fw-dot" style="left:{left}vw;top:{top}vh;'
+            f'width:{size}px;height:{size}px;'
+            f'--dx:{dx}px;--dy:{dy}px;'
+            f'animation-delay:{delay:.2f}s;animation-duration:{duration:.2f}s;'
+            f'background:{color};"></span>'
+        )
 
-                const overlay = hostDoc.createElement("div");
-                overlay.id = "ny-fireworks-overlay";
-                overlay.style.position = "fixed";
-                overlay.style.inset = "0";
-                overlay.style.pointerEvents = "none";
-                overlay.style.zIndex = "2147483647";
-                overlay.style.background = "transparent";
-
-                const canvas = hostDoc.createElement("canvas");
-                canvas.style.width = "100%";
-                canvas.style.height = "100%";
-                overlay.appendChild(canvas);
-                hostDoc.body.appendChild(overlay);
-
-                const ctx = canvas.getContext("2d");
-                let width = 0;
-                let height = 0;
-
-                function resize() {
-                    width = hostDoc.documentElement.clientWidth || window.innerWidth || 1280;
-                    height = hostDoc.documentElement.clientHeight || window.innerHeight || 720;
-                    const dpr = Math.max(1, window.devicePixelRatio || 1);
-                    canvas.width = Math.floor(width * dpr);
-                    canvas.height = Math.floor(height * dpr);
-                    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-                }
-                resize();
-                window.addEventListener("resize", resize);
-
-                const colors = ["#ff4d4f", "#ff7a45", "#ffa940", "#fadb14", "#73d13d", "#36cfc9", "#597ef7", "#b37feb"];
-                const sparks = [];
-                const rockets = [];
-                const gravity = 0.05;
-
-                function random(min, max) {
-                    return Math.random() * (max - min) + min;
-                }
-
-                function launchRocket() {
-                    rockets.push({
-                        x: random(width * 0.1, width * 0.9),
-                        y: height + 10,
-                        vx: random(-0.6, 0.6),
-                        vy: random(-12.5, -9.5),
-                        color: colors[Math.floor(Math.random() * colors.length)],
-                        life: random(38, 58)
-                    });
-                }
-
-                function burst(x, y, baseColor) {
-                    const n = Math.floor(random(45, 78));
-                    for (let i = 0; i < n; i++) {
-                        const angle = random(0, Math.PI * 2);
-                        const speed = random(1.2, 5.6);
-                        sparks.push({
-                            x, y,
-                            vx: Math.cos(angle) * speed,
-                            vy: Math.sin(angle) * speed,
-                            alpha: 1,
-                            size: random(1.5, 3.8),
-                            color: baseColor || colors[Math.floor(Math.random() * colors.length)],
-                            decay: random(0.010, 0.022)
-                        });
-                    }
-                }
-
-                let frame = 0;
-                const launchInterval = setInterval(launchRocket, 180);
-                for (let i = 0; i < 6; i++) launchRocket();
-
-                function animate() {
-                    frame += 1;
-                    ctx.fillStyle = "rgba(0, 0, 0, 0.16)";
-                    ctx.fillRect(0, 0, width, height);
-
-                    for (let i = rockets.length - 1; i >= 0; i--) {
-                        const r = rockets[i];
-                        r.x += r.vx;
-                        r.y += r.vy;
-                        r.vy += gravity * 0.35;
-                        r.life -= 1;
-
-                        ctx.beginPath();
-                        ctx.arc(r.x, r.y, 2.2, 0, Math.PI * 2);
-                        ctx.fillStyle = r.color;
-                        ctx.fill();
-
-                        if (r.life <= 0 || r.vy >= -1.0) {
-                            burst(r.x, r.y, r.color);
-                            rockets.splice(i, 1);
-                        }
-                    }
-
-                    for (let i = sparks.length - 1; i >= 0; i--) {
-                        const p = sparks[i];
-                        p.x += p.vx;
-                        p.y += p.vy;
-                        p.vy += gravity;
-                        p.vx *= 0.985;
-                        p.vy *= 0.992;
-                        p.alpha -= p.decay;
-
-                        if (p.alpha <= 0) {
-                            sparks.splice(i, 1);
-                            continue;
-                        }
-
-                        ctx.beginPath();
-                        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-                        ctx.fillStyle = p.color;
-                        ctx.globalAlpha = Math.max(0, p.alpha);
-                        ctx.fill();
-                        ctx.globalAlpha = 1;
-                    }
-
-                    if (frame < 420 || rockets.length > 0 || sparks.length > 0) {
-                        requestAnimationFrame(animate);
-                    } else {
-                        cleanup();
-                    }
-                }
-
-                function cleanup() {
-                    clearInterval(launchInterval);
-                    window.removeEventListener("resize", resize);
-                    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
-                }
-
-                animate();
-                setTimeout(cleanup, 7800);
-            }
-
-            const launcher = hostDoc.getElementById("ny-fireworks-btn");
-            if (launcher && !launcher.dataset.bound) {
-                launcher.dataset.bound = "1";
-                launcher.addEventListener("click", function () {
-                    playFireworks();
-                });
-            }
-        })();
-        </script>
+    st.markdown(
+        f"""
+        <style>
+            .fw-layer {{
+                position: fixed;
+                inset: 0;
+                pointer-events: none;
+                z-index: 2147483647;
+                overflow: hidden;
+            }}
+            .fw-dot {{
+                position: fixed;
+                border-radius: 999px;
+                opacity: 0;
+                box-shadow: 0 0 10px currentColor, 0 0 22px rgba(255,255,255,0.28);
+                animation-name: fw-pop;
+                animation-timing-function: ease-out;
+                animation-fill-mode: forwards;
+            }}
+            @keyframes fw-pop {{
+                0%   {{ transform: translate(0,0) scale(0.35); opacity: 0; }}
+                18%  {{ opacity: 1; }}
+                100% {{ transform: translate(var(--dx), var(--dy)) scale(1.35); opacity: 0; }}
+            }}
+        </style>
+        <div class="fw-layer">
+            {''.join(particles)}
+        </div>
         """,
-        height=0,
+        unsafe_allow_html=True,
     )
 
 
-_mount_fireworks_launcher()
+if _fireworks_clicked:
+    _render_fireworks_overlay()
 
 
 def _do_lookup(query_word: str) -> None:
