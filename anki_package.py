@@ -71,7 +71,8 @@ def generate_anki_package(
         font-size: 30px; font-weight: 700; color: #0056b3;
         margin: 0 0 6px 0; line-height: 1.3;
     }
-    .nightMode .phrase { color: #66b0ff; }
+    .nightMode .card { background-color: #1a1a2e; color: #e0e0e0; }
+    .nightMode .phrase { color: #7cb8ff; }
 
     .audio-phrase, .audio-ex {
         display: inline-block; vertical-align: middle;
@@ -90,7 +91,7 @@ def generate_anki_package(
         font-size: 23px; font-weight: bold; color: #222;
         margin: 0 0 8px 0; text-align: left; line-height: 1.45;
     }
-    .nightMode .meaning { color: #e0e0e0; }
+    .nightMode .meaning { color: #f0f0f0; }
 
     .example {
         background: #f7f9fa;
@@ -102,7 +103,7 @@ def generate_anki_package(
         text-align: left;
         margin: 0 0 8px 0;
     }
-    .nightMode .example { background: #383838; color: #ccc; border-left-color: #66b0ff; }
+    .nightMode .example { background: #252540; color: #d4d4d8; border-left-color: #7cb8ff; }
 
     .etymology {
         font-size: 19px; color: #555;
@@ -111,7 +112,11 @@ def generate_anki_package(
         margin: 6px 0 0 0; border: 1px solid #fef3c7;
         text-align: left; line-height: 1.45;
     }
-    .nightMode .etymology { background-color: #333; color: #aaa; border-color: #444; }
+    .nightMode .etymology { background-color: #1e2a1e; color: #a5d6a7; border-color: #2e4a2e; }
+    .nightMode hr {
+        background: linear-gradient(to right,
+            rgba(255,255,255,0), rgba(255,255,255,0.12), rgba(255,255,255,0));
+    }
     """
 
     DECK_ID = zlib.adler32(deck_name.encode('utf-8'))

@@ -235,6 +235,15 @@ st.markdown("""
     /* ===== Section dividers ===== */
     hr { border: none; height: 1px; background: #e5e7eb; margin: 1.5rem 0; }
 
+    /* ===== AI lookup result styles ===== */
+    .ql-result { padding: 4px 0; }
+    .ql-word   { color: #1e3a8a; margin-bottom: 6px; font-size: 18px; line-height: 1.7; }
+    .ql-def    { color: #1e3a8a; margin-bottom: 6px; font-size: 18px; line-height: 1.7; }
+    .ql-etym   { color: #065f46; background: #ecfdf5; padding: 6px 10px; border-radius: 8px; margin: 8px 0; line-height: 1.7; }
+    .ql-ex     { color: #374151; margin-top: 6px; font-size: 18px; line-height: 1.7; }
+    .ql-misc   { color: #6b7280; margin-bottom: 8px; font-size: 18px; line-height: 1.7; }
+    .ql-stream { padding: 10px 12px; border: 1px solid #dbeafe; background: #f8fbff; border-radius: 10px; color: #1f2937; line-height: 1.7; font-size: 18px; }
+
     /* ===== App footer ===== */
     .app-footer {
         margin-top: 3rem; padding: 1.25rem 0; text-align: center;
@@ -290,52 +299,154 @@ st.markdown("""
 
     /* ===== Dark mode refinement ===== */
     @media (prefers-color-scheme: dark) {
-        .stApp { background: #0b1220; color: #e5e7eb; }
-        .stForm {
-            background: #111827;
-            border-color: #1f2937;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.35);
-        }
-        [data-testid="stMetric"] {
-            background: linear-gradient(135deg, #0f172a 0%, #111827 100%);
-            border-color: #1f2937;
-        }
-        .stTabs [data-baseweb="tab-list"] {
-            background: #0f172a;
-            border-color: #1f2937;
-        }
-        .stTabs [data-baseweb="tab"] {
-            color: #cbd5e1;
-        }
-        .stTabs [data-baseweb="tab"][aria-selected="true"] {
-            background: #111827;
-            color: #e5e7eb;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.35);
-        }
-        .stExpander {
-            border-color: #1f2937;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.35);
-        }
-        .stAlert {
-            background: #0f172a;
-            border-color: #1f2937;
-            color: #e5e7eb;
-        }
-        hr { background: #1f2937; }
-        .app-footer {
-            color: #94a3b8;
-            border-top-color: #1f2937;
+        /* -- Base -- */
+        .stApp { background: #0b1120; color: #e2e8f0; }
+
+        /* -- Hero gradient for dark bg -- */
+        .app-hero h1 {
+            background: linear-gradient(135deg, #60a5fa 0%, #818cf8 50%, #a78bfa 100%);
+            -webkit-background-clip: text; background-clip: text;
         }
         .app-hero p { color: #94a3b8; }
+
+        /* -- Forms & cards -- */
+        .stForm {
+            background: #111827;
+            border-color: #1e293b;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+        }
+
+        /* -- Inputs: text, number, select, textarea -- */
+        .stTextInput input, .stNumberInput input, .stSelectbox input {
+            background: #1e293b; color: #e2e8f0;
+            border-color: #334155;
+        }
+        .stTextInput input:focus, .stNumberInput input:focus, .stSelectbox input:focus {
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 2px rgba(96,165,250,0.25);
+        }
+        .stTextInput input::placeholder { color: #64748b; }
+        .stTextArea textarea {
+            background: #1e293b; color: #e2e8f0;
+            border-color: #334155;
+        }
+        .stTextArea textarea:focus {
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 2px rgba(96,165,250,0.25);
+        }
+        .stTextArea textarea::placeholder { color: #64748b; }
+
+        /* -- Buttons -- */
+        .stButton>button {
+            border-color: #334155;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .stButton>button:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+        }
+        .stDownloadButton > button {
+            box-shadow: 0 2px 8px rgba(96,165,250,0.2);
+        }
+
+        /* -- Metric cards -- */
+        [data-testid="stMetric"] {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            border-color: #1e293b;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        [data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f1f5f9; }
+        [data-testid="stMetric"] [data-testid="stMetricLabel"] { color: #94a3b8; }
+
+        /* -- Tabs -- */
+        .stTabs [data-baseweb="tab-list"] {
+            background: #0f172a;
+            border-color: #1e293b;
+        }
+        .stTabs [data-baseweb="tab"] { color: #94a3b8; }
+        .stTabs [data-baseweb="tab"]:hover { color: #cbd5e1; }
+        .stTabs [data-baseweb="tab"][aria-selected="true"] {
+            background: #1e293b;
+            color: #f1f5f9;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        }
+
+        /* -- Expanders -- */
+        .stExpander {
+            border-color: #1e293b;
+            background: #111827;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
+        .stExpander summary span { color: #e2e8f0; }
+
+        /* -- Alerts -- */
+        .stAlert {
+            background: #0f172a;
+            border-color: #1e293b;
+            color: #e2e8f0;
+        }
+
+        /* -- Radio chips -- */
         .stRadio > div > label {
             border-color: #334155;
-            color: #e5e7eb;
-            background: #0f172a;
+            color: #cbd5e1;
+            background: #1e293b;
         }
         .stRadio > div > label:hover {
-            border-color: #3b82f6;
+            border-color: #60a5fa;
             background: #172554;
+            color: #e2e8f0;
         }
+
+        /* -- Checkbox -- */
+        .stCheckbox label { color: #cbd5e1; }
+
+        /* -- Progress bar dark glow -- */
+        .stProgress > div > div > div > div {
+            background: linear-gradient(90deg, #3b82f6 0%, #818cf8 100%);
+        }
+
+        /* -- Markdown text -- */
+        .stMarkdown p, .stMarkdown li, .stMarkdown h1,
+        .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 { color: #e2e8f0; }
+        .stCaption { color: #94a3b8 !important; }
+        label { color: #cbd5e1; }
+
+        /* -- Code block -- */
+        .stCodeBlock, pre, code {
+            background: #0f172a !important;
+            color: #e2e8f0 !important;
+            border-color: #1e293b !important;
+        }
+
+        /* -- Dataframe -- */
+        .stDataFrame { border-color: #1e293b; }
+
+        /* -- Dividers & footer -- */
+        hr { background: #1e293b; }
+        .app-footer { color: #64748b; border-top-color: #1e293b; }
+
+        /* -- File uploader -- */
+        [data-testid="stFileUploader"] {
+            border-color: #334155;
+        }
+        [data-testid="stFileUploader"] section {
+            background: #1e293b;
+            border-color: #334155;
+        }
+
+        /* -- Spinner text -- */
+        .stSpinner > div { color: #94a3b8; }
+
+        /* -- AI lookup result card -- */
+        .ql-result { background: #1e293b !important; border-color: #334155 !important; }
+        .ql-word { color: #93c5fd !important; }
+        .ql-def  { color: #c4b5fd !important; }
+        .ql-etym { background: #1a2332 !important; color: #6ee7b7 !important; }
+        .ql-ex   { color: #cbd5e1 !important; }
+        .ql-misc { color: #94a3b8 !important; }
+
+        /* -- Streaming box -- */
+        .ql-stream { background: #1e293b !important; border-color: #334155 !important; color: #e2e8f0 !important; }
     }
 
     /* ===== Mobile (iOS/Android) ===== */
@@ -770,13 +881,7 @@ def _do_lookup(query_word: str) -> None:
             def _on_stream(text: str) -> None:
                 safe = html.escape(text).replace("\n", "<br>")
                 stream_box.markdown(
-                    (
-                        '<div style="padding:10px 12px;border:1px solid #dbeafe;'
-                        'background:#f8fbff;border-radius:10px;color:#1f2937;'
-                        'line-height:1.7;font-size:16px;">'
-                        f'{safe}'
-                        '</div>'
-                    ),
+                    f'<div class="ql-stream">{safe}</div>',
                     unsafe_allow_html=True,
                 )
 
@@ -896,24 +1001,21 @@ def render_quick_lookup() -> None:
             line = line.strip()
             if not line:
                 continue
+            safe = html.escape(line)
 
             if line.startswith("🌱"):
-                safe = html.escape(line)
-                formatted_lines.append(f'<div style="color:#065f46;background:#ecfdf5;padding:6px 10px;border-radius:8px;margin:8px 0;line-height:1.7;">{safe}</div>')
+                formatted_lines.append(f'<div class="ql-etym">{safe}</div>')
             elif "|" in line and len(line) < 50:
-                safe = html.escape(line)
-                formatted_lines.append(f'<div style="color:#1e3a8a;margin-bottom:6px;font-size:16px;line-height:1.7;">{safe}</div>')
+                formatted_lines.append(f'<div class="ql-def">{safe}</div>')
             elif line.startswith("•"):
-                safe = html.escape(line)
-                formatted_lines.append(f'<div style="color:#374151;margin-top:6px;font-size:16px;line-height:1.7;">{safe}</div>')
+                formatted_lines.append(f'<div class="ql-ex">{safe}</div>')
             else:
-                safe = html.escape(line)
-                formatted_lines.append(f'<div style="color:#6b7280;margin-bottom:8px;font-size:16px;line-height:1.7;">{safe}</div>')
+                formatted_lines.append(f'<div class="ql-misc">{safe}</div>')
 
         display_html = "".join(formatted_lines)
         rank_badge = f'<span style="display:inline-block;background:{rank_color};color:white;padding:3px 10px;border-radius:5px;font-size:13px;font-weight:600;">📊 {rank} · {rank_label}</span>'
 
-        st.markdown(f"""<div style="padding:4px 0;">{display_html}<div style="margin-top:10px;">{rank_badge}</div></div>""", unsafe_allow_html=True)
+        st.markdown(f'<div class="ql-result">{display_html}<div style="margin-top:10px;">{rank_badge}</div></div>', unsafe_allow_html=True)
 
     elif result and 'error' in result:
         # Avoid flashing red error blocks on reruns/refresh.
