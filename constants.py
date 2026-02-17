@@ -35,7 +35,6 @@ DEFAULT_SESSION_STATE = {
     'uploader_id': DEFAULT_UPLOADER_ID,
     'anki_input_text': "",
     'anki_pkg_name': "",
-    'url_input_key': "",
 }
 
 # ---- Rate limiting (generous – designed to stop bots, not humans) ----
