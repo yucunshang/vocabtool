@@ -457,6 +457,12 @@ def _analyze_and_set_words(raw_text: str, min_rank: int, max_rank: int) -> bool:
         return False
     final_data, raw_count, stats_info = analyze_logic(raw_text, min_rank, max_rank, False)
     set_generated_words_state(final_data, raw_count, stats_info)
+    if not final_data:
+        st.info(
+            f"📭 共提取 {raw_count} 个原始词，经 rank {min_rank}–{max_rank} 筛选后无剩余单词。"
+            " 可尝试扩大 rank 范围，或使用「词表」模式直接粘贴。"
+        )
+        return False
     return True
 
 
