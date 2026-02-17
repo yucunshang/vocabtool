@@ -144,7 +144,18 @@ st.markdown("""
         transform: translateY(-1px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.10);
     }
-    .stButton>button:active { transform: translateY(0); }
+    .stButton>button:active {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 rgba(0,0,0,0);
+        transition: transform 0.08s ease, box-shadow 0.08s ease !important;
+    }
+
+    /* Form submit buttons (e.g. lookup) – same active feedback */
+    .stForm [data-testid="stFormSubmitButton"] button:active {
+        transform: scale(0.93);
+        box-shadow: 0 0 0 rgba(0,0,0,0);
+        transition: transform 0.08s ease !important;
+    }
 
     /* ===== Text areas ===== */
     .stTextArea textarea {
