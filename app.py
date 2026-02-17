@@ -509,7 +509,7 @@ with hero_title_col:
     </div>
     """, unsafe_allow_html=True)
 with hero_btn_col:
-    _fireworks_clicked = st.button("烟花", key="hero_fireworks_btn", use_container_width=True)
+    _fireworks_clicked = st.button("🎆 放烟花", key="hero_fireworks_btn", use_container_width=True)
 
 st.markdown("""
 <div class="app-hero" style="padding-top:0;">
@@ -522,14 +522,14 @@ def _render_fireworks_overlay() -> None:
     """Render fullscreen fireworks overlay in current page."""
     particles = []
     colors = ["#ff4d4f", "#ff7a45", "#ffa940", "#fadb14", "#73d13d", "#36cfc9", "#597ef7", "#b37feb"]
-    for _ in range(120):
+    for _ in range(96):
         left = random.randint(4, 96)
         top = random.randint(8, 82)
         size = random.randint(3, 8)
         dx = random.randint(-180, 180)
         dy = random.randint(-180, 180)
-        delay = random.uniform(0, 1.0)
-        duration = random.uniform(0.9, 1.8)
+        delay = random.uniform(0, 0.35)
+        duration = random.uniform(0.55, 1.05)
         color = random.choice(colors)
         particles.append(
             f'<span class="fw-dot" style="left:{left}vw;top:{top}vh;'
