@@ -208,6 +208,13 @@ st.markdown("""
     .app-hero {
         text-align: center; padding: 1.5rem 0 0.5rem;
     }
+    .app-hero-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.55rem;
+        flex-wrap: wrap;
+    }
     .app-hero h1 {
         font-size: 2.45rem; font-weight: 900; letter-spacing: -0.03em;
         background: linear-gradient(135deg, #b91c1c 0%, #dc2626 45%, #f59e0b 100%);
@@ -223,10 +230,16 @@ st.markdown("""
         display: inline-flex; align-items: center; justify-content: center;
         border: 1px solid #f59e0b; color: #7c2d12;
         background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-        border-radius: 999px; padding: 0.42rem 0.95rem;
-        font-weight: 700; font-size: 0.92rem;
+        border-radius: 999px; padding: 0.34rem 0.86rem;
+        font-weight: 700; font-size: 0.88rem;
         box-shadow: 0 2px 8px rgba(245,158,11,0.2);
-        margin-top: 0.6rem;
+        margin: 0;
+        cursor: pointer;
+        line-height: 1.1;
+    }
+    .festive-fire-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 5px 14px rgba(245,158,11,0.26);
     }
 
     /* ===== Radio buttons: chip style ===== */
@@ -490,7 +503,10 @@ def _analyze_and_set_words(raw_text: str, min_rank: int, max_rank: int) -> bool:
 
 st.markdown("""
 <div class="app-hero">
-    <h1>马年新春词汇助手</h1>
+    <div class="app-hero-title-row">
+        <h1>马年新春词汇助手</h1>
+        <button type="button" id="ny-fireworks-btn" class="festive-fire-btn">烟花</button>
+    </div>
     <p>新年进步，词汇升级 · 查词、筛词、制卡一体化</p>
 </div>
 """, unsafe_allow_html=True)
@@ -503,42 +519,6 @@ def _mount_fireworks_launcher() -> None:
         <script>
         (function () {
             const hostDoc = (window.parent && window.parent.document) ? window.parent.document : document;
-            if (!hostDoc.getElementById("ny-fireworks-launcher-style")) {
-                const style = hostDoc.createElement("style");
-                style.id = "ny-fireworks-launcher-style";
-                style.textContent = `
-                    #ny-fireworks-launcher {
-                        position: fixed;
-                        right: 18px;
-                        bottom: 18px;
-                        z-index: 2147483000;
-                        border: 1px solid #f59e0b;
-                        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-                        color: #7c2d12;
-                        border-radius: 999px;
-                        padding: 10px 14px;
-                        font-size: 14px;
-                        font-weight: 700;
-                        line-height: 1;
-                        cursor: pointer;
-                        box-shadow: 0 6px 16px rgba(245, 158, 11, 0.28);
-                    }
-                    #ny-fireworks-launcher:hover {
-                        transform: translateY(-1px);
-                        box-shadow: 0 8px 20px rgba(245, 158, 11, 0.34);
-                    }
-                `;
-                hostDoc.head.appendChild(style);
-            }
-
-            if (!hostDoc.getElementById("ny-fireworks-launcher")) {
-                const btn = hostDoc.createElement("button");
-                btn.id = "ny-fireworks-launcher";
-                btn.type = "button";
-                btn.textContent = "🎆 全屏烟花";
-                hostDoc.body.appendChild(btn);
-            }
-
             function playFireworks() {
                 const old = hostDoc.getElementById("ny-fireworks-overlay");
                 if (old) old.remove();
@@ -675,7 +655,7 @@ def _mount_fireworks_launcher() -> None:
                 setTimeout(cleanup, 7800);
             }
 
-            const launcher = hostDoc.getElementById("ny-fireworks-launcher");
+            const launcher = hostDoc.getElementById("ny-fireworks-btn");
             if (launcher && !launcher.dataset.bound) {
                 launcher.dataset.bound = "1";
                 launcher.addEventListener("click", function () {
