@@ -476,9 +476,6 @@ def _do_lookup(query_word: str) -> None:
 
 
 def render_quick_lookup() -> None:
-    st.markdown("### AI 极速查词")
-    st.caption("输入单词后按回车或点击查询")
-
     if "quick_lookup_last_query" not in st.session_state:
         st.session_state["quick_lookup_last_query"] = ""
     if "quick_lookup_last_result" not in st.session_state:
@@ -494,31 +491,31 @@ def render_quick_lookup() -> None:
     in_cooldown = now_ts < st.session_state["quick_lookup_block_until"]
     lookup_disabled = st.session_state["quick_lookup_is_loading"] or in_cooldown
 
-    # Apply pending lookup word before text_input widget is created.
-    # This avoids mutating an already-instantiated widget state key.
     pending_word = st.session_state.pop("_quick_lookup_pending_word", "")
     if pending_word:
         st.session_state["quick_lookup_word"] = pending_word
         st.session_state["_auto_lookup_word"] = pending_word
 
-    # Auto-lookup from clicked word (query param, pills, or word-block)
     auto_word = st.session_state.pop("_auto_lookup_word", "")
     if auto_word and not in_cooldown:
         _do_lookup(auto_word)
 
-    with st.form("quick_lookup_form", clear_on_submit=False):
+    _model_name = get_config()["openai_model"]
+    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else f"🔍 {_model_name}"
+
+    with st.form("quick_lookup_form", clear_on_submit=False, border=False):
         col_word, col_btn = st.columns([4, 1])
         with col_word:
             lookup_word = st.text_input(
                 "输入单词或短语",
-                placeholder="如：serendipity, take off, run into...",
+                placeholder="输入单词或短语，回车查询 …",
                 key="quick_lookup_word",
                 label_visibility="collapsed",
                 autocomplete="off",
             )
         with col_btn:
             lookup_submit = st.form_submit_button(
-                "查询中..." if st.session_state["quick_lookup_is_loading"] else "查询",
+                _btn_label,
                 type="primary",
                 use_container_width=True,
                 disabled=lookup_disabled
