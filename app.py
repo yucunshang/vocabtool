@@ -6,7 +6,6 @@ resources, extraction, vocab, ai, anki_parse, tts, anki_package, state.
 import html
 import logging
 import os
-import random
 import re
 import time
 
@@ -19,13 +18,14 @@ from ai import CardFormat, build_card_prompt, get_word_quick_definition, process
 from anki_package import cleanup_old_apkg_files, generate_anki_package
 from anki_parse import parse_anki_data
 from config import get_config
+from errors import ErrorHandler
 from extraction import (
     extract_text_from_file,
     extract_text_from_url,
     is_upload_too_large,
     parse_anki_txt_export,
 )
-from state import clear_all_state, set_generated_words_state
+from state import set_generated_words_state
 from utils import get_beijing_time_str, render_copy_button, run_gc
 from vocab import analyze_logic
 
@@ -82,7 +82,7 @@ logger = logging.getLogger(__name__)
 # Page Configuration
 # ==========================================
 st.set_page_config(
-    page_title="马到成功 · 新春词汇助手",
+    page_title="Vocab Flow Ultra · 词汇助手",
     page_icon="⚡️",
     layout="centered",
     initial_sidebar_state="collapsed"
@@ -208,40 +208,16 @@ st.markdown("""
     .app-hero {
         text-align: center; padding: 1.5rem 0 0.5rem;
     }
-    .app-hero-title-row {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.55rem;
-        flex-wrap: wrap;
-    }
     .app-hero h1 {
         font-size: 2.45rem; font-weight: 900; letter-spacing: -0.03em;
-        background: linear-gradient(135deg, #b91c1c 0%, #dc2626 45%, #f59e0b 100%);
+        background: linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #6366f1 100%);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
         background-clip: text; margin-bottom: 0.2rem;
-        text-shadow: 0 1px 2px rgba(185,28,28,0.15);
     }
     .app-hero p {
-        color: #9a3412; font-size: 1.02rem; margin: 0;
+        color: #64748b; font-size: 1.02rem; margin: 0;
         font-weight: 600;
     }
-    .festive-fire-btn {
-        display: inline-flex; align-items: center; justify-content: center;
-        border: 1px solid #f59e0b; color: #7c2d12;
-        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-        border-radius: 999px; padding: 0.34rem 0.86rem;
-        font-weight: 700; font-size: 0.88rem;
-        box-shadow: 0 2px 8px rgba(245,158,11,0.2);
-        margin: 0;
-        cursor: pointer;
-        line-height: 1.1;
-    }
-    .festive-fire-btn:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 5px 14px rgba(245,158,11,0.26);
-    }
-
     /* ===== Radio buttons: chip style ===== */
     .stRadio > div { gap: 0.4rem; }
     .stRadio > div > label {
@@ -428,57 +404,6 @@ def render_anki_download_button(
 # ==========================================
 
 
-def render_card_format_selector(key_prefix: str) -> CardFormat:
-    """Render card format options and return the selected CardFormat dict.
-
-    ``key_prefix`` makes widget keys unique when called in multiple places.
-    """
-    st.markdown("#### ⚙️ 卡片格式自定义")
-
-    col_front, col_def = st.columns(2)
-    with col_front:
-        front_label = st.radio(
-            "正面内容",
-            options=list(constants.FRONT_OPTIONS.keys()),
-            index=1,
-            horizontal=True,
-            key=f"{key_prefix}_front",
-        )
-    with col_def:
-        def_label = st.radio(
-            "释义语言",
-            options=list(constants.DEFINITION_OPTIONS.keys()),
-            index=0,
-            horizontal=True,
-            key=f"{key_prefix}_def",
-        )
-
-    col_ex, col_ety = st.columns(2)
-    with col_ex:
-        ex_label = st.radio(
-            "例句数量",
-            options=list(constants.EXAMPLE_COUNT_OPTIONS.keys()),
-            index=0,
-            horizontal=True,
-            key=f"{key_prefix}_ex",
-        )
-    with col_ety:
-        ety_label = st.radio(
-            "词源词根",
-            options=list(constants.ETYMOLOGY_OPTIONS.keys()),
-            index=0,
-            horizontal=True,
-            key=f"{key_prefix}_ety",
-        )
-
-    return CardFormat(
-        front=constants.FRONT_OPTIONS[front_label],
-        definition=constants.DEFINITION_OPTIONS[def_label],
-        examples=constants.EXAMPLE_COUNT_OPTIONS[ex_label],
-        etymology=constants.ETYMOLOGY_OPTIONS[ety_label],
-    )
-
-
 def _rank_badge_style(rank: int) -> tuple[str, str]:
     """Map numeric rank to badge color and label."""
     if rank <= 5000:
@@ -501,79 +426,12 @@ def _analyze_and_set_words(raw_text: str, min_rank: int, max_rank: int) -> bool:
     return True
 
 
-hero_title_col, hero_btn_col = st.columns([6, 1])
-with hero_title_col:
-    st.markdown("""
-    <div class="app-hero" style="padding-bottom:0;">
-        <h1>马年新春词汇助手</h1>
-    </div>
-    """, unsafe_allow_html=True)
-with hero_btn_col:
-    _fireworks_clicked = st.button("🎆 放烟花", key="hero_fireworks_btn", use_container_width=True)
-
 st.markdown("""
-<div class="app-hero" style="padding-top:0;">
-    <p>新年进步，词汇升级 · 查词、筛词、制卡一体化</p>
+<div class="app-hero">
+    <h1>词汇助手</h1>
+    <p>查词、筛词、制卡一体化</p>
 </div>
 """, unsafe_allow_html=True)
-
-
-def _render_fireworks_overlay() -> None:
-    """Render fullscreen fireworks overlay in current page."""
-    particles = []
-    colors = ["#ff4d4f", "#ff7a45", "#ffa940", "#fadb14", "#73d13d", "#36cfc9", "#597ef7", "#b37feb"]
-    for _ in range(96):
-        left = random.randint(4, 96)
-        top = random.randint(8, 82)
-        size = random.randint(3, 8)
-        dx = random.randint(-180, 180)
-        dy = random.randint(-180, 180)
-        delay = random.uniform(0, 0.35)
-        duration = random.uniform(0.55, 1.05)
-        color = random.choice(colors)
-        particles.append(
-            f'<span class="fw-dot" style="left:{left}vw;top:{top}vh;'
-            f'width:{size}px;height:{size}px;'
-            f'--dx:{dx}px;--dy:{dy}px;'
-            f'animation-delay:{delay:.2f}s;animation-duration:{duration:.2f}s;'
-            f'background:{color};"></span>'
-        )
-
-    st.markdown(
-        f"""
-        <style>
-            .fw-layer {{
-                position: fixed;
-                inset: 0;
-                pointer-events: none;
-                z-index: 2147483647;
-                overflow: hidden;
-            }}
-            .fw-dot {{
-                position: fixed;
-                border-radius: 999px;
-                opacity: 0;
-                box-shadow: 0 0 10px currentColor, 0 0 22px rgba(255,255,255,0.28);
-                animation-name: fw-pop;
-                animation-timing-function: ease-out;
-                animation-fill-mode: forwards;
-            }}
-            @keyframes fw-pop {{
-                0%   {{ transform: translate(0,0) scale(0.35); opacity: 0; }}
-                18%  {{ opacity: 1; }}
-                100% {{ transform: translate(var(--dx), var(--dy)) scale(1.35); opacity: 0; }}
-            }}
-        </style>
-        <div class="fw-layer">
-            {''.join(particles)}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-if _fireworks_clicked:
-    _render_fireworks_overlay()
 
 
 def _do_lookup(query_word: str) -> None:
@@ -1071,7 +929,6 @@ with tab_extract:
                             run_gc()
                         except Exception as e:
                             audio_text.markdown("**音频进度**：❌ 失败")
-                            from errors import ErrorHandler
                             ErrorHandler.handle(e, "生成出错")
                     else:
                         card_text.markdown("**制卡进度**：❌ 解析失败")
@@ -1176,6 +1033,59 @@ with tab_extract:
                 strict_prompt_template = build_card_prompt(words_str_for_prompt, card_fmt)
                 st.code(strict_prompt_template, language="text")
 
+            with st.expander("📋 AI Prompt 模板（可直接复制）", expanded=False):
+                st.markdown("以下三个模板可直接复制到 ChatGPT / DeepSeek / Claude 等 AI 中使用。"
+                            "将 `[你的单词列表]` 替换成实际单词即可。")
+
+                st.markdown("---")
+                st.markdown("**模板 1：单词 + 中文释义 + 1 例句（简洁版）**")
+                st.code(
+                    '请为以下单词各生成一张 Anki 卡片。\n'
+                    '格式要求：每行一个单词，字段之间用 ||| 分隔。\n'
+                    '字段顺序：单词 ||| 中文释义 ||| 一个英文例句\n\n'
+                    '示例：\n'
+                    'hectic ||| 忙乱的 ||| She has a hectic schedule today.\n'
+                    'altruism ||| 利他主义 ||| His donation was motivated by altruism.\n\n'
+                    '请处理以下单词：\n'
+                    '[你的单词列表，逗号分隔]',
+                    language="text",
+                )
+
+                st.markdown("---")
+                st.markdown("**模板 2：短语 + 中英双语释义 + 2 例句 + 词源（完整版）**")
+                st.code(
+                    '请为以下单词各生成一张 Anki 卡片。\n'
+                    '格式要求：每行一个，字段之间用 ||| 分隔。\n'
+                    '字段顺序：常用短语搭配 ||| 中文释义 / English definition ||| 例句1 // 例句2 ||| 词源词根拆解\n\n'
+                    '注意：\n'
+                    '- 第一个字段是包含目标词的短语，不是单独的单词\n'
+                    '- 释义用"中文 / English"格式\n'
+                    '- 两个例句之间用 // 分隔\n'
+                    '- 词源用中文解释词根含义\n\n'
+                    '示例：\n'
+                    'a hectic schedule ||| 忙乱的 / full of frantic activity ||| She has a hectic schedule with meetings all day. // The hectic pace of city life can be exhausting. ||| hect- (持续的) + -ic (形容词后缀)\n\n'
+                    '请处理以下单词：\n'
+                    '[你的单词列表，逗号分隔]',
+                    language="text",
+                )
+
+                st.markdown("---")
+                st.markdown("**模板 3：单词 + 英文释义 + 3 例句（英英版）**")
+                st.code(
+                    '请为以下单词各生成一张 Anki 卡片。\n'
+                    '格式要求：每行一个单词，字段之间用 ||| 分隔。\n'
+                    '字段顺序：word ||| English definition ||| example1 // example2 // example3\n\n'
+                    '注意：\n'
+                    '- 释义用简洁英文（B2-C1 水平，15 词以内）\n'
+                    '- 三个例句之间用 // 分隔\n'
+                    '- 每个例句都需包含目标单词\n\n'
+                    '示例：\n'
+                    'resilience ||| the ability to recover quickly from difficulties ||| Her resilience helped her overcome the setback. // The community showed remarkable resilience after the flood. // Building resilience takes time and practice.\n\n'
+                    '请处理以下单词：\n'
+                    '[你的单词列表，逗号分隔]',
+                    language="text",
+                )
+
 # ==========================================
 # Tab 2: Manual Anki Card Creation
 # ==========================================
@@ -1257,7 +1167,6 @@ with tab_anki:
                         st.toast("任务完成！", icon="🎉")
                         run_gc()
                     except Exception as e:
-                        from errors import ErrorHandler
                         ErrorHandler.handle(e, "生成文件出错")
                 else:
                     st.error("❌ 解析失败，请检查输入格式。")

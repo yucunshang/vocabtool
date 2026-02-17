@@ -38,7 +38,7 @@ DEFAULT_CARD_FORMAT: CardFormat = {
 # Fast in-memory cache for quick lookup to match vocabtool behavior.
 _QUERY_CACHE: OrderedDict[str, str] = OrderedDict()
 _QUERY_CACHE_MAX = 500
-_OPENAI_CLIENT: Any | None = None
+_OPENAI_CLIENT: Optional[Any] = None
 
 LOOKUP_SYSTEM_PROMPT = """# Role
 Atomic Dictionary.

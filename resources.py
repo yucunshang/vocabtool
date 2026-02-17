@@ -39,7 +39,7 @@ def load_nlp_resources() -> Tuple[Any, Any]:
             try:
                 nltk.data.find(f'tokenizers/{pkg}')
             except LookupError:
-                logger.info(f"Downloading NLTK package: {pkg}")
+                logger.info("Downloading NLTK package: %s", pkg)
                 nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
     except Exception as e:
         ErrorHandler.handle(e, "NLP 资源加载失败")
@@ -94,7 +94,7 @@ def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame]]:
             vocab_dict = pd.Series(df[rank_col].values, index=df[word_col]).to_dict()
             return vocab_dict, df
         except Exception as e:
-            logger.error(f"Error loading CSV file {file_path}: {e}")
+            logger.error("Error loading CSV file %s: %s", file_path, e)
             return {}, None
 
     logger.warning("No vocabulary data files found (searched in %s)", root_dir)

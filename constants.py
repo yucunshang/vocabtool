@@ -45,25 +45,3 @@ VOICE_MAP = {
     "👨 英音男声 (Ryan)": "en-GB-RyanNeural",
 }
 
-# ---- Card format customization ----
-FRONT_OPTIONS = {
-    "📝 单词": "word",
-    "📝 短语/搭配": "phrase",
-}
-
-DEFINITION_OPTIONS = {
-    "🇨🇳 中文释义": "cn",
-    "🇬🇧 英文释义": "en",
-    "🇨🇳🇬🇧 中英双语": "both",
-}
-
-EXAMPLE_COUNT_OPTIONS = {
-    "1 个例句": 1,
-    "2 个例句": 2,
-    "3 个例句": 3,
-}
-
-ETYMOLOGY_OPTIONS = {
-    "✅ 包含词源": True,
-    "❌ 不含词源": False,
-}
