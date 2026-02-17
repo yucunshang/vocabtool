@@ -537,6 +537,12 @@ def render_quick_lookup() -> None:
         st.session_state["quick_lookup_word"] = pending_word
         st.session_state["_auto_lookup_word"] = pending_word
 
+    # Handle pending clear (must happen before text_input widget is created)
+    if st.session_state.pop("_quick_lookup_pending_clear", False):
+        st.session_state["quick_lookup_word"] = ""
+        st.session_state["quick_lookup_last_query"] = ""
+        st.session_state["quick_lookup_last_result"] = None
+
     auto_word = st.session_state.pop("_auto_lookup_word", "")
     if auto_word and not in_cooldown:
         _do_lookup(auto_word)
@@ -568,9 +574,7 @@ def render_quick_lookup() -> None:
             with col_clear:
                 clear_submit = st.form_submit_button("✕", use_container_width=True)
             if clear_submit:
-                st.session_state["quick_lookup_word"] = ""
-                st.session_state["quick_lookup_last_query"] = ""
-                st.session_state["quick_lookup_last_result"] = None
+                st.session_state["_quick_lookup_pending_clear"] = True
                 st.rerun()
 
     if in_cooldown:
