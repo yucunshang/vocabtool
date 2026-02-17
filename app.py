@@ -164,12 +164,17 @@ st.markdown("""
         -webkit-overflow-scrolling: touch;
     }
 
-    /* ===== Form cards ===== */
-    .stForm {
-        border: 1px solid #e5e7eb; border-radius: 14px;
-        padding: 1.25rem 1.5rem; background: #fafbfc;
+    /* ===== Form cards (only for bordered forms) ===== */
+    .stForm:not([class*="borderless"]) {
+        border-radius: 14px;
         box-shadow: 0 1px 4px rgba(0,0,0,0.04);
         margin-bottom: 1rem;
+    }
+
+    /* ===== Text input: comfortable height ===== */
+    .stTextInput input {
+        min-height: 48px;
+        font-size: 17px;
     }
 
     /* ===== Metric cards ===== */
@@ -552,7 +557,7 @@ def render_quick_lookup() -> None:
 
     with st.form("quick_lookup_form", clear_on_submit=False, border=False):
         if _has_content:
-            col_word, col_btn, col_clear = st.columns([5, 2, 1])
+            col_word, col_btn, col_clear = st.columns([4, 2, 1.2])
         else:
             col_word, col_btn = st.columns([5, 2])
         with col_word:
@@ -572,7 +577,7 @@ def render_quick_lookup() -> None:
             )
         if _has_content:
             with col_clear:
-                clear_submit = st.form_submit_button("✕", use_container_width=True)
+                clear_submit = st.form_submit_button("清空", use_container_width=True)
             if clear_submit:
                 st.session_state["_quick_lookup_pending_clear"] = True
                 st.rerun()
