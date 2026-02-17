@@ -62,58 +62,54 @@ def generate_anki_package(
 
     CSS = """
     .card {
-        font-family: 'Arial', sans-serif; font-size: 20px;
-        text-align: center; color: #333; background-color: white;
-        padding: 12px 16px;
-        max-width: 720px; margin: 0 auto;
+        font-family: -apple-system, 'Arial', sans-serif;
+        font-size: 22px; text-align: center; color: #333;
+        background-color: white;
+        padding: 14px 16px; margin: 0 auto;
     }
     .phrase {
-        font-size: 28px; font-weight: 700; color: #0056b3;
-        margin: 0 0 4px 0; line-height: 1.3;
+        font-size: 30px; font-weight: 700; color: #0056b3;
+        margin: 0 0 6px 0; line-height: 1.3;
     }
     .nightMode .phrase { color: #66b0ff; }
 
-    /* Audio play buttons: inline & compact */
     .audio-phrase, .audio-ex {
-        display: inline-block; margin: 2px 0 0 0;
-        font-size: 0; line-height: 0;
+        display: inline-block; vertical-align: middle;
+        margin: 0 0 0 2px;
     }
-    .audio-phrase .replay-button, .audio-ex .replay-button,
-    .audio-phrase svg, .audio-ex svg {
-        width: 28px !important; height: 28px !important;
+    .audio-phrase .replay-button, .audio-ex .replay-button {
+        width: 32px !important; height: 32px !important;
     }
 
     hr {
-        border: 0; height: 1px; margin: 6px 0;
+        border: 0; height: 1px; margin: 8px 0;
         background: linear-gradient(to right,
             rgba(0,0,0,0), rgba(0,0,0,0.18), rgba(0,0,0,0));
     }
     .meaning {
-        font-size: 21px; font-weight: bold; color: #222;
-        margin: 0 0 6px 0; text-align: left; line-height: 1.4;
+        font-size: 23px; font-weight: bold; color: #222;
+        margin: 0 0 8px 0; text-align: left; line-height: 1.45;
     }
     .nightMode .meaning { color: #e0e0e0; }
 
     .example {
         background: #f7f9fa;
-        padding: 8px 10px;
+        padding: 10px 12px;
         border-left: 4px solid #0056b3;
         border-radius: 4px;
-        color: #444;
-        font-style: italic;
-        font-size: 19px;
-        line-height: 1.5;
+        color: #444; font-style: italic;
+        font-size: 21px; line-height: 1.55;
         text-align: left;
-        margin: 0 0 6px 0;
+        margin: 0 0 8px 0;
     }
     .nightMode .example { background: #383838; color: #ccc; border-left-color: #66b0ff; }
 
     .etymology {
-        display: block; font-size: 17px; color: #555;
+        font-size: 19px; color: #555;
         background-color: #fffdf5;
-        padding: 6px 10px; border-radius: 6px;
-        margin: 4px 0 0 0; border: 1px solid #fef3c7;
-        text-align: left; line-height: 1.4;
+        padding: 8px 12px; border-radius: 6px;
+        margin: 6px 0 0 0; border: 1px solid #fef3c7;
+        text-align: left; line-height: 1.45;
     }
     .nightMode .etymology { background-color: #333; color: #aaa; border-color: #444; }
     """
