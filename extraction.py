@@ -64,16 +64,48 @@ def parse_anki_txt_export(uploaded_file: Any) -> str:
         return ErrorHandler.handle_file_error(e, "Anki Export Import")
 
 
+def _is_safe_url(url: str) -> bool:
+    """Block URLs pointing to localhost, private IPs, or non-HTTP schemes."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    hostname = (parsed.hostname or "").lower()
+    blocked = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]", "metadata.google")
+    for b in blocked:
+        if hostname == b or hostname.endswith("." + b):
+            return False
+    # Block common private ranges
+    if hostname.startswith(("10.", "192.168.", "169.254.")):
+        return False
+    if hostname.startswith("172."):
+        parts = hostname.split(".")
+        if len(parts) >= 2 and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
+            return False
+    return True
+
+
 def extract_text_from_url(url: str) -> str:
     """Extract text content from a URL."""
+    if not _is_safe_url(url):
+        return "Error: URL blocked for security reasons (private/local address)."
+
     _, _, _, _, BeautifulSoup = get_file_parsers()
 
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        response = requests.get(url, headers=headers, timeout=constants.REQUEST_TIMEOUT_SECONDS)
+        response = requests.get(
+            url, headers=headers, timeout=constants.REQUEST_TIMEOUT_SECONDS,
+            allow_redirects=True,
+        )
         response.raise_for_status()
+
+        # Guard against downloading enormous pages
+        max_content = constants.MAX_UPLOAD_BYTES
+        if len(response.content) > max_content:
+            return f"Error: page too large ({len(response.content)} bytes)"
 
         soup = BeautifulSoup(response.content, 'html.parser')
         for element in soup(["script", "style", "nav", "footer", "iframe", "noscript"]):

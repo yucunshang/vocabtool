@@ -38,6 +38,27 @@ DEFAULT_SESSION_STATE = {
     'url_input_key': "",
 }
 
+# ---- Rate limiting (generous – designed to stop bots, not humans) ----
+# AI word lookup
+RL_LOOKUP_PER_MINUTE = 60       # ~1 word per second sustained
+RL_LOOKUP_PER_HOUR = 200        # ~3 words/min sustained
+RL_LOOKUP_PER_DAY = 1500        # heavy study day
+
+# Batch AI card generation (each click = 1 event, not per-word)
+RL_BATCH_PER_MINUTE = 5         # can't realistically click faster
+RL_BATCH_PER_HOUR = 30          # generous for iterating
+RL_BATCH_PER_DAY = 100          # very heavy usage day
+
+# URL scraping
+RL_URL_PER_MINUTE = 15          # pasting multiple articles
+RL_URL_PER_HOUR = 150
+RL_URL_PER_DAY = 500
+
+# Max input length guards
+MAX_LOOKUP_INPUT_LENGTH = 100   # single word/phrase lookup
+MAX_PASTE_TEXT_LENGTH = 500_000 # ~500 KB of text
+MAX_URL_LENGTH = 2048
+
 VOICE_MAP = {
     "👩 美音女声 (Jenny)": "en-US-JennyNeural",
     "👨 美音男声 (Christopher)": "en-US-ChristopherNeural",

@@ -25,6 +25,10 @@ from extraction import (
     is_upload_too_large,
     parse_anki_txt_export,
 )
+from rate_limiter import (
+    check_batch_limit, check_lookup_limit, check_url_limit,
+    record_batch, record_lookup, record_url,
+)
 from state import set_generated_words_state
 from utils import get_beijing_time_str, render_copy_button, run_gc
 from vocab import analyze_logic
@@ -436,6 +440,17 @@ st.markdown("""
 
 def _do_lookup(query_word: str) -> None:
     """Execute AI lookup for a word, populating session state cache and result."""
+    # Input length guard
+    if len(query_word) > constants.MAX_LOOKUP_INPUT_LENGTH:
+        st.warning(f"⚠️ 输入过长（最多 {constants.MAX_LOOKUP_INPUT_LENGTH} 字符）。")
+        return
+
+    # Rate limit check
+    allowed, msg = check_lookup_limit()
+    if not allowed:
+        st.warning(msg)
+        return
+
     st.session_state["quick_lookup_is_loading"] = True
     try:
         cache_key = f"lookup_cache_{query_word.lower()}"
@@ -470,6 +485,7 @@ def _do_lookup(query_word: str) -> None:
             st.session_state["quick_lookup_cache_keys"] = keys
         st.session_state["quick_lookup_last_query"] = query_word
         st.session_state["quick_lookup_last_result"] = st.session_state.get(cache_key)
+        record_lookup()
     finally:
         st.session_state["quick_lookup_is_loading"] = False
         st.session_state["quick_lookup_block_until"] = time.time() + constants.QUICK_LOOKUP_COOLDOWN_SECONDS
@@ -634,6 +650,8 @@ with tab_extract:
         if st.button("🚀 从文本生成重点词", type="primary", key="btn_mode_2_1"):
             if target_rank < current_rank:
                 st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
+            elif len(pasted_text) > constants.MAX_PASTE_TEXT_LENGTH:
+                st.error(f"❌ 文本过长（最大约 {constants.MAX_PASTE_TEXT_LENGTH // 1000}K 字符），请缩短后重试。")
             else:
                 with st.status("🔍 正在加载资源并分析文本...", expanded=True) as status:
                     start_time = time.time()
@@ -666,17 +684,26 @@ with tab_extract:
                 st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
             elif not input_url.strip():
                 st.warning("⚠️ 请输入有效链接。")
+            elif len(input_url) > constants.MAX_URL_LENGTH:
+                st.error(f"❌ URL 过长（最大 {constants.MAX_URL_LENGTH} 字符）。")
+            elif not re.match(r'^https?://', input_url.strip()):
+                st.error("❌ 请输入以 http:// 或 https:// 开头的有效链接。")
             else:
-                with st.status("🌐 正在抓取并分析网页文本...", expanded=True) as status:
-                    start_time = time.time()
-                    status.write(f"正在抓取：{input_url}")
-                    raw_text = extract_text_from_url(input_url)
-                    if _analyze_and_set_words(raw_text, current_rank_url, target_rank_url):
-                        st.session_state['process_time'] = time.time() - start_time
-                        run_gc()
-                        status.update(label="✅ 生成完成", state="complete", expanded=False)
-                    else:
-                        status.update(label="⚠️ 抓取内容为空或过短", state="error")
+                url_allowed, url_msg = check_url_limit()
+                if not url_allowed:
+                    st.warning(url_msg)
+                else:
+                    record_url()
+                    with st.status("🌐 正在抓取并分析网页文本...", expanded=True) as status:
+                        start_time = time.time()
+                        status.write(f"正在抓取：{input_url}")
+                        raw_text = extract_text_from_url(input_url)
+                        if _analyze_and_set_words(raw_text, current_rank_url, target_rank_url):
+                            st.session_state['process_time'] = time.time() - start_time
+                            run_gc()
+                            status.update(label="✅ 生成完成", state="complete", expanded=False)
+                        else:
+                            status.update(label="⚠️ 抓取内容为空或过短", state="error")
 
     with mode_upload:
         col1, col2 = st.columns(2)
@@ -873,6 +900,12 @@ with tab_extract:
                 words_for_auto_ai = words_for_auto_ai[:constants.MAX_AUTO_LIMIT]
 
             if st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", use_container_width=True):
+                batch_allowed, batch_msg = check_batch_limit()
+                if not batch_allowed:
+                    st.warning(batch_msg)
+                    st.stop()
+                record_batch()
+
                 progress_title = st.empty()
                 card_text = st.empty()
                 card_bar = st.progress(0.0)
