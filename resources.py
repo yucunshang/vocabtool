@@ -22,6 +22,14 @@ def get_vocab_dict() -> Dict[str, int]:
     return VOCAB_DICT
 
 
+def get_rank_for_word(word: str) -> int:
+    """Get rank for word: try exact case first, then lowercase. Returns 99999 if not found."""
+    if not word:
+        return 99999
+    w = word.strip()
+    return VOCAB_DICT.get(w, VOCAB_DICT.get(w.lower(), 99999))
+
+
 @st.cache_resource(show_spinner="正在加载 NLP 引擎...")
 def load_nlp_resources() -> Tuple[Any, Any]:
     """Load NLTK and lemminflect resources with proper error handling."""
@@ -87,7 +95,8 @@ def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame]]:
             rank_col = next((c for c in df.columns if 'rank' in c), df.columns[1])
 
             df = df.dropna(subset=[word_col])
-            df[word_col] = df[word_col].astype(str).str.lower().str.strip()
+            # Preserve case so "May" (month) and "may" (modal) can both exist
+            df[word_col] = df[word_col].astype(str).str.strip()
             df[rank_col] = pd.to_numeric(df[rank_col], errors='coerce')
             df = df.sort_values(rank_col).drop_duplicates(subset=[word_col], keep='first')
 

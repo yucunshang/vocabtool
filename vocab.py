@@ -77,8 +77,9 @@ def analyze_logic(
 
     for word, count in token_counts.items():
         lemma = get_lemma(word, lemminflect)
-        rank_lemma = vocab_dict.get(lemma, 99999)
-        rank_orig = vocab_dict.get(word, 99999)
+        # Try exact case first so "May" vs "may" are distinct
+        rank_lemma = vocab_dict.get(lemma, vocab_dict.get(lemma.lower(), 99999)) if lemma else 99999
+        rank_orig = vocab_dict.get(word, vocab_dict.get(word.lower(), 99999))
 
         if rank_lemma != 99999 and rank_orig != 99999:
             best_rank = min(rank_lemma, rank_orig)

@@ -1230,7 +1230,7 @@ with tab_extract:
                             unique_words.append(word)
 
                         raw_count = len(valid_words)
-                        data_list = [(w, VOCAB_DICT.get(w.lower(), 99999)) for w in unique_words]
+                        data_list = [(w, resources.get_rank_for_word(w)) for w in unique_words]
                         set_generated_words_state(data_list, raw_count, None)
                         duplicated = raw_count - len(unique_words)
                         msg = f"✅ 已加载 {len(unique_words)} 个单词（不筛 rank）"

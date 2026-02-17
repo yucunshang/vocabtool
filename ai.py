@@ -10,7 +10,7 @@ import streamlit as st
 import constants
 from config import get_config
 from errors import ErrorHandler
-from resources import get_vocab_dict
+from resources import get_rank_for_word
 
 logger = logging.getLogger(__name__)
 
@@ -250,8 +250,7 @@ def get_word_quick_definition(
     If ``stream_callback`` is provided, tokens are streamed incrementally.
     """
     word_lower = word.lower().strip()
-    vocab_dict = get_vocab_dict()
-    rank = vocab_dict.get(word_lower, 99999)
+    rank = get_rank_for_word(word)
 
     client = get_openai_client()
     if not client:
