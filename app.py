@@ -338,6 +338,12 @@ st.markdown("""
             min-height: 46px;
             border-radius: 12px;
         }
+        /* Ensure form submit (lookup) button is wide enough to tap */
+        .stForm [data-testid="stFormSubmitButton"] button {
+            min-width: 90px;
+            min-height: 46px;
+            font-size: 15px;
+        }
         /* Avoid hover lift on touch devices */
         .stButton>button:hover {
             transform: none;
@@ -519,7 +525,7 @@ def render_quick_lookup() -> None:
     _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else "🔍 deepseek"
 
     with st.form("quick_lookup_form", clear_on_submit=False, border=False):
-        col_word, col_btn = st.columns([4, 1])
+        col_word, col_btn = st.columns([3, 1])
         with col_word:
             lookup_word = st.text_input(
                 "输入单词或短语",
