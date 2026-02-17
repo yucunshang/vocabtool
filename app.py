@@ -500,8 +500,7 @@ def render_quick_lookup() -> None:
     if auto_word and not in_cooldown:
         _do_lookup(auto_word)
 
-    _model_name = get_config()["openai_model"]
-    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else f"🔍 {_model_name}"
+    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else "🔍 deepseek"
 
     with st.form("quick_lookup_form", clear_on_submit=False, border=False):
         col_word, col_btn = st.columns([4, 1])
