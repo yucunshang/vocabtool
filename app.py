@@ -703,9 +703,8 @@ with tab_extract:
         with col_gen_p:
             btn_paste = st.button("🚀 从文本生成重点词", type="primary", key="btn_mode_2_1", use_container_width=True)
         with col_clr_p:
-            if st.button("清空", key="clr_paste", use_container_width=True):
-                st.session_state["paste_key_2_1"] = ""
-                st.rerun()
+            st.button("清空", key="clr_paste", use_container_width=True,
+                       on_click=lambda: st.session_state.update({"paste_key_2_1": ""}))
 
         if btn_paste:
             if target_rank < current_rank:
@@ -743,9 +742,8 @@ with tab_extract:
         with col_gen_u:
             btn_url = st.button("🌐 从链接生成重点词", type="primary", key="btn_mode_2_2", use_container_width=True)
         with col_clr_u:
-            if st.button("清空", key="clr_url", use_container_width=True):
-                st.session_state["url_input_key_2_2"] = ""
-                st.rerun()
+            st.button("清空", key="clr_url", use_container_width=True,
+                       on_click=lambda: st.session_state.update({"url_input_key_2_2": ""}))
 
         if btn_url:
             if target_rank_url < current_rank_url:
@@ -819,9 +817,8 @@ with tab_extract:
         with col_gen_m:
             btn_gen_manual = st.button("🧾 生成词表（不筛 rank）", key="btn_mode_2_5", type="primary", use_container_width=True)
         with col_clr_m:
-            if st.button("清空", key="clr_manual_words", use_container_width=True):
-                st.session_state["manual_words_2_5"] = ""
-                st.rerun()
+            st.button("清空", key="clr_manual_words", use_container_width=True,
+                       on_click=lambda: st.session_state.update({"manual_words_2_5": ""}))
 
         if btn_gen_manual:
             with st.spinner("正在解析列表..."):
