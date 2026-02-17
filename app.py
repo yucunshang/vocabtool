@@ -608,6 +608,13 @@ def render_quick_lookup() -> None:
         st.toast(f"查词失败：{result.get('error', '未知错误')}", icon="⚠️")
         st.session_state["quick_lookup_last_result"] = None
 
+    if st.session_state.get("quick_lookup_last_result") or st.session_state.get("quick_lookup_word"):
+        if st.button("✕ 清空", key="btn_clear_lookup", type="secondary"):
+            st.session_state["quick_lookup_word"] = ""
+            st.session_state["quick_lookup_last_query"] = ""
+            st.session_state["quick_lookup_last_result"] = None
+            st.rerun()
+
     st.markdown("---")
 
 

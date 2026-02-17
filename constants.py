@@ -9,7 +9,7 @@ MAX_PREVIEW_CARDS = 10
 BEIJING_TIMEZONE_OFFSET = 8
 MAX_UPLOAD_MB = 200
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
-QUICK_LOOKUP_COOLDOWN_SECONDS = 1.2
+QUICK_LOOKUP_COOLDOWN_SECONDS = 0.5
 QUICK_LOOKUP_CACHE_MAX = 100
 
 # Temp .apkg files: subdir under system temp, cleanup files older than this
@@ -41,8 +41,8 @@ DEFAULT_SESSION_STATE = {
 # ---- Rate limiting (generous – designed to stop bots, not humans) ----
 # AI word lookup
 RL_LOOKUP_PER_MINUTE = 60       # ~1 word per second sustained
-RL_LOOKUP_PER_HOUR = 200        # ~3 words/min sustained
-RL_LOOKUP_PER_DAY = 1500        # heavy study day
+RL_LOOKUP_PER_HOUR = 500        # ~8 words/min sustained
+RL_LOOKUP_PER_DAY = 3000        # heavy study day
 
 # Batch AI card generation (each click = 1 event, not per-word)
 RL_BATCH_PER_MINUTE = 5         # can't realistically click faster
