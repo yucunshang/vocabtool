@@ -1033,59 +1033,6 @@ with tab_extract:
                 strict_prompt_template = build_card_prompt(words_str_for_prompt, card_fmt)
                 st.code(strict_prompt_template, language="text")
 
-            with st.expander("📋 AI Prompt 模板（可直接复制）", expanded=False):
-                st.markdown("以下三个模板可直接复制到 ChatGPT / DeepSeek / Claude 等 AI 中使用。"
-                            "将 `[你的单词列表]` 替换成实际单词即可。")
-
-                st.markdown("---")
-                st.markdown("**模板 1：单词 + 中文释义 + 1 例句（简洁版）**")
-                st.code(
-                    '请为以下单词各生成一张 Anki 卡片。\n'
-                    '格式要求：每行一个单词，字段之间用 ||| 分隔。\n'
-                    '字段顺序：单词 ||| 中文释义 ||| 一个英文例句\n\n'
-                    '示例：\n'
-                    'hectic ||| 忙乱的 ||| She has a hectic schedule today.\n'
-                    'altruism ||| 利他主义 ||| His donation was motivated by altruism.\n\n'
-                    '请处理以下单词：\n'
-                    '[你的单词列表，逗号分隔]',
-                    language="text",
-                )
-
-                st.markdown("---")
-                st.markdown("**模板 2：短语 + 中英双语释义 + 2 例句 + 词源（完整版）**")
-                st.code(
-                    '请为以下单词各生成一张 Anki 卡片。\n'
-                    '格式要求：每行一个，字段之间用 ||| 分隔。\n'
-                    '字段顺序：常用短语搭配 ||| 中文释义 / English definition ||| 例句1 // 例句2 ||| 词源词根拆解\n\n'
-                    '注意：\n'
-                    '- 第一个字段是包含目标词的短语，不是单独的单词\n'
-                    '- 释义用"中文 / English"格式\n'
-                    '- 两个例句之间用 // 分隔\n'
-                    '- 词源用中文解释词根含义\n\n'
-                    '示例：\n'
-                    'a hectic schedule ||| 忙乱的 / full of frantic activity ||| She has a hectic schedule with meetings all day. // The hectic pace of city life can be exhausting. ||| hect- (持续的) + -ic (形容词后缀)\n\n'
-                    '请处理以下单词：\n'
-                    '[你的单词列表，逗号分隔]',
-                    language="text",
-                )
-
-                st.markdown("---")
-                st.markdown("**模板 3：单词 + 英文释义 + 3 例句（英英版）**")
-                st.code(
-                    '请为以下单词各生成一张 Anki 卡片。\n'
-                    '格式要求：每行一个单词，字段之间用 ||| 分隔。\n'
-                    '字段顺序：word ||| English definition ||| example1 // example2 // example3\n\n'
-                    '注意：\n'
-                    '- 释义用简洁英文（B2-C1 水平，15 词以内）\n'
-                    '- 三个例句之间用 // 分隔\n'
-                    '- 每个例句都需包含目标单词\n\n'
-                    '示例：\n'
-                    'resilience ||| the ability to recover quickly from difficulties ||| Her resilience helped her overcome the setback. // The community showed remarkable resilience after the flood. // Building resilience takes time and practice.\n\n'
-                    '请处理以下单词：\n'
-                    '[你的单词列表，逗号分隔]',
-                    language="text",
-                )
-
 # ==========================================
 # Tab 2: Manual Anki Card Creation
 # ==========================================
