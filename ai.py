@@ -26,15 +26,17 @@ class CardFormat(TypedDict, total=False):
     definition: str   # "cn" | "en" | "both"
     examples: int     # 1 | 2 | 3
     etymology: bool   # True | False
+    examples_with_cn: bool   # True = 例句带中文翻译
     examples_colloquial: bool   # True = 例句用口语
 
 
-# Built-in card format: front=word, back=中文释义 + 2例句(含中文翻译) + 词根词源，每例句单独音频
+# Default: 正面单词，反面中文释义，2条例句带翻译，不要词源
 DEFAULT_CARD_FORMAT: CardFormat = {
     "front": "word",
     "definition": "cn",
     "examples": 2,
-    "etymology": True,
+    "etymology": False,
+    "examples_with_cn": True,
 }
 
 # Fast in-memory cache for quick lookup to match vocabtool behavior.
@@ -105,6 +107,7 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
     def_lang = fmt.get("definition", "en")
     num_examples = fmt.get("examples", 1)
     include_ety = fmt.get("etymology", True)
+    examples_with_cn = fmt.get("examples_with_cn", True)
     examples_colloquial = fmt.get("examples_colloquial", False)
 
     # ---- Field 1 description ----
@@ -128,9 +131,9 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
     if def_lang == "cn":
         f2_name = "Chinese Definition"
         f2_constraint = """2. **Field 2: Definition (中文)**
-   - Simplified Chinese only. Concise meaning (2-8 characters preferred)."""
-        f2_example_altruism = "利他主义/无私"
-        f2_example_hectic = "忙乱的/繁忙的"
+   - Simplified Chinese only. Prefer a SINGLE word or 2-4 characters (e.g. 利他、忙乱). Avoid long phrases."""
+        f2_example_altruism = "利他"
+        f2_example_hectic = "忙乱"
     elif def_lang == "en":
         f2_name = "English Definition"
         f2_constraint = """2. **Field 2: Definition (English)**
@@ -149,23 +152,40 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
     colloquial_note = "\n   - Use natural **spoken/colloquial** English (口语化); like daily conversation. Avoid formal or written style." if examples_colloquial else ""
     ex_label = f"{num_examples} Example Sentence{'s' if num_examples > 1 else ''}"
     if num_examples == 1:
-        f3_constraint = """3. **Field 3: Example**
-   - ONE short, authentic English sentence containing the word/phrase.""" + colloquial_note
-        f3_example_altruism = "His donation was motivated by altruism, not a desire for fame."
-        f3_example_hectic = "She has a hectic schedule with meetings all day."
+        if examples_with_cn:
+            f3_constraint = """3. **Field 3: Example**
+   - ONE short, authentic English sentence, then ` (中文翻译)` on the same line.""" + colloquial_note
+            f3_example_altruism = "His donation was motivated by altruism, not a desire for fame. (他的捐赠出于利他之心，而非求名。)"
+            f3_example_hectic = "She has a hectic schedule with meetings all day. (她今天日程排满，会议不断。)"
+        else:
+            f3_constraint = """3. **Field 3: Example**
+   - ONE short, authentic English sentence containing the word/phrase. No Chinese translation.""" + colloquial_note
+            f3_example_altruism = "His donation was motivated by altruism, not a desire for fame."
+            f3_example_hectic = "She has a hectic schedule with meetings all day."
     elif num_examples == 2:
-        f3_constraint = """3. **Field 3: Examples (2 sentences, each with Chinese translation)**
+        if examples_with_cn:
+            f3_constraint = """3. **Field 3: Examples (2 sentences, each with Chinese translation)**
    - TWO short, authentic English sentences separated by ` // `.
    - Each segment MUST be: `English sentence (中文翻译)` — same line, parentheses with Chinese.
    - Each English sentence must contain the target word/phrase.""" + colloquial_note
-        f3_example_altruism = "His donation was motivated by altruism, not a desire for fame. (他的捐赠出于利他之心，而非求名。) // True altruism expects nothing in return. (真正的利他主义不求回报。)"
-        f3_example_hectic = "She has a hectic schedule with meetings all day. (她今天日程排满，会议不断。) // The hectic pace of city life can be exhausting. (城市生活的快节奏令人疲惫。)"
+            f3_example_altruism = "His donation was motivated by altruism, not a desire for fame. (他的捐赠出于利他之心，而非求名。) // True altruism expects nothing in return. (真正的利他主义不求回报。)"
+            f3_example_hectic = "She has a hectic schedule with meetings all day. (她今天日程排满，会议不断。) // The hectic pace of city life can be exhausting. (城市生活的快节奏令人疲惫。)"
+        else:
+            f3_constraint = """3. **Field 3: Examples (2 sentences)**
+   - TWO short, authentic English sentences separated by ` // `. No Chinese translation.""" + colloquial_note
+            f3_example_altruism = "His donation was motivated by altruism, not a desire for fame. // True altruism expects nothing in return."
+            f3_example_hectic = "She has a hectic schedule with meetings all day. // The hectic pace of city life can be exhausting."
     else:
-        f3_constraint = """3. **Field 3: Examples (3 sentences)**
-   - THREE short, authentic English sentences separated by ` // `.
-   - Each sentence must contain the target word/phrase.""" + colloquial_note
-        f3_example_altruism = "His donation was motivated by altruism. // True altruism expects nothing in return. // Altruism is a core value in many cultures."
-        f3_example_hectic = "She has a hectic schedule today. // The hectic pace of city life can be exhausting. // After a hectic week, he finally relaxed."
+        if examples_with_cn:
+            f3_constraint = """3. **Field 3: Examples (3 sentences, each with Chinese translation)**
+   - THREE short, authentic English sentences separated by ` // `. Each: `English (中文)`.""" + colloquial_note
+            f3_example_altruism = "His donation was motivated by altruism. (他的捐赠出于利他之心。) // True altruism expects nothing in return. (真正的利他主义不求回报。) // Altruism is a core value. (利他主义是核心价值。)"
+            f3_example_hectic = "She has a hectic schedule today. (她今天日程很满。) // The hectic pace can be exhausting. (快节奏令人疲惫。) // After a hectic week, he relaxed. (忙了一周后他放松了。)"
+        else:
+            f3_constraint = """3. **Field 3: Examples (3 sentences)**
+   - THREE short, authentic English sentences separated by ` // `. No Chinese.""" + colloquial_note
+            f3_example_altruism = "His donation was motivated by altruism. // True altruism expects nothing in return. // Altruism is a core value in many cultures."
+            f3_example_hectic = "She has a hectic schedule today. // The hectic pace of city life can be exhausting. // After a hectic week, he finally relaxed."
 
     # ---- Field 4 description (etymology, optional) ----
     if include_ety:
@@ -188,12 +208,19 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
     field_constraints = "\n\n".join(filter(None, [f1_constraint, f2_constraint, f3_constraint, f4_constraint]))
 
     mandatory_note = ""
-    if include_ety and num_examples >= 2:
-        mandatory_note = """
+    if num_examples >= 2:
+        if include_ety:
+            mandatory_note = """
 # CRITICAL (Do not skip)
 - Every line MUST have exactly 4 parts separated by `|||`: (1) word/phrase, (2) definition, (3) examples, (4) etymology.
-- Field 3: exactly 2 example sentences, each with Chinese translation in parentheses, separated by ` // `.
+- Field 3: exactly 2 example sentences (with or without Chinese per format). Separated by ` // `.
 - Field 4: etymology/roots in Chinese is REQUIRED for every word. If uncertain, give a brief origin note in Chinese.
+"""
+        else:
+            mandatory_note = """
+# CRITICAL (Do not skip)
+- Every line MUST have exactly 3 parts separated by `|||`: (1) word/phrase, (2) definition, (3) examples. Do NOT add Field 4.
+- Field 3: exactly 2 example sentences. Separated by ` // `.
 """
 
     prompt = f"""# Role

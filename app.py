@@ -685,8 +685,46 @@ def _render_extract_results() -> None:
         selected_voice_code = constants.VOICE_MAP[selected_voice_label]
 
         enable_audio_auto = st.checkbox("启用语音", value=True, key="chk_audio_auto")
+
+        with st.expander("📐 自定义卡片格式", expanded=False):
+            front_fmt = st.radio(
+                "正面",
+                options=["word", "phrase"],
+                format_func=lambda x: "单词" if x == "word" else "短语/词组",
+                index=0,
+                horizontal=True,
+                key="builtin_front",
+            )
+            def_fmt = st.radio(
+                "释义",
+                options=["cn", "en"],
+                format_func=lambda x: "中文" if x == "cn" else "英文",
+                index=0,
+                horizontal=True,
+                key="builtin_def",
+            )
+            num_ex = st.radio(
+                "例句数量",
+                options=[1, 2, 3],
+                format_func=lambda x: f"{x} 条",
+                index=1,
+                horizontal=True,
+                key="builtin_ex",
+            )
+            ex_with_cn = st.checkbox("例句带中文翻译", value=True, key="builtin_ex_cn")
+            include_ety = st.checkbox("词根词源词缀", value=False, key="builtin_ety")
+
         examples_colloquial = st.checkbox("例句用口语", value=False, key="chk_examples_colloquial",
                                            help="例句使用日常口语化表达，而非书面语")
+
+        builtin_card_format: CardFormat = {
+            "front": front_fmt,
+            "definition": def_fmt,
+            "examples": num_ex,
+            "examples_with_cn": ex_with_cn,
+            "etymology": include_ety,
+            "examples_colloquial": examples_colloquial,
+        }
 
         words_for_auto_ai = words_only
         current_word_count = len(words_for_auto_ai)
@@ -710,25 +748,25 @@ def _render_extract_results() -> None:
             audio_text = st.empty()
             audio_bar = st.progress(0.0)
 
+            total_words = len(words_for_auto_ai)
+            batch_size = constants.AI_BATCH_SIZE
+            first_end = min(batch_size, total_words)
             progress_title.markdown("#### ⏳ 内置 AI 制卡进度")
-            card_text.markdown("**制卡进度**：AI 生成中...")
+            card_text.markdown(f"**制卡进度**：第 1 组（1–{first_end}/{total_words}）AI 生成中...")
             audio_text.markdown("**音频进度**：等待制卡完成...")
 
             def update_ai_progress(current: int, total: int) -> None:
                 ratio = current / total if total > 0 else 0.0
                 card_bar.progress(min(0.9, ratio * 0.9))
-                card_text.markdown(f"**制卡进度**：AI 生成中（{current}/{total}）")
+                batch_idx = (current + batch_size - 1) // batch_size
+                start = (batch_idx - 1) * batch_size + 1
+                end = min(batch_idx * batch_size, total)
+                card_text.markdown(f"**制卡进度**：第 {batch_idx} 组（{start}–{end}/{total}）AI 生成中...")
 
             ai_result = process_ai_in_batches(
                 words_for_auto_ai,
                 progress_callback=update_ai_progress,
-                card_format={
-                    "front": "word",
-                    "definition": "cn",
-                    "examples": 2,
-                    "etymology": True,
-                    "examples_colloquial": examples_colloquial,
-                },
+                card_format=builtin_card_format,
             )
 
             if ai_result:
