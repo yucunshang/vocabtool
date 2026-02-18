@@ -40,6 +40,10 @@ _QUERY_CACHE: OrderedDict[str, str] = OrderedDict()
 _QUERY_CACHE_MAX = 500
 _OPENAI_CLIENT: Optional[Any] = None
 
+# -----------------------------------------------------------------------------
+# Consistent Lookup Prompts
+# -----------------------------------------------------------------------------
+
 LOOKUP_SYSTEM_PROMPT = """# Role
 Atomic Flash Dictionary.
 
@@ -60,41 +64,14 @@ Provide the SINGLE most common meaning of a word in a strict 5-line format with 
 🌱 词源: [root (CN) + affix (CN)] (Or brief origin)
 • [English Example 1] ([CN Trans])
 • [English Example 2] ([CN Trans])
-
-# Few-Shot Examples (Visual Style: Clean)
-**User Input:**
-spring
-
-**Model Output:**
-spring (n 名词)
-春天 | The season after winter
-🌱 词源: spring- (涌出/生长) → 万物复苏的季节
-• Flowers bloom in spring. (花朵在春天绽放。)
-• I love the fresh air of spring. (我喜欢春天清新的空气。)
-
-**User Input:**
-date
-
-**Model Output:**
-date (n 名词)
-日期 | Specific day of the month
-🌱 词源: dat- (给予/指定) + -e (名词后缀)
-• What is today's date? (今天是几号？)
-• Please sign and date the form. (请在表格上签名并注明日期。)
-
-**User Input:**
-express
-
-**Model Output:**
-express (v 动词)
-表达；表示 | Convey a thought or feeling
-🌱 词源: ex- (向外) + press (压/挤)
-• She expressed her thanks to us. (她向我们表达了谢意。)
-• Words cannot express my feelings. (言语无法表达我的感受。)"""
+"""
 
 
 def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
-    """Build a dynamic AI prompt for Anki card generation based on card format."""
+    """
+    Build a dynamic AI prompt for Anki card generation.
+    matches the visual style of the single-word lookup tool (Atomic Flash Dictionary).
+    """
     if fmt is None:
         fmt = DEFAULT_CARD_FORMAT
 
@@ -103,113 +80,71 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
     num_examples = fmt.get("examples", 1)
     include_ety = fmt.get("etymology", True)
 
-    # ---- Field 1 description ----
+    # 1. Front Field Logic
     if front_type == "phrase":
-        f1_name = "Natural Phrase/Collocation"
-        f1_constraint = """1. **Field 1: Phrase (CRITICAL)**
-   - DO NOT output the single target word alone.
-   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
-   - Example: If input is "rain", output "heavy rain" or "torrential rain"."""
-        f1_example_altruism = "motivated by altruism"
-        f1_example_hectic = "a hectic schedule"
+        front_instruction = "Output a high-frequency short phrase/collocation containing the word."
     else:
-        f1_name = "Target Word"
-        f1_constraint = """1. **Field 1: Word**
-   - Output the target word itself (lowercase).
-   - Do NOT add extra words or phrases."""
-        f1_example_altruism = "altruism"
-        f1_example_hectic = "hectic"
+        front_instruction = "Output the target word itself (clean, lowercase)."
 
-    # ---- Field 2 description ----
+    # 2. Definition Logic
     if def_lang == "cn":
-        f2_name = "Chinese Definition"
-        f2_constraint = """2. **Field 2: Definition (中文)**
-   - Simplified Chinese only. Concise meaning (2-8 characters preferred)."""
-        f2_example_altruism = "利他主义/无私"
-        f2_example_hectic = "忙乱的/繁忙的"
+        def_instruction = "[CN Meaning]"
     elif def_lang == "en":
-        f2_name = "English Definition"
-        f2_constraint = """2. **Field 2: Definition (English)**
-   - Concise English definition (B2-C1 level, under 15 words)."""
-        f2_example_altruism = "acting out of selfless concern for the well-being of others"
-        f2_example_hectic = "full of frantic activity; very busy"
+        def_instruction = "[Short EN Definition (<12 words)]"
     else:
-        f2_name = "Chinese + English Definition"
-        f2_constraint = """2. **Field 2: Definition (中英双语)**
-   - Format: `中文释义 / English definition`
-   - Chinese part: 2-8 characters. English part: concise B2-C1 level."""
-        f2_example_altruism = "利他主义 / selfless concern for others"
-        f2_example_hectic = "忙乱的 / full of frantic activity"
+        def_instruction = "[CN Meaning] | [Short EN Definition]"
 
-    # ---- Field 3 description (examples) ----
-    ex_label = f"{num_examples} Example Sentence{'s' if num_examples > 1 else ''}"
-    if num_examples == 1:
-        f3_constraint = """3. **Field 3: Example**
-   - ONE short, authentic English sentence containing the word/phrase."""
-        f3_example_altruism = "His donation was motivated by altruism, not a desire for fame."
-        f3_example_hectic = "She has a hectic schedule with meetings all day."
-    elif num_examples == 2:
-        f3_constraint = """3. **Field 3: Examples (2 sentences)**
-   - TWO short, authentic English sentences separated by ` // `.
-   - Each sentence must contain the target word/phrase."""
-        f3_example_altruism = "His donation was motivated by altruism, not a desire for fame. // True altruism expects nothing in return."
-        f3_example_hectic = "She has a hectic schedule with meetings all day. // The hectic pace of city life can be exhausting."
-    else:
-        f3_constraint = """3. **Field 3: Examples (3 sentences)**
-   - THREE short, authentic English sentences separated by ` // `.
-   - Each sentence must contain the target word/phrase."""
-        f3_example_altruism = "His donation was motivated by altruism. // True altruism expects nothing in return. // Altruism is a core value in many cultures."
-        f3_example_hectic = "She has a hectic schedule today. // The hectic pace of city life can be exhausting. // After a hectic week, he finally relaxed."
-
-    # ---- Field 4 description (etymology, optional) ----
+    # 3. Etymology Logic
     if include_ety:
-        f4_constraint = """4. **Field 4: Roots/Etymology (Simplified Chinese)**
-   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
-   - If no classical roots exist, explain the origin briefly in Chinese.
-   - Use Simplified Chinese for meanings."""
-        f4_example_altruism = " ||| alter (其他) + -ism (主义/行为)"
-        f4_example_hectic = " ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)"
-        f4_structure = " ||| `Etymology breakdown (Simplified Chinese)`"
-        f4_label = ", Etymology"
+        ety_instruction = "🌱 词源: [root (CN) + affix (CN)] (Briefly explain origin in Simplified Chinese) <br>"
     else:
-        f4_constraint = ""
-        f4_example_altruism = ""
-        f4_example_hectic = ""
-        f4_structure = ""
-        f4_label = ""
+        ety_instruction = ""  # Empty string if disabled
 
-    # ---- Assemble ----
-    field_constraints = "\n\n".join(filter(None, [f1_constraint, f2_constraint, f3_constraint, f4_constraint]))
+    # 4. Examples Logic
+    # We construct the example template based on count
+    example_lines = []
+    for i in range(num_examples):
+        example_lines.append(f"• [Example {i+1}] ([CN Trans])")
+    
+    # Join examples with <br> for HTML rendering in Anki
+    examples_instruction = " <br> ".join(example_lines)
 
     prompt = f"""# Role
-You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards.
-Make sure to process everything in one go, without missing anything.
+You are an expert Anki Card Generator.
+Your task is to convert a list of words into Anki cards that perfectly match the "Atomic Flash Dictionary" visual style.
 
 # Input Data
 {words_str}
 
-# Output Format Guidelines
-1. **Output Container**: Strictly inside a single ```text code block.
-2. **Layout**: One entry per line.
-3. **Separator**: Use `|||` as the delimiter.
-4. **Target Structure**:
-   `{f1_name}` ||| `{f2_name}` ||| `{ex_label}`{f4_structure}
+# Output Format (Strict CSV-like)
+- **One line per entry**.
+- **Separator**: `|||`
+- **Structure**: `Field1_Front ||| Field2_Back`
+- **Important**: For line breaks INSIDE the card back, use the HTML tag `<br>`. Do NOT use actual newlines inside the content, or the import will fail.
 
-# Field Constraints (Strict)
-{field_constraints}
+# Field 1: Front
+{front_instruction}
 
-# Valid Example (Follow this logic strictly)
-Input: altruism
-Output:
-{f1_example_altruism} ||| {f2_example_altruism} ||| {f3_example_altruism}{f4_example_altruism}
+# Field 2: Back (Visual Content)
+Construct the back content strictly using this layout (use `<br>` for new lines):
+`([pos] [CN pos]) <br>`
+`{def_instruction} <br>`
+`{ety_instruction}`
+`{examples_instruction}`
 
-Input: hectic
-Output:
-{f1_example_hectic} ||| {f2_example_hectic} ||| {f3_example_hectic}{f4_example_hectic}
+# Critical Constraints
+1. **Consistency**: The definition, etymology, and examples must all align with the SINGLE most common meaning of the word.
+2. **Conciseness**: Definitions should be short. Example translations must be on the same line as the English sentence.
+3. **Language**: Use Simplified Chinese for translations/meanings unless specified otherwise.
+4. **No Markdown**: Do not use bold/italic markdown (** or *) in the output, just plain text with `<br>` tags.
+
+# Example Output (Mock)
+altruism ||| (n 名词) <br> 利他主义 | selfless concern for others <br> 🌱 词源: alter (其他) + -ism (主义) <br> • His donation was motivated by altruism. (他的捐款是出于利他主义。)
+hectic ||| (adj 形容词) <br> 忙乱的 | full of frantic activity <br> 🌱 词源: hect- (习惯性) + -ic (后缀) <br> • She has a hectic schedule. (她的日程安排非常繁忙。)
 
 # Task
-Process the provided input list strictly adhering to the format above."""
-
+Process the input list now.
+"""
     return prompt
 
 
@@ -326,7 +261,9 @@ def process_ai_in_batches(
     total_words = len(words_list)
     full_results: List[str] = []
 
-    system_prompt = "You are a helpful assistant for vocabulary learning."
+    # System prompt is now handled per-batch via build_card_prompt,
+    # but we set a generic role here for the message history context.
+    system_prompt = "You are a precise Anki card generator."
 
     for i in range(0, total_words, constants.AI_BATCH_SIZE):
         batch = words_list[i:i + constants.AI_BATCH_SIZE]
@@ -347,6 +284,10 @@ def process_ai_in_batches(
                 content = (response.choices[0].message.content or "").strip()
                 if not content:
                     raise ValueError("Empty AI batch response")
+                
+                # Remove markdown code blocks if AI adds them (e.g. ```text ... ```)
+                content = content.replace("```text", "").replace("```", "").strip()
+                
                 full_results.append(content)
 
                 if progress_callback:
