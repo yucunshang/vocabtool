@@ -529,6 +529,17 @@ def _do_lookup(query_word: str) -> None:
 
 
 def render_quick_lookup() -> None:
+    # Guard against sessions that predate DEFAULT_SESSION_STATE centralization.
+    for _k, _v in {
+        "quick_lookup_last_query": "",
+        "quick_lookup_last_result": None,
+        "quick_lookup_is_loading": False,
+        "quick_lookup_block_until": 0.0,
+        "quick_lookup_cache_keys": [],
+    }.items():
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
+
     now_ts = time.time()
     in_cooldown = now_ts < st.session_state["quick_lookup_block_until"]
     lookup_disabled = st.session_state["quick_lookup_is_loading"] or in_cooldown
