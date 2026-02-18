@@ -685,43 +685,6 @@ def _render_extract_results() -> None:
     else:
         selected_voice_code = list(constants.VOICE_MAP.values())[0]
 
-    card_format_mode = st.radio(
-        "卡片格式",
-        options=["default", "custom"],
-        format_func=lambda x: "默认格式" if x == "default" else "自定义格式",
-        index=0,
-        horizontal=True,
-        key="card_format_mode",
-    )
-    if card_format_mode == "custom":
-        with st.expander("📐 自定义卡片格式", expanded=True):
-            front_fmt = st.radio(
-                "正面",
-                options=["word", "phrase"],
-                format_func=lambda x: "单词" if x == "word" else "短语/词组",
-                index=0,
-                horizontal=True,
-                key="builtin_front",
-            )
-            def_fmt = st.radio(
-                "释义",
-                options=["cn", "en"],
-                format_func=lambda x: "中文" if x == "cn" else "英文",
-                index=0,
-                horizontal=True,
-                key="builtin_def",
-            )
-            num_ex = st.radio(
-                "例句数量",
-                options=[1, 2, 3],
-                format_func=lambda x: f"{x} 条",
-                index=1,
-                horizontal=True,
-                key="builtin_ex",
-            )
-            ex_with_cn = st.checkbox("例句带中文翻译", value=True, key="builtin_ex_cn")
-            include_ety = st.checkbox("词根词源词缀", value=False, key="builtin_ety")
-
     examples_colloquial = st.checkbox(
         "例句用口语",
         value=False,
@@ -729,24 +692,15 @@ def _render_extract_results() -> None:
         help="例句使用日常口语化表达，而非书面语",
     )
 
-    if card_format_mode == "default":
-        shared_card_format: CardFormat = {
-            "front": "word",
-            "definition": "cn",
-            "examples": 2,
-            "examples_with_cn": True,
-            "etymology": False,
-            "examples_colloquial": examples_colloquial,
-        }
-    else:
-        shared_card_format = {
-            "front": front_fmt,
-            "definition": def_fmt,
-            "examples": num_ex,
-            "examples_with_cn": ex_with_cn,
-            "etymology": include_ety,
-            "examples_colloquial": examples_colloquial,
-        }
+    # 固定模板：正面单词，反面中文释义 + 2 条例句带中文翻译，不加词根词缀
+    shared_card_format: CardFormat = {
+        "front": "word",
+        "definition": "cn",
+        "examples": 2,
+        "examples_with_cn": True,
+        "etymology": False,
+        "examples_colloquial": examples_colloquial,
+    }
 
     st.markdown("#### ② 生成方式")
     use_builtin_ai = st.radio(
