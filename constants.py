@@ -35,6 +35,11 @@ DEFAULT_SESSION_STATE = {
     'uploader_id': DEFAULT_UPLOADER_ID,
     'anki_input_text': "",
     'anki_pkg_name': "",
+    'quick_lookup_last_query': "",
+    'quick_lookup_last_result': None,
+    'quick_lookup_is_loading': False,
+    'quick_lookup_block_until': 0.0,
+    'quick_lookup_cache_keys': [],
 }
 
 # ---- Rate limiting (generous – designed to stop bots, not humans) ----

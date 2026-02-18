@@ -1,5 +1,6 @@
 # Word validation and text analysis (rank-based vocabulary extraction).
 
+import functools
 import re
 from collections import Counter
 from typing import Any, Dict, List, Tuple
@@ -18,17 +19,13 @@ _BASIC_WORDS: Dict[str, int] = {
 }
 
 
-_basic_words_patched = False
-
+@functools.lru_cache(maxsize=None)
 def _vocab_dict() -> Dict[str, int]:
-    """Return VOCAB_DICT with basic-word overrides applied once."""
-    global _basic_words_patched
-    d = get_vocab_dict()
-    if not _basic_words_patched:
-        for w, r in _BASIC_WORDS.items():
-            if w not in d or d[w] > r:
-                d[w] = r
-        _basic_words_patched = True
+    """Return a copy of VOCAB_DICT with basic-word overrides applied."""
+    d = dict(get_vocab_dict())  # copy — never mutate the cached original
+    for w, r in _BASIC_WORDS.items():
+        if w not in d or d[w] > r:
+            d[w] = r
     return d
 
 

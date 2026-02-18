@@ -529,17 +529,6 @@ def _do_lookup(query_word: str) -> None:
 
 
 def render_quick_lookup() -> None:
-    if "quick_lookup_last_query" not in st.session_state:
-        st.session_state["quick_lookup_last_query"] = ""
-    if "quick_lookup_last_result" not in st.session_state:
-        st.session_state["quick_lookup_last_result"] = None
-    if "quick_lookup_is_loading" not in st.session_state:
-        st.session_state["quick_lookup_is_loading"] = False
-    if "quick_lookup_block_until" not in st.session_state:
-        st.session_state["quick_lookup_block_until"] = 0.0
-    if "quick_lookup_cache_keys" not in st.session_state:
-        st.session_state["quick_lookup_cache_keys"] = []
-
     now_ts = time.time()
     in_cooldown = now_ts < st.session_state["quick_lookup_block_until"]
     lookup_disabled = st.session_state["quick_lookup_is_loading"] or in_cooldown
@@ -879,14 +868,17 @@ with tab_extract:
             if st.button("🚀 生成列表"):
                 with st.spinner("正在提取..."):
                     if FULL_DF is not None:
-                        rank_col = next(c for c in FULL_DF.columns if 'rank' in c)
-                        word_col = next(c for c in FULL_DF.columns if 'word' in c)
-                        subset = FULL_DF[FULL_DF[rank_col] >= start_rank].sort_values(rank_col).head(count)
-                        set_generated_words_state(
-                            list(zip(subset[word_col], subset[rank_col])),
-                            0,
-                            None
-                        )
+                        rank_col = next((c for c in FULL_DF.columns if 'rank' in c), None)
+                        word_col = next((c for c in FULL_DF.columns if 'word' in c), None)
+                        if rank_col is None or word_col is None:
+                            st.error("❌ 词库CSV格式异常：缺少 rank 或 word 列")
+                        else:
+                            subset = FULL_DF[FULL_DF[rank_col] >= start_rank].sort_values(rank_col).head(count)
+                            set_generated_words_state(
+                                list(zip(subset[word_col], subset[rank_col])),
+                                0,
+                                None
+                            )
         else:
             col_min, col_max, col_cnt = st.columns([1, 1, 1])
             min_rank = col_min.number_input("最小排名", 1, 20000, 12000, step=100)
@@ -902,17 +894,20 @@ with tab_extract:
                 else:
                     with st.spinner("正在抽取..."):
                         if FULL_DF is not None:
-                            rank_col = next(c for c in FULL_DF.columns if 'rank' in c)
-                            word_col = next(c for c in FULL_DF.columns if 'word' in c)
-                            pool = FULL_DF[(FULL_DF[rank_col] >= min_rank) & (FULL_DF[rank_col] <= max_rank)]
-                            if len(pool) < random_count:
-                                st.warning(f"⚠️ 该范围只有 {len(pool)} 个单词，已全部选中")
-                            sample = pool.sample(n=min(random_count, len(pool)))
-                            set_generated_words_state(
-                                list(zip(sample[word_col], sample[rank_col])),
-                                0,
-                                None
-                            )
+                            rank_col = next((c for c in FULL_DF.columns if 'rank' in c), None)
+                            word_col = next((c for c in FULL_DF.columns if 'word' in c), None)
+                            if rank_col is None or word_col is None:
+                                st.error("❌ 词库CSV格式异常：缺少 rank 或 word 列")
+                            else:
+                                pool = FULL_DF[(FULL_DF[rank_col] >= min_rank) & (FULL_DF[rank_col] <= max_rank)]
+                                if len(pool) < random_count:
+                                    st.warning(f"⚠️ 该范围只有 {len(pool)} 个单词，已全部选中")
+                                sample = pool.sample(n=min(random_count, len(pool)))
+                                set_generated_words_state(
+                                    list(zip(sample[word_col], sample[rank_col])),
+                                    0,
+                                    None
+                                )
 
     # Display results (shared across all modes)
     _render_extract_results()
