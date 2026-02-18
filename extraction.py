@@ -131,12 +131,13 @@ def extract_from_txt(uploaded_file: Any) -> str:
 
 
 def extract_from_pdf(uploaded_file: Any) -> str:
-    """Extract text from PDF file."""
+    """Extract text from PDF file. Only first PDF_MAX_PAGES pages to keep speed."""
     pypdf, _, _, _, _ = get_file_parsers()
 
     try:
         reader = pypdf.PdfReader(uploaded_file)
-        pages_text = [page.extract_text() for page in reader.pages if page.extract_text()]
+        pages = reader.pages[: constants.PDF_MAX_PAGES]
+        pages_text = [p.extract_text() for p in pages if p.extract_text()]
         return "\n".join(pages_text)
     except Exception as e:
         return ErrorHandler.handle_file_error(e, "PDF")

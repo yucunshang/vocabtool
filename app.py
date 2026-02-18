@@ -809,10 +809,15 @@ with tab_extract:
                 with st.status("📄 正在解析文件并提取重点词...", expanded=True) as status:
                     start_time = time.time()
                     raw_text = extract_text_from_file(uploaded_file)
+                    truncated = False
+                    if len(raw_text) > constants.MAX_TEXT_ANALYSIS_CHARS:
+                        raw_text = raw_text[: constants.MAX_TEXT_ANALYSIS_CHARS]
+                        truncated = True
                     if _analyze_and_set_words(raw_text, current_rank_upload, target_rank_upload):
                         st.session_state['process_time'] = time.time() - start_time
                         run_gc()
-                        status.update(label="✅ 生成完成", state="complete", expanded=False)
+                        label = "✅ 生成完成（已仅分析前 30 万字）" if truncated else "✅ 生成完成"
+                        status.update(label=label, state="complete", expanded=False)
                     else:
                         status.update(label="⚠️ 文件内容为空或过短", state="error")
 
