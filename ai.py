@@ -400,7 +400,8 @@ def process_ai_in_batches(
 
             except Exception as e:
                 if attempt < constants.MAX_RETRIES - 1:
-                    time.sleep(1 + attempt)
+                    # Exponential backoff: 2s, 4s, 8s, ...
+                    time.sleep(2 ** (attempt + 1))
                     continue
                 else:
                     ErrorHandler.handle(
