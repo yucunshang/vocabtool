@@ -183,10 +183,19 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
     # ---- Assemble ----
     field_constraints = "\n\n".join(filter(None, [f1_constraint, f2_constraint, f3_constraint, f4_constraint]))
 
+    mandatory_note = ""
+    if include_ety and num_examples >= 2:
+        mandatory_note = """
+# CRITICAL (Do not skip)
+- Every line MUST have exactly 4 parts separated by `|||`: (1) word/phrase, (2) definition, (3) examples, (4) etymology.
+- Field 3: exactly 2 example sentences, each with Chinese translation in parentheses, separated by ` // `.
+- Field 4: etymology/roots in Chinese is REQUIRED for every word. If uncertain, give a brief origin note in Chinese.
+"""
+
     prompt = f"""# Role
 You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards.
 Make sure to process everything in one go, without missing anything.
-
+{mandatory_note}
 # Input Data
 {words_str}
 
@@ -194,7 +203,7 @@ Make sure to process everything in one go, without missing anything.
 1. **Output Container**: Strictly inside a single ```text code block.
 2. **Layout**: One entry per line.
 3. **Separator**: Use `|||` as the delimiter.
-4. **Target Structure**:
+4. **Target Structure** (every line must have all parts):
    `{f1_name}` ||| `{f2_name}` ||| `{ex_label}`{f4_structure}
 
 # Field Constraints (Strict)

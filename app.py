@@ -720,6 +720,7 @@ def _render_extract_results() -> None:
             ai_result = process_ai_in_batches(
                 words_for_auto_ai,
                 progress_callback=update_ai_progress,
+                card_format={"front": "word", "definition": "cn", "examples": 2, "etymology": True},
             )
 
             if ai_result:
