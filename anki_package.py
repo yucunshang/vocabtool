@@ -44,6 +44,14 @@ def _split_examples(raw_example: str) -> List[str]:
     return parts if parts else ([raw_example] if raw_example.strip() else [])
 
 
+def _example_text_for_tts(display_text: str) -> str:
+    """Return the text to send to TTS: only the English part when format is 'English (中文)'."""
+    idx = display_text.find(" (")
+    if idx != -1:
+        return display_text[:idx].strip()
+    return display_text.strip()
+
+
 def generate_anki_package(
     cards_data: List[Dict[str, str]],
     deck_name: str,
@@ -182,8 +190,9 @@ def generate_anki_package(
                     if sent and len(sent) > 3:
                         ex_filename = f"tts_{safe_phrase}_{unique_id}_e{ei}.mp3"
                         ex_path = os.path.join(tmp_dir, ex_filename)
+                        tts_text = _example_text_for_tts(sent)
                         audio_tasks.append({
-                            'text': sent,
+                            'text': tts_text if tts_text else sent,
                             'path': ex_path,
                             'voice': tts_voice
                         })
