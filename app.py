@@ -685,6 +685,8 @@ def _render_extract_results() -> None:
         selected_voice_code = constants.VOICE_MAP[selected_voice_label]
 
         enable_audio_auto = st.checkbox("启用语音", value=True, key="chk_audio_auto")
+        examples_colloquial = st.checkbox("例句用口语", value=False, key="chk_examples_colloquial",
+                                           help="例句使用日常口语化表达，而非书面语")
 
         words_for_auto_ai = words_only
         current_word_count = len(words_for_auto_ai)
@@ -720,7 +722,13 @@ def _render_extract_results() -> None:
             ai_result = process_ai_in_batches(
                 words_for_auto_ai,
                 progress_callback=update_ai_progress,
-                card_format={"front": "word", "definition": "cn", "examples": 2, "etymology": True},
+                card_format={
+                    "front": "word",
+                    "definition": "cn",
+                    "examples": 2,
+                    "etymology": True,
+                    "examples_colloquial": examples_colloquial,
+                },
             )
 
             if ai_result:
