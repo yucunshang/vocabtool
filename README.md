@@ -36,15 +36,21 @@
 
 ## 项目结构
 
-- `app.py`：主入口与页面编排
-- `ai.py`：AI 查词、批量制卡 Prompt 构造与调用
-- `vocab.py`：词汇分析、rank 过滤
-- `extraction.py`：多格式内容提取
-- `anki_parse.py`：AI 输出解析
-- `anki_package.py`：Anki 打包与语音文件处理
-- `resources.py`：词库/NLP 资源加载
-- `constants.py`：全局常量
-- `config.py`：配置读取（`st.secrets`）
+| 文件 | 说明 |
+|---|---|
+| `app.py` | Streamlit 主入口，页面编排与 UI 渲染 |
+| `resources.py` | 词库/NLP 资源加载（**纯逻辑，无 Streamlit 依赖**，使用 `functools.lru_cache`） |
+| `ai.py` | AI 查词、批量制卡 Prompt 构造与调用（**纯逻辑，无 Streamlit 依赖**） |
+| `vocab.py` | 词汇分析、rank 过滤 |
+| `extraction.py` | 多格式内容提取（PDF/DOCX/EPUB/URL/CSV/Excel/SQLite/Anki 导出） |
+| `anki_parse.py` | AI 输出（`\|\|\|` 格式）解析为卡片 |
+| `anki_package.py` | Anki 打包与语音文件处理 |
+| `prompts.py` | AI 提示词模板（可直接修改，不影响其余逻辑） |
+| `constants.py` | 全局常量 |
+| `config.py` | 配置读取（`st.secrets` → 环境变量 → 默认值） |
+| `tests/` | pytest 测试套件（50 个测试，含对 `resources`/`ai` 的无 Streamlit 单元测试） |
+
+> **架构说明：** `resources.py` 和 `ai.py` 已与 Streamlit 完全解耦，可在非 UI 环境中直接导入和测试。详见 `CLAUDE.md`。
 
 ## 环境要求
 
@@ -86,8 +92,11 @@ streamlit run app.py
 ## 测试
 
 ```bash
-pytest -q
+# 使用 Python 3.13（需已安装项目依赖）
+python -m pytest tests/ -q
 ```
+
+当前共 50 个测试，覆盖 AI Prompt 构造、Anki 解析、词汇分析、文本提取，以及 `resources.py`/`ai.py` 的无 Streamlit 单元测试。
 
 ## 说明与建议
 
