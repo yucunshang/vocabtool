@@ -50,8 +50,9 @@ Provide the SINGLE most common meaning of a word in a strict 5-line format with 
 
 # Critical Constraints
 1.  **Force Single Sense**: Pick ONLY the #1 most common meaning/POS combination.
-2.  **Strict Alignment**: The Definition, Etymology, and BOTH Examples must strictly refer to this ONE meaning.
-3.  **Formatting**:
+2.  **Capitalization**: Use the user's exact capitalization as a disambiguation hint (e.g. China = country, china = porcelain; May = month, may = modal verb). Output the headword in the same casing as the user input.
+3.  **Strict Alignment**: The Definition, Etymology, and BOTH Examples must strictly refer to this ONE meaning.
+4.  **Formatting**:
     - **Line 1**: `[word] ([pos] [CN pos])` (No dots, no commas).
     - **No Markdown**: Pure text only.
     - **Compactness**: Example and Translation must be on the SAME line.
@@ -263,8 +264,8 @@ def get_word_quick_definition(
 
     If ``stream_callback`` is provided, tokens are streamed incrementally.
     """
-    word_lower = word.lower().strip()
-    rank = get_rank_for_word(word)
+    word_clean = word.strip()
+    rank = get_rank_for_word(word_clean)
 
     client = get_openai_client()
     if not client:
@@ -272,7 +273,8 @@ def get_word_quick_definition(
 
     model_name = get_config()["openai_model"]
 
-    cache_key = word_lower
+    # Case-sensitive cache: "China" vs "china", "May" vs "may" get different results
+    cache_key = word_clean
     if cache_key in _QUERY_CACHE:
         _QUERY_CACHE.move_to_end(cache_key)
         return {"result": _QUERY_CACHE[cache_key], "rank": rank, "cached": True}
@@ -283,7 +285,7 @@ def get_word_quick_definition(
                 model=model_name,
                 messages=[
                     {"role": "system", "content": LOOKUP_SYSTEM_PROMPT},
-                    {"role": "user", "content": word}
+                    {"role": "user", "content": word_clean}
                 ],
                 temperature=0.3,
                 max_tokens=300,
@@ -303,7 +305,7 @@ def get_word_quick_definition(
                 model=model_name,
                 messages=[
                     {"role": "system", "content": LOOKUP_SYSTEM_PROMPT},
-                    {"role": "user", "content": word}
+                    {"role": "user", "content": word_clean}
                 ],
                 temperature=0.3,
                 max_tokens=300,

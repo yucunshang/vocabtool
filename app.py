@@ -883,7 +883,8 @@ def _do_lookup(query_word: str) -> None:
 
     st.session_state["quick_lookup_is_loading"] = True
     try:
-        cache_key = f"lookup_cache_{query_word.lower()}"
+        # Case-sensitive cache so "China" vs "china", "May" vs "may" get different results
+        cache_key = f"lookup_cache_{query_word.strip()}"
         if cache_key not in st.session_state:
             stream_box = st.empty()
 
