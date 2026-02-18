@@ -23,7 +23,6 @@ from extraction import (
     extract_text_from_file,
     extract_text_from_url,
     is_upload_too_large,
-    parse_anki_txt_export,
 )
 from rate_limiter import (
     check_batch_limit, check_lookup_limit, check_url_limit,
@@ -39,45 +38,6 @@ VOCAB_DICT, FULL_DF = resources.load_vocab_data()
 
 # Clean old .apkg files from our temp subdir (e.g. from previous sessions)
 cleanup_old_apkg_files()
-
-# Stop words to filter out in direct-input mode (articles, pronouns,
-# prepositions, conjunctions, auxiliary verbs, determiners, etc.).
-_DIRECT_INPUT_STOPWORDS: set = {
-    # Articles & determiners
-    "a", "an", "the", "this", "that", "these", "those",
-    # Pronouns
-    "i", "me", "my", "mine", "myself",
-    "you", "your", "yours", "yourself", "yourselves",
-    "he", "him", "his", "himself",
-    "she", "her", "hers", "herself",
-    "it", "its", "itself",
-    "we", "us", "our", "ours", "ourselves",
-    "they", "them", "their", "theirs", "themselves",
-    "who", "whom", "whose", "which", "what",
-    # Prepositions
-    "in", "on", "at", "to", "for", "of", "with", "by", "from",
-    "up", "out", "off", "into", "onto", "upon", "about", "over",
-    "under", "after", "before", "between", "through", "during",
-    "above", "below", "around", "against", "along", "across",
-    "behind", "beyond", "within", "without", "toward", "towards",
-    # Conjunctions
-    "and", "but", "or", "nor", "so", "yet", "for",
-    "both", "either", "neither", "whether",
-    # Auxiliary / common verbs
-    "is", "am", "are", "was", "were", "be", "been", "being",
-    "do", "did", "does", "done", "doing",
-    "has", "had", "have", "having",
-    "will", "would", "shall", "should",
-    "can", "could", "may", "might", "must",
-    # Very common adverbs / particles
-    "not", "no", "yes", "very", "too", "also", "just",
-    "then", "than", "now", "here", "there",
-    "how", "when", "where", "why",
-    # Other function words
-    "if", "as", "all", "each", "every", "any", "some",
-    "such", "more", "most", "much", "many", "few",
-    "other", "own", "same", "only",
-}
 
 logger = logging.getLogger(__name__)
 
@@ -382,7 +342,7 @@ def _render_builtin_ai_section(
 def _render_thirdparty_prompt_section(
     words_only: list, examples_colloquial: bool, use_builtin_ai: str
 ) -> None:
-    """Third-party AI prompt configuration and copy section."""
+    """Render card-format options and a copyable prompt block for third-party AI services."""
     if use_builtin_ai == "thirdparty":
         st.markdown("#### 📌 复制 Prompt（可自定义卡片格式）")
         st.caption("在下方选择卡片格式后复制 Prompt 到第三方 AI，生成结果粘贴到「Anki 制卡」页解析。")

@@ -7,8 +7,6 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
-import constants
-
 logger = logging.getLogger(__name__)
 
 
