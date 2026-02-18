@@ -6,8 +6,6 @@ import time
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
-import streamlit as st
-
 import constants
 from config import get_config
 from errors import ErrorHandler
@@ -198,13 +196,13 @@ def get_openai_client() -> Optional[Any]:
         return _OPENAI_CLIENT
 
     if not OpenAI:
-        st.error("❌ 未安装 OpenAI 库，无法使用内置 AI 功能。")
+        logger.error("OpenAI library not installed")
         return None
 
     cfg = get_config()
     api_key = cfg["openai_api_key"]
     if not api_key:
-        st.error("❌ 未找到 OPENAI_API_KEY。请在 .streamlit/secrets.toml 中配置。")
+        logger.error("OPENAI_API_KEY not configured in secrets or env")
         return None
 
     try:

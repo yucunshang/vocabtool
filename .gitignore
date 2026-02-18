@@ -35,3 +35,4 @@ htmlcov/
 *.apkg
 nltk_data/
 test_vocab.db
+.claude/

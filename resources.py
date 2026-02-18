@@ -1,36 +1,32 @@
 # Cached resource loaders (NLP, file parsers, genanki, vocab data).
 
+import functools
 import logging
 import os
 from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
-import streamlit as st
 
 import constants
-from errors import ErrorHandler
 
 logger = logging.getLogger(__name__)
 
-# Set by app after load_vocab_data() so vocab module can use them.
-VOCAB_DICT: Dict[str, int] = {}
-FULL_DF: Optional[pd.DataFrame] = None
-
 
 def get_vocab_dict() -> Dict[str, int]:
-    """Return current VOCAB_DICT (set by app after load_vocab_data())."""
-    return VOCAB_DICT
+    """Return the vocabulary dict from the cached load_vocab_data() call."""
+    return load_vocab_data()[0]
 
 
 def get_rank_for_word(word: str) -> int:
     """Get rank for word: try exact case first, then lowercase. Returns 99999 if not found."""
     if not word:
         return 99999
+    vocab = load_vocab_data()[0]
     w = word.strip()
-    return VOCAB_DICT.get(w, VOCAB_DICT.get(w.lower(), 99999))
+    return vocab.get(w, vocab.get(w.lower(), 99999))
 
 
-@st.cache_resource(show_spinner="正在加载 NLP 引擎...")
+@functools.lru_cache(maxsize=None)
 def load_nlp_resources() -> Tuple[Any, Any]:
     """Load NLTK and lemminflect resources with proper error handling."""
     import nltk
@@ -50,12 +46,12 @@ def load_nlp_resources() -> Tuple[Any, Any]:
                 logger.info("Downloading NLTK package: %s", pkg)
                 nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
     except Exception as e:
-        ErrorHandler.handle(e, "NLP 资源加载失败")
+        logger.error("NLP 资源加载失败: %s", e)
 
     return nltk, lemminflect
 
 
-@st.cache_resource
+@functools.lru_cache(maxsize=None)
 def get_file_parsers() -> Tuple[Any, Any, Any, Any, Any]:
     """Lazy load file parsing libraries (cached)."""
     import pypdf
@@ -66,7 +62,7 @@ def get_file_parsers() -> Tuple[Any, Any, Any, Any, Any]:
     return pypdf, docx, ebooklib, epub, BeautifulSoup
 
 
-@st.cache_resource
+@functools.lru_cache(maxsize=None)
 def get_genanki() -> Tuple[Any, Any]:
     """Lazy load genanki library (cached)."""
     import genanki
@@ -74,7 +70,7 @@ def get_genanki() -> Tuple[Any, Any]:
     return genanki, tempfile
 
 
-@st.cache_data
+@functools.lru_cache(maxsize=None)
 def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame]]:
     """Load vocabulary data from CSV files only."""
     root_dir = os.path.dirname(os.path.abspath(__file__))

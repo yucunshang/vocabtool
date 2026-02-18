@@ -34,10 +34,8 @@ from ui_styles import APP_STYLES_HTML
 from utils import get_beijing_time_str, render_copy_button, run_gc
 from vocab import analyze_logic
 
-# Load vocab and expose to app (and to resources for vocab/ai modules)
+# Load vocab data for use in mode_rank tab and the vocab error check below.
 VOCAB_DICT, FULL_DF = resources.load_vocab_data()
-resources.VOCAB_DICT = VOCAB_DICT
-resources.FULL_DF = FULL_DF
 
 # Clean old .apkg files from our temp subdir (e.g. from previous sessions)
 cleanup_old_apkg_files()
@@ -208,14 +206,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def _render_extract_results() -> None:
-    """Render the extracted words results, AI card generation, and third-party prompt."""
-    if not st.session_state.get('gen_words_data'):
-        return
-
-    data = st.session_state['gen_words_data']
+def _render_extraction_stats(data: list) -> None:
+    """Show 4 metrics: coverage, target density, raw count, filtered count."""
     original_count = len(data)
-
     if st.session_state.get('stats_info'):
         stats = st.session_state['stats_info']
         col_s1, col_s2 = st.columns(2)
@@ -233,10 +226,12 @@ def _render_extract_results() -> None:
     with col_t2:
         st.metric("✅ 筛选后单词总数", original_count)
 
-    st.markdown("### ✅ 提取成功！")
 
+def _render_word_editor(data: list) -> list:
+    """Render editable word list textarea with copy button. Returns current words_only."""
     words_only = [w for w, r in data]
     words_text = "\n".join(words_only)
+    original_count = len(data)
     if "word_list_editor" not in st.session_state:
         st.session_state["word_list_editor"] = words_text
 
@@ -259,27 +254,235 @@ def _render_extract_results() -> None:
     if edited_words != words_text:
         edited_word_list = [w.strip() for w in edited_words.split('\n') if w.strip()]
         st.info(f"📝 已编辑：当前共 {len(edited_word_list)} 个单词")
-        words_only = edited_word_list
+        return edited_word_list
     else:
-        words_only = [w for w, r in data]
+        return words_only
+
+
+def _render_audio_settings(key_prefix: str) -> tuple[bool, str]:
+    """Render audio toggle + voice selector. Returns (enable_audio, voice_code)."""
+    enable_audio = st.checkbox("启用语音", value=True, key=f"chk_audio_{key_prefix}")
+    if enable_audio:
+        selected_voice_label = st.radio(
+            "🎙️ 发音人",
+            options=list(constants.VOICE_MAP.keys()),
+            index=0,
+            horizontal=True,
+            key=f"sel_voice_{key_prefix}",
+        )
+        voice_code = constants.VOICE_MAP[selected_voice_label]
+    else:
+        voice_code = list(constants.VOICE_MAP.values())[0]
+    return enable_audio, voice_code
+
+
+def _render_builtin_ai_section(
+    words_only: list, enable_audio: bool, voice_code: str,
+    card_format, use_builtin_ai: str
+) -> None:
+    """Builtin AI generation flow: button → progress → parse → package → download."""
+    ai_model_label = get_config()["openai_model"]
+
+    words_for_auto_ai = words_only
+    current_word_count = len(words_for_auto_ai)
+    if current_word_count > constants.MAX_AUTO_LIMIT:
+        st.caption(
+            f"⚠️ 当前 {current_word_count} 词；内置 AI 最多处理前 {constants.MAX_AUTO_LIMIT} 词。"
+            " 可选「第三方 AI」复制 Prompt 分批处理。"
+        )
+        words_for_auto_ai = words_for_auto_ai[:constants.MAX_AUTO_LIMIT]
+
+    if use_builtin_ai == "builtin":
+        if st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", use_container_width=True):
+            batch_allowed, batch_msg = check_batch_limit()
+            if not batch_allowed:
+                st.warning(batch_msg)
+                st.stop()
+            record_batch()
+
+            progress_title = st.empty()
+            card_text = st.empty()
+            card_bar = st.progress(0.0)
+            audio_text = st.empty()
+            audio_bar = st.progress(0.0)
+
+            total_words = len(words_for_auto_ai)
+            batch_size = constants.AI_BATCH_SIZE
+            first_end = min(batch_size, total_words)
+            progress_title.markdown("#### ⏳ 内置 AI 制卡进度")
+            card_text.markdown(f"**制卡进度**：第 1 组（1–{first_end}/{total_words}）AI 生成中...")
+            audio_text.markdown("**音频进度**：等待制卡完成...")
+
+            def update_ai_progress(current: int, total: int) -> None:
+                ratio = current / total if total > 0 else 0.0
+                card_bar.progress(min(0.9, ratio * 0.9))
+                batch_idx = (current + batch_size - 1) // batch_size
+                start = (batch_idx - 1) * batch_size + 1
+                end = min(batch_idx * batch_size, total)
+                card_text.markdown(f"**制卡进度**：第 {batch_idx} 组（{start}–{end}/{total}）AI 生成中...")
+
+            ai_result = process_ai_in_batches(
+                words_for_auto_ai,
+                progress_callback=update_ai_progress,
+                card_format=card_format,
+            )
+
+            if ai_result:
+                card_text.markdown("**制卡进度**：正在解析 AI 结果...")
+                parsed_data = parse_anki_data(ai_result)
+
+                if parsed_data:
+                    try:
+                        card_bar.progress(1.0)
+                        card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
+                        audio_text.markdown("**音频进度**：进行中...")
+                        audio_bar.progress(0.0)
+                        deck_name = f"Vocab_{get_beijing_time_str()}"
+
+                        def update_pkg_progress(ratio: float, text: str) -> None:
+                            audio_bar.progress(ratio)
+                            audio_text.markdown(f"**音频进度**：{text}")
+
+                        file_path = generate_anki_package(
+                            parsed_data,
+                            deck_name,
+                            enable_tts=enable_audio,
+                            tts_voice=voice_code,
+                            progress_callback=update_pkg_progress
+                        )
+
+                        set_anki_pkg(file_path, deck_name)
+
+                        audio_bar.progress(1.0)
+                        audio_text.markdown("**音频进度**：✅ 完成")
+                        st.balloons()
+                        run_gc()
+                    except Exception as e:
+                        audio_text.markdown("**音频进度**：❌ 失败")
+                        ErrorHandler.handle(e, "生成出错")
+                else:
+                    card_text.markdown("**制卡进度**：❌ 解析失败")
+                    audio_text.markdown("**音频进度**：未开始")
+                    st.error("解析失败，AI 返回内容为空或格式错误。")
+            else:
+                card_text.markdown("**制卡进度**：❌ AI 生成失败")
+                audio_text.markdown("**音频进度**：未开始")
+                st.error("AI 生成失败，请检查 API Key 或网络连接。")
+    else:
+        st.info("请使用右侧「复制 Prompt」到第三方 AI，格式与上方通用设置一致。")
+
+    render_anki_download_button(
+        f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
+        button_type="primary",
+        use_container_width=True
+    )
+    st.caption("⚠️ AI 结果请人工复核后再学习。")
+
+
+def _render_thirdparty_prompt_section(
+    words_only: list, examples_colloquial: bool, use_builtin_ai: str
+) -> None:
+    """Third-party AI prompt configuration and copy section."""
+    if use_builtin_ai == "thirdparty":
+        st.markdown("#### 📌 复制 Prompt（可自定义卡片格式）")
+        st.caption("在下方选择卡片格式后复制 Prompt 到第三方 AI，生成结果粘贴到「Anki 制卡」页解析。")
+    else:
+        st.markdown("#### 第三方 AI Prompt")
+        st.caption("需要大批量或自定义卡片格式时，可切换为「第三方 AI」在下方自定义格式并复制 Prompt。")
+
+    with st.expander("📌 复制 Prompt（第三方 AI）", expanded=(use_builtin_ai == "thirdparty")):
+        st.markdown("##### ⚙️ 卡片格式（仅影响下方 Prompt）")
+        col_tp_front, col_tp_def = st.columns(2)
+        with col_tp_front:
+            tp_front = st.radio(
+                "正面",
+                options=["word", "phrase"],
+                format_func=lambda x: "单词" if x == "word" else "短语/词组",
+                index=0,
+                horizontal=True,
+                key="tp_prompt_front",
+            )
+        with col_tp_def:
+            tp_def = st.radio(
+                "释义",
+                options=["cn", "en", "both"],
+                format_func=lambda x: {"cn": "中文", "en": "英文", "both": "中英双语"}[x],
+                index=0,
+                horizontal=True,
+                key="tp_prompt_def",
+            )
+        col_tp_ex, col_tp_ety = st.columns(2)
+        with col_tp_ex:
+            tp_ex = st.radio(
+                "例句数量",
+                options=[1, 2, 3],
+                format_func=lambda x: f"{x} 条",
+                index=1,
+                horizontal=True,
+                key="tp_prompt_ex",
+            )
+        with col_tp_ety:
+            tp_ety = st.checkbox("词根词源词缀", value=False, key="tp_prompt_ety")
+        tp_ex_cn = st.checkbox("例句带中文翻译", value=True, key="tp_prompt_ex_cn")
+        tp_colloquial = st.checkbox("例句用口语", value=examples_colloquial, key="tp_prompt_colloquial", help="例句使用日常口语化表达")
+
+        third_party_card_format: CardFormat = {
+            "front": tp_front,
+            "definition": tp_def,
+            "examples": tp_ex,
+            "examples_with_cn": tp_ex_cn,
+            "etymology": tp_ety,
+            "examples_colloquial": tp_colloquial,
+        }
+
+        batch_size_prompt = int(
+            st.number_input("🔢 分组大小 (最大 500)", min_value=1, max_value=500, value=50, step=10, key="batch_size_prompt")
+        )
+        current_batch_words = []
+
+        if words_only:
+            total_w = len(words_only)
+            if total_w <= 500:
+                st.caption(f"💡 当前共 {total_w} 个单词（≤500），已全部放入一个 Prompt。")
+                current_batch_words = words_only
+            else:
+                num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
+                batch_options = [
+                    f"第 {i+1} 组 ({i*batch_size_prompt+1} - {min((i+1)*batch_size_prompt, total_w)})"
+                    for i in range(num_batches)
+                ]
+                selected_batch_str = st.selectbox("📂 选择当前分组", batch_options)
+                sel_idx = batch_options.index(selected_batch_str)
+                current_batch_words = words_only[
+                    sel_idx*batch_size_prompt:min((sel_idx+1)*batch_size_prompt, total_w)
+                ]
+        else:
+            st.warning("⚠️ 暂无单词数据，请先提取单词。")
+
+        words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[INSERT YOUR WORD LIST HERE]"
+        strict_prompt_template = build_card_prompt(words_str_for_prompt, third_party_card_format)
+        st.code(strict_prompt_template, language="text")
+
+
+def _render_extract_results() -> None:
+    """Render the extracted words results, AI card generation, and third-party prompt."""
+    if not st.session_state.get('gen_words_data'):
+        return
+
+    data = st.session_state['gen_words_data']
+
+    _render_extraction_stats(data)
+
+    st.markdown("### ✅ 提取成功！")
+
+    words_only = _render_word_editor(data)
 
     st.markdown("---")
     st.markdown("### 🤖 AI 生成 Anki 卡片")
 
     # ---------- 公用设置（内置 AI 与第三方 Prompt 共用）----------
     st.markdown("#### ① 通用设置")
-    enable_audio_auto = st.checkbox("启用语音", value=True, key="chk_audio_auto")
-    if enable_audio_auto:
-        selected_voice_label = st.radio(
-            "🎙️ 发音人",
-            options=list(constants.VOICE_MAP.keys()),
-            index=0,
-            horizontal=True,
-            key="sel_voice_auto",
-        )
-        selected_voice_code = constants.VOICE_MAP[selected_voice_label]
-    else:
-        selected_voice_code = list(constants.VOICE_MAP.values())[0]
+    enable_audio, voice_code = _render_audio_settings("auto")
 
     examples_colloquial = st.checkbox(
         "例句用口语",
@@ -311,183 +514,10 @@ def _render_extract_results() -> None:
     col_ai_btn, col_copy_hint = st.columns([1, 1.35], vertical_alignment="top")
 
     with col_ai_btn:
-        ai_model_label = get_config()["openai_model"]
-
-        words_for_auto_ai = words_only
-        current_word_count = len(words_for_auto_ai)
-        if current_word_count > constants.MAX_AUTO_LIMIT:
-            st.caption(
-                f"⚠️ 当前 {current_word_count} 词；内置 AI 最多处理前 {constants.MAX_AUTO_LIMIT} 词。"
-                " 可选「第三方 AI」复制 Prompt 分批处理。"
-            )
-            words_for_auto_ai = words_for_auto_ai[:constants.MAX_AUTO_LIMIT]
-
-        if use_builtin_ai == "builtin":
-            if st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", use_container_width=True):
-                batch_allowed, batch_msg = check_batch_limit()
-                if not batch_allowed:
-                    st.warning(batch_msg)
-                    st.stop()
-                record_batch()
-
-                progress_title = st.empty()
-                card_text = st.empty()
-                card_bar = st.progress(0.0)
-                audio_text = st.empty()
-                audio_bar = st.progress(0.0)
-
-                total_words = len(words_for_auto_ai)
-                batch_size = constants.AI_BATCH_SIZE
-                first_end = min(batch_size, total_words)
-                progress_title.markdown("#### ⏳ 内置 AI 制卡进度")
-                card_text.markdown(f"**制卡进度**：第 1 组（1–{first_end}/{total_words}）AI 生成中...")
-                audio_text.markdown("**音频进度**：等待制卡完成...")
-
-                def update_ai_progress(current: int, total: int) -> None:
-                    ratio = current / total if total > 0 else 0.0
-                    card_bar.progress(min(0.9, ratio * 0.9))
-                    batch_idx = (current + batch_size - 1) // batch_size
-                    start = (batch_idx - 1) * batch_size + 1
-                    end = min(batch_idx * batch_size, total)
-                    card_text.markdown(f"**制卡进度**：第 {batch_idx} 组（{start}–{end}/{total}）AI 生成中...")
-
-                ai_result = process_ai_in_batches(
-                    words_for_auto_ai,
-                    progress_callback=update_ai_progress,
-                    card_format=shared_card_format,
-                )
-
-                if ai_result:
-                    card_text.markdown("**制卡进度**：正在解析 AI 结果...")
-                    parsed_data = parse_anki_data(ai_result)
-
-                    if parsed_data:
-                        try:
-                            card_bar.progress(1.0)
-                            card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
-                            audio_text.markdown("**音频进度**：进行中...")
-                            audio_bar.progress(0.0)
-                            deck_name = f"Vocab_{get_beijing_time_str()}"
-
-                            def update_pkg_progress(ratio: float, text: str) -> None:
-                                audio_bar.progress(ratio)
-                                audio_text.markdown(f"**音频进度**：{text}")
-
-                            file_path = generate_anki_package(
-                                parsed_data,
-                                deck_name,
-                                enable_tts=enable_audio_auto,
-                                tts_voice=selected_voice_code,
-                                progress_callback=update_pkg_progress
-                            )
-
-                            set_anki_pkg(file_path, deck_name)
-
-                            audio_bar.progress(1.0)
-                            audio_text.markdown("**音频进度**：✅ 完成")
-                            st.balloons()
-                            run_gc()
-                        except Exception as e:
-                            audio_text.markdown("**音频进度**：❌ 失败")
-                            ErrorHandler.handle(e, "生成出错")
-                    else:
-                        card_text.markdown("**制卡进度**：❌ 解析失败")
-                        audio_text.markdown("**音频进度**：未开始")
-                        st.error("解析失败，AI 返回内容为空或格式错误。")
-                else:
-                    card_text.markdown("**制卡进度**：❌ AI 生成失败")
-                    audio_text.markdown("**音频进度**：未开始")
-                    st.error("AI 生成失败，请检查 API Key 或网络连接。")
-        else:
-            st.info("请使用右侧「复制 Prompt」到第三方 AI，格式与上方通用设置一致。")
-
-        render_anki_download_button(
-            f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
-            button_type="primary",
-            use_container_width=True
-        )
-        st.caption("⚠️ AI 结果请人工复核后再学习。")
+        _render_builtin_ai_section(words_only, enable_audio, voice_code, shared_card_format, use_builtin_ai)
 
     with col_copy_hint:
-        if use_builtin_ai == "thirdparty":
-            st.markdown("#### 📌 复制 Prompt（可自定义卡片格式）")
-            st.caption("在下方选择卡片格式后复制 Prompt 到第三方 AI，生成结果粘贴到「Anki 制卡」页解析。")
-        else:
-            st.markdown("#### 第三方 AI Prompt")
-            st.caption("需要大批量或自定义卡片格式时，可切换为「第三方 AI」在下方自定义格式并复制 Prompt。")
-
-        with st.expander("📌 复制 Prompt（第三方 AI）", expanded=(use_builtin_ai == "thirdparty")):
-            st.markdown("##### ⚙️ 卡片格式（仅影响下方 Prompt）")
-            col_tp_front, col_tp_def = st.columns(2)
-            with col_tp_front:
-                tp_front = st.radio(
-                    "正面",
-                    options=["word", "phrase"],
-                    format_func=lambda x: "单词" if x == "word" else "短语/词组",
-                    index=0,
-                    horizontal=True,
-                    key="tp_prompt_front",
-                )
-            with col_tp_def:
-                tp_def = st.radio(
-                    "释义",
-                    options=["cn", "en", "both"],
-                    format_func=lambda x: {"cn": "中文", "en": "英文", "both": "中英双语"}[x],
-                    index=0,
-                    horizontal=True,
-                    key="tp_prompt_def",
-                )
-            col_tp_ex, col_tp_ety = st.columns(2)
-            with col_tp_ex:
-                tp_ex = st.radio(
-                    "例句数量",
-                    options=[1, 2, 3],
-                    format_func=lambda x: f"{x} 条",
-                    index=1,
-                    horizontal=True,
-                    key="tp_prompt_ex",
-                )
-            with col_tp_ety:
-                tp_ety = st.checkbox("词根词源词缀", value=False, key="tp_prompt_ety")
-            tp_ex_cn = st.checkbox("例句带中文翻译", value=True, key="tp_prompt_ex_cn")
-            tp_colloquial = st.checkbox("例句用口语", value=examples_colloquial, key="tp_prompt_colloquial", help="例句使用日常口语化表达")
-
-            third_party_card_format: CardFormat = {
-                "front": tp_front,
-                "definition": tp_def,
-                "examples": tp_ex,
-                "examples_with_cn": tp_ex_cn,
-                "etymology": tp_ety,
-                "examples_colloquial": tp_colloquial,
-            }
-
-            batch_size_prompt = int(
-                st.number_input("🔢 分组大小 (最大 500)", min_value=1, max_value=500, value=50, step=10, key="batch_size_prompt")
-            )
-            current_batch_words = []
-
-            if words_only:
-                total_w = len(words_only)
-                if total_w <= 500:
-                    st.caption(f"💡 当前共 {total_w} 个单词（≤500），已全部放入一个 Prompt。")
-                    current_batch_words = words_only
-                else:
-                    num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
-                    batch_options = [
-                        f"第 {i+1} 组 ({i*batch_size_prompt+1} - {min((i+1)*batch_size_prompt, total_w)})"
-                        for i in range(num_batches)
-                    ]
-                    selected_batch_str = st.selectbox("📂 选择当前分组", batch_options)
-                    sel_idx = batch_options.index(selected_batch_str)
-                    current_batch_words = words_only[
-                        sel_idx*batch_size_prompt:min((sel_idx+1)*batch_size_prompt, total_w)
-                    ]
-            else:
-                st.warning("⚠️ 暂无单词数据，请先提取单词。")
-
-            words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[INSERT YOUR WORD LIST HERE]"
-            strict_prompt_template = build_card_prompt(words_str_for_prompt, third_party_card_format)
-            st.code(strict_prompt_template, language="text")
+        _render_thirdparty_prompt_section(words_only, examples_colloquial, use_builtin_ai)
 
 
 def _do_lookup(query_word: str) -> None:
@@ -687,6 +717,22 @@ with tab_lookup:
 # ==========================================
 # Tab 1: Word Extraction
 # ==========================================
+def _render_rank_inputs(key_suffix: str) -> tuple[int, int]:
+    """Render min/max rank number inputs with validation warning. Returns (min_rank, max_rank)."""
+    col1, col2 = st.columns(2)
+    min_rank = col1.number_input(
+        "忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100,
+        key=f"min_rank_{key_suffix}"
+    )
+    max_rank = col2.number_input(
+        "忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500,
+        key=f"max_rank_{key_suffix}"
+    )
+    if max_rank < min_rank:
+        st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
+    return min_rank, max_rank
+
+
 with tab_extract:
     mode_paste, mode_url, mode_upload, mode_rank, mode_manual = st.tabs([
         "文本",
@@ -697,12 +743,7 @@ with tab_extract:
     ])
 
     with mode_paste:
-        col1, col2 = st.columns(2)
-        current_rank = col1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100)
-        target_rank = col2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
-
-        if target_rank < current_rank:
-            st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
+        current_rank, target_rank = _render_rank_inputs("2_1")
 
         pasted_text = st.text_area(
             "粘贴文章文本",
@@ -737,12 +778,7 @@ with tab_extract:
                         status.update(label="⚠️ 内容为空或太短", state="error")
 
     with mode_url:
-        col1, col2 = st.columns(2)
-        current_rank_url = col1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100, key="min_rank_2_2")
-        target_rank_url = col2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500, key="max_rank_2_2")
-
-        if target_rank_url < current_rank_url:
-            st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
+        current_rank_url, target_rank_url = _render_rank_inputs("2_2")
 
         input_url = st.text_input(
             "🔗 输入文章 URL（自动抓取）",
@@ -784,12 +820,7 @@ with tab_extract:
                             status.update(label="⚠️ 抓取内容为空或过短", state="error")
 
     with mode_upload:
-        col1, col2 = st.columns(2)
-        current_rank_upload = col1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100, key="min_rank_2_3")
-        target_rank_upload = col2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500, key="max_rank_2_3")
-
-        if target_rank_upload < current_rank_upload:
-            st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
+        current_rank_upload, target_rank_upload = _render_rank_inputs("2_3")
 
         uploaded_file = st.file_uploader(
             "上传文件（TXT/PDF/DOCX/EPUB/CSV/Excel/DB）",
