@@ -1,4 +1,5 @@
 # AI-backed word definitions and batch card generation.
+# 提示词模板见 prompts.py，可直接修改，不影响制卡 / apkg / 语音 / 卡片格式。
 
 import logging
 import time
@@ -10,6 +11,7 @@ import streamlit as st
 import constants
 from config import get_config
 from errors import ErrorHandler
+from prompts import CARD_GEN_SYSTEM_PROMPT, CARD_GEN_USER_TEMPLATE, LOOKUP_SYSTEM_PROMPT
 from resources import get_rank_for_word
 
 logger = logging.getLogger(__name__)
@@ -43,59 +45,6 @@ DEFAULT_CARD_FORMAT: CardFormat = {
 _QUERY_CACHE: OrderedDict[str, str] = OrderedDict()
 _QUERY_CACHE_MAX = 500
 _OPENAI_CLIENT: Optional[Any] = None
-
-LOOKUP_SYSTEM_PROMPT = """# Role
-Atomic Flash Dictionary.
-
-# Goal
-Provide the SINGLE most common meaning of a word in a strict 5-line format with clean POS tags.
-
-# Critical Constraints
-1.  **Force Single Sense**: Pick ONLY the #1 most common meaning/POS combination.
-2.  **Capitalization**: Use the user's exact capitalization as a disambiguation hint (e.g. China = country, china = porcelain; May = month, may = modal verb). Output the headword in the same casing as the user input.
-3.  **Strict Alignment**: The Definition, Etymology, and BOTH Examples must strictly refer to this ONE meaning.
-4.  **Formatting**:
-    - **Line 1**: `[word] ([pos] [CN pos])` (No dots, no commas).
-    - **No Markdown**: Pure text only.
-    - **Compactness**: Example and Translation must be on the SAME line.
-
-# Output Format
-[word] ([pos] [CN pos])
-[CN Meaning] | [Short EN Definition (<8 words)]
-🌱 词源: [root (CN) + affix (CN)] (Or brief origin)
-• [English Example 1] ([CN Trans])
-• [English Example 2] ([CN Trans])
-
-# Few-Shot Examples (Visual Style: Clean)
-**User Input:**
-spring
-
-**Model Output:**
-spring (n 名词)
-春天 | The season after winter
-🌱 词源: spring- (涌出/生长) → 万物复苏的季节
-• Flowers bloom in spring. (花朵在春天绽放。)
-• I love the fresh air of spring. (我喜欢春天清新的空气。)
-
-**User Input:**
-date
-
-**Model Output:**
-date (n 名词)
-日期 | Specific day of the month
-🌱 词源: dat- (给予/指定) + -e (名词后缀)
-• What is today's date? (今天是几号？)
-• Please sign and date the form. (请在表格上签名并注明日期。)
-
-**User Input:**
-express
-
-**Model Output:**
-express (v 动词)
-表达；表示 | Convey a thought or feeling
-🌱 词源: ex- (向外) + press (压/挤)
-• She expressed her thanks to us. (她向我们表达了谢意。)
-• Words cannot express my feelings. (言语无法表达我的感受。)"""
 
 
 def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
@@ -223,36 +172,23 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
 - Field 3: exactly 2 example sentences. Separated by ` // `.
 """
 
-    prompt = f"""# Role
-You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards.
-Make sure to process everything in one go, without missing anything.
-{mandatory_note}
-# Input Data
-{words_str}
-
-# Output Format Guidelines
-1. **Output Container**: Strictly inside a single ```text code block.
-2. **Layout**: One entry per line.
-3. **Separator**: Use `|||` as the delimiter.
-4. **Target Structure** (every line must have all parts):
-   `{f1_name}` ||| `{f2_name}` ||| `{ex_label}`{f4_structure}
-
-# Field Constraints (Strict)
-{field_constraints}
-
-# Valid Example (Follow this logic strictly)
-Input: altruism
-Output:
-{f1_example_altruism} ||| {f2_example_altruism} ||| {f3_example_altruism}{f4_example_altruism}
-
-Input: hectic
-Output:
-{f1_example_hectic} ||| {f2_example_hectic} ||| {f3_example_hectic}{f4_example_hectic}
-
-# Task
-Process the provided input list strictly adhering to the format above."""
-
-    return prompt
+    return CARD_GEN_USER_TEMPLATE.format(
+        mandatory_note=mandatory_note,
+        words_str=words_str,
+        f1_name=f1_name,
+        f2_name=f2_name,
+        ex_label=ex_label,
+        f4_structure=f4_structure,
+        field_constraints=field_constraints,
+        f1_example_altruism=f1_example_altruism,
+        f2_example_altruism=f2_example_altruism,
+        f3_example_altruism=f3_example_altruism,
+        f4_example_altruism=f4_example_altruism,
+        f1_example_hectic=f1_example_hectic,
+        f2_example_hectic=f2_example_hectic,
+        f3_example_hectic=f3_example_hectic,
+        f4_example_hectic=f4_example_hectic,
+    )
 
 
 def get_openai_client() -> Optional[Any]:
@@ -369,7 +305,7 @@ def process_ai_in_batches(
     total_words = len(words_list)
     full_results: List[str] = []
 
-    system_prompt = "You are a helpful assistant for vocabulary learning."
+    system_prompt = CARD_GEN_SYSTEM_PROMPT
 
     for i in range(0, total_words, constants.AI_BATCH_SIZE):
         batch = words_list[i:i + constants.AI_BATCH_SIZE]
