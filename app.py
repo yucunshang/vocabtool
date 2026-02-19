@@ -361,41 +361,46 @@ def _render_thirdparty_prompt_section(
         st.caption("需要大批量或自定义卡片格式时，可切换为「第三方 AI」在下方自定义格式并复制 Prompt。")
 
     with st.expander("📌 复制 Prompt（第三方 AI）", expanded=(use_builtin_ai == "thirdparty")):
-        st.markdown("##### ⚙️ 卡片格式（仅影响下方 Prompt）")
-        col_tp_front, col_tp_def = st.columns(2)
-        with col_tp_front:
-            tp_front = st.radio(
+        st.markdown("##### ⚙️ 自定义卡片格式")
+        st.caption("仅影响下方生成的 Prompt")
+        st.markdown("**卡片内容**")
+        r1a, r1b = st.columns(2)
+        with r1a:
+            tp_front = st.selectbox(
                 "正面",
                 options=["word", "phrase"],
                 format_func=lambda x: "单词" if x == "word" else "短语/词组",
                 index=0,
-                horizontal=True,
                 key="tp_prompt_front",
             )
-        with col_tp_def:
-            tp_def = st.radio(
+        with r1b:
+            tp_def = st.selectbox(
                 "释义",
                 options=["cn", "en", "both"],
                 format_func=lambda x: {"cn": "中文", "en": "英文", "both": "中英双语"}[x],
                 index=0,
-                horizontal=True,
                 key="tp_prompt_def",
             )
-        col_tp_ex, col_tp_ety = st.columns(2)
-        with col_tp_ex:
-            tp_ex = st.radio(
+        r2a, r2b = st.columns(2)
+        with r2a:
+            tp_ex = st.selectbox(
                 "例句数量",
                 options=[1, 2, 3],
                 format_func=lambda x: f"{x} 条",
                 index=1,
-                horizontal=True,
                 key="tp_prompt_ex",
             )
-        with col_tp_ety:
+        with r2b:
             tp_ety = st.checkbox("词根词源词缀", value=False, key="tp_prompt_ety")
-        tp_ex_cn = st.checkbox("例句带中文翻译", value=True, key="tp_prompt_ex_cn")
-        tp_colloquial = st.checkbox("例句用口语", value=examples_colloquial, key="tp_prompt_colloquial", help="例句使用日常口语化表达")
+        st.markdown("**例句样式**")
+        r3a, r3b = st.columns(2)
+        with r3a:
+            tp_ex_cn = st.checkbox("例句带中文翻译", value=True, key="tp_prompt_ex_cn")
+        with r3b:
+            tp_colloquial = st.checkbox("例句用口语", value=examples_colloquial, key="tp_prompt_colloquial", help="例句使用日常口语化表达")
 
+        st.markdown("---")
+        st.markdown("**分组与 Prompt**")
         third_party_card_format: CardFormat = {
             "front": tp_front,
             "definition": tp_def,
@@ -405,6 +410,7 @@ def _render_thirdparty_prompt_section(
             "examples_colloquial": tp_colloquial,
         }
 
+        st.caption("选择分组并复制下方 Prompt 到第三方 AI")
         batch_size_prompt = int(
             st.number_input("🔢 分组大小 (最大 500)", min_value=1, max_value=500, value=50, step=10, key="batch_size_prompt")
         )
