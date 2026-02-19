@@ -20,7 +20,7 @@ MIN_WORD_LENGTH = 2
 MAX_WORD_LENGTH = 25
 
 AI_BATCH_SIZE = 20     # 每组请求词数（每批 API 调用 20 个词）
-AI_CONCURRENCY = 50    # API 请求最大并发度
+AI_CONCURRENCY = 5     # API 请求最大并发度
 MAX_AUTO_LIMIT = 1000  # 一次性制卡上限，仅一批（内部拆成 20 词/组，最多 50 组并发）
 MAX_RETRIES = 3
 
