@@ -14,7 +14,7 @@ import streamlit as st
 
 import constants
 import resources
-from ai import CardFormat, build_card_prompt, get_word_quick_definition, process_ai_in_batches
+from ai import CardFormat, get_word_quick_definition, process_ai_in_batches
 from anki_package import cleanup_old_apkg_files, generate_anki_package
 from anki_parse import parse_anki_data
 from config import get_config
@@ -30,7 +30,7 @@ from rate_limiter import (
 )
 from state import set_generated_words_state
 from ui_styles import APP_STYLES_HTML
-from utils import get_beijing_time_str, render_copy_button, render_prompt_copy_button, run_gc
+from utils import get_beijing_time_str, render_copy_button, run_gc
 from vocab import analyze_logic
 
 logger = logging.getLogger(__name__)
@@ -252,7 +252,7 @@ def _render_audio_settings(key_prefix: str) -> tuple[bool, str, bool]:
 
 def _render_builtin_ai_section(
     words_only: list, enable_audio: bool, voice_code: str, enable_example_audio: bool,
-    card_format, use_builtin_ai: str
+    card_format: CardFormat
 ) -> None:
     """Builtin AI generation flow: button → progress → parse → edit → package → download."""
     ai_model_label = get_config()["openai_model"]
@@ -286,139 +286,135 @@ def _render_builtin_ai_section(
                 f"（共 {total_word_count} 词）。"
             )
 
-    if use_builtin_ai == "builtin":
-        # Handle auto-generate flag set by "继续下一批" button
-        auto_generate = st.session_state.pop("_builtin_auto_generate", False)
+    # Handle auto-generate flag set by "继续下一批" button
+    auto_generate = st.session_state.pop("_builtin_auto_generate", False)
 
-        col_btn, _ = st.columns([0.35, 1])
-        with col_btn:
-            clicked = st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", key="btn_builtin_gen")
+    col_btn, _ = st.columns([0.35, 1])
+    with col_btn:
+        clicked = st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", key="btn_builtin_gen")
 
-        if clicked:
-            # Fresh generate: reset page and clear previous cards
-            st.session_state["_builtin_gen_page"] = 0
-            st.session_state.pop("_builtin_parsed_cards", None)
-            st.session_state.pop("_builtin_ai_partial_result", None)
-            st.session_state.pop("card_editor", None)
-            # Re-compute pagination for page 0
-            words_for_auto_ai = words_only[:page_size]
-            remaining_words = max(0, total_word_count - page_size)
+    if clicked:
+        # Fresh generate: reset page and clear previous cards
+        st.session_state["_builtin_gen_page"] = 0
+        st.session_state.pop("_builtin_parsed_cards", None)
+        st.session_state.pop("_builtin_ai_partial_result", None)
+        st.session_state.pop("card_editor", None)
+        # Re-compute pagination for page 0
+        words_for_auto_ai = words_only[:page_size]
+        remaining_words = max(0, total_word_count - page_size)
 
-        if clicked or auto_generate:
-            batch_allowed, batch_msg = check_batch_limit()
-            if not batch_allowed:
-                st.warning(batch_msg)
-                st.stop()
-            record_batch()
+    if clicked or auto_generate:
+        batch_allowed, batch_msg = check_batch_limit()
+        if not batch_allowed:
+            st.warning(batch_msg)
+            st.stop()
+        record_batch()
 
-            progress_title = st.empty()
-            card_text = st.empty()
-            card_bar = st.progress(0.0)
-            audio_text = st.empty()
-            audio_bar = st.progress(0.0)
+        progress_title = st.empty()
+        card_text = st.empty()
+        card_bar = st.progress(0.0)
+        audio_text = st.empty()
+        audio_bar = st.progress(0.0)
 
-            total_words = len(words_for_auto_ai)
-            batch_size = constants.AI_BATCH_SIZE
-            first_end = min(batch_size, total_words)
-            progress_title.markdown("#### ⏳ 内置 AI 制卡进度")
-            st.caption("💡 第一组可能稍慢（建立连接），后续组并发进行。")
-            card_text.markdown(f"**制卡进度**：第 1 组（1–{first_end}/{total_words}）AI 生成中...")
-            audio_text.markdown("**音频进度**：等待制卡完成...")
+        total_words = len(words_for_auto_ai)
+        batch_size = constants.AI_BATCH_SIZE
+        first_end = min(batch_size, total_words)
+        progress_title.markdown("#### ⏳ 内置 AI 制卡进度")
+        st.caption("💡 第一组可能稍慢（建立连接），后续组并发进行。")
+        card_text.markdown(f"**制卡进度**：第 1 组（1–{first_end}/{total_words}）AI 生成中...")
+        audio_text.markdown("**音频进度**：等待制卡完成...")
 
-            def update_ai_progress(current: int, total: int) -> None:
-                ratio = current / total if total > 0 else 0.0
-                card_bar.progress(min(0.9, ratio * 0.9))
-                batch_idx = (current + batch_size - 1) // batch_size
-                start = (batch_idx - 1) * batch_size + 1
-                end = min(batch_idx * batch_size, total)
-                card_text.markdown(f"**制卡进度**：第 {batch_idx} 组（{start}–{end}/{total}）AI 生成中...")
+        def update_ai_progress(current: int, total: int) -> None:
+            ratio = current / total if total > 0 else 0.0
+            card_bar.progress(min(0.9, ratio * 0.9))
+            batch_idx = (current + batch_size - 1) // batch_size
+            start = (batch_idx - 1) * batch_size + 1
+            end = min(batch_idx * batch_size, total)
+            card_text.markdown(f"**制卡进度**：第 {batch_idx} 组（{start}–{end}/{total}）AI 生成中...")
 
-            # Fix 3: Unpack (content, failed_words) tuple
-            ai_result, failed_words = process_ai_in_batches(
-                words_for_auto_ai,
-                progress_callback=update_ai_progress,
-                card_format=card_format,
+        # Fix 3: Unpack (content, failed_words) tuple
+        ai_result, failed_words = process_ai_in_batches(
+            words_for_auto_ai,
+            progress_callback=update_ai_progress,
+            card_format=card_format,
+        )
+
+        # Fix 3: Report failed words
+        if failed_words:
+            st.warning(
+                f"⚠️ {len(failed_words)} 个词生成失败，已跳过："
+                f"{', '.join(failed_words[:20])}"
+                + ("..." if len(failed_words) > 20 else "")
             )
 
-            # Fix 3: Report failed words
-            if failed_words:
-                st.warning(
-                    f"⚠️ {len(failed_words)} 个词生成失败，已跳过："
-                    f"{', '.join(failed_words[:20])}"
-                    + ("..." if len(failed_words) > 20 else "")
-                )
+        if ai_result:
+            card_text.markdown("**制卡进度**：正在解析 AI 结果...")
+            parsed_data = parse_anki_data(ai_result)
 
-            if ai_result:
-                card_text.markdown("**制卡进度**：正在解析 AI 结果...")
-                parsed_data = parse_anki_data(ai_result)
+            if parsed_data:
+                card_bar.progress(1.0)
+                card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
+                audio_text.markdown("**音频进度**：进行中...")
 
-                if parsed_data:
-                    card_bar.progress(1.0)
-                    card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
-                    audio_text.markdown("**音频进度**：进行中...")
+                # Fix 4: Checkpoint — save raw AI text in case packaging fails
+                st.session_state["_builtin_ai_partial_result"] = ai_result
 
-                    # Fix 4: Checkpoint — save raw AI text in case packaging fails
-                    st.session_state["_builtin_ai_partial_result"] = ai_result
-
-                    # Fix 5: Save cards; append if continuing a batch
-                    if auto_generate:
-                        existing = st.session_state.get("_builtin_parsed_cards") or []
-                        st.session_state["_builtin_parsed_cards"] = existing + parsed_data
-                        st.session_state.pop("card_editor", None)
-                    else:
-                        st.session_state["_builtin_parsed_cards"] = parsed_data
-
-                    edited_data = st.session_state["_builtin_parsed_cards"]
-
-                    def update_pkg_progress(ratio: float, text: str) -> None:
-                        audio_bar.progress(ratio)
-                        audio_text.markdown(f"**音频进度**：{text}")
-
-                    try:
-                        current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
-                        file_path, audio_failed, failed_phrases = generate_anki_package(
-                            edited_data,
-                            current_deck_name,
-                            enable_tts=enable_audio,
-                            tts_voice=voice_code,
-                            enable_example_tts=enable_example_audio,
-                            progress_callback=update_pkg_progress,
-                        )
-                        set_anki_pkg(file_path, current_deck_name)
-                        st.session_state["anki_cards_cache"] = edited_data
-                        st.session_state["_builtin_audio_failed_count"] = audio_failed
-                        st.session_state["_builtin_audio_failed_phrases"] = failed_phrases or []
-                        audio_bar.progress(1.0)
-                        suffix = f"（{audio_failed} 条失败，可点击下方重试）" if audio_failed else ""
-                        audio_text.markdown(f"**音频进度**：✅ 完成{suffix}")
-                        st.info(f"✅ 解析完成，共 {len(edited_data)} 张卡片。")
-                        st.balloons()
-                        run_gc()
-                    except Exception as e:
-                        audio_text.markdown("**音频进度**：❌ 生成失败")
-                        ErrorHandler.handle(e, "生成 .apkg 出错")
+                # Fix 5: Save cards; append if continuing a batch
+                if auto_generate:
+                    existing = st.session_state.get("_builtin_parsed_cards") or []
+                    st.session_state["_builtin_parsed_cards"] = existing + parsed_data
+                    st.session_state.pop("card_editor", None)
                 else:
-                    card_text.markdown("**制卡进度**：❌ 解析失败")
-                    audio_text.markdown("**音频进度**：未开始")
-                    st.error("解析失败，AI 返回内容为空或格式错误。")
+                    st.session_state["_builtin_parsed_cards"] = parsed_data
+
+                edited_data = st.session_state["_builtin_parsed_cards"]
+
+                def update_pkg_progress(ratio: float, text: str) -> None:
+                    audio_bar.progress(ratio)
+                    audio_text.markdown(f"**音频进度**：{text}")
+
+                try:
+                    current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
+                    file_path, audio_failed, failed_phrases = generate_anki_package(
+                        edited_data,
+                        current_deck_name,
+                        enable_tts=enable_audio,
+                        tts_voice=voice_code,
+                        enable_example_tts=enable_example_audio,
+                        progress_callback=update_pkg_progress,
+                    )
+                    set_anki_pkg(file_path, current_deck_name)
+                    st.session_state["anki_cards_cache"] = edited_data
+                    st.session_state["_builtin_audio_failed_count"] = audio_failed
+                    st.session_state["_builtin_audio_failed_phrases"] = failed_phrases or []
+                    audio_bar.progress(1.0)
+                    suffix = f"（{audio_failed} 条失败，可点击下方重试）" if audio_failed else ""
+                    audio_text.markdown(f"**音频进度**：✅ 完成{suffix}")
+                    st.info(f"✅ 解析完成，共 {len(edited_data)} 张卡片。")
+                    st.balloons()
+                    run_gc()
+                except Exception as e:
+                    audio_text.markdown("**音频进度**：❌ 生成失败")
+                    ErrorHandler.handle(e, "生成 .apkg 出错")
             else:
-                card_text.markdown("**制卡进度**：❌ AI 生成失败")
+                card_text.markdown("**制卡进度**：❌ 解析失败")
                 audio_text.markdown("**音频进度**：未开始")
-                st.error("AI 生成失败，请检查 API Key 或网络连接。")
+                st.error("解析失败，AI 返回内容为空或格式错误。")
+        else:
+            card_text.markdown("**制卡进度**：❌ AI 生成失败")
+            audio_text.markdown("**音频进度**：未开始")
+            st.error("AI 生成失败，请检查 API Key 或网络连接。")
 
-        # Fix 5: Next batch button — shown whenever cards are in session state
-        if st.session_state.get("_builtin_parsed_cards") and remaining_words > 0:
-            if st.button(
-                f"▶ 下一批（剩余 {remaining_words} 词）",
-                key="btn_gen_next_page",
-                use_container_width=True,
-            ):
-                st.session_state["_builtin_gen_page"] = page + 1
-                st.session_state["_builtin_auto_generate"] = True
-                st.rerun()
-
-    else:
-        st.info("请使用右侧「复制 Prompt」到第三方 AI，格式与上方通用设置一致。")
+    # Fix 5: Next batch button — shown whenever cards are in session state
+    if st.session_state.get("_builtin_parsed_cards") and remaining_words > 0:
+        if st.button(
+            f"▶ 下一批（剩余 {remaining_words} 词）",
+            key="btn_gen_next_page",
+            use_container_width=True,
+        ):
+            st.session_state["_builtin_gen_page"] = page + 1
+            st.session_state["_builtin_auto_generate"] = True
+            st.rerun()
 
     render_anki_download_button(
         f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
@@ -466,113 +462,6 @@ def _render_builtin_ai_section(
     st.caption("⚠️ AI 结果请人工复核后再学习。")
 
 
-def _render_thirdparty_prompt_section(
-    words_only: list, examples_colloquial: bool, use_builtin_ai: str,
-    enable_audio: bool = True, voice_code: str = "", enable_example_audio: bool = True
-) -> None:
-    """Render card-format options and a copyable prompt block for third-party AI services."""
-    if use_builtin_ai == "thirdparty":
-        st.markdown("#### 📌 复制 Prompt（可自定义卡片格式）")
-        st.caption("在下方选择卡片格式后复制 Prompt 到第三方 AI，生成结果粘贴到「Anki 制卡」页解析。")
-    else:
-        st.markdown("#### 第三方 AI Prompt")
-        st.caption("需要大批量或自定义卡片格式时，可切换为「第三方 AI」在下方自定义格式并复制 Prompt。")
-
-    with st.expander("📌 复制 Prompt（第三方 AI）", expanded=(use_builtin_ai == "thirdparty")):
-        st.markdown("##### ⚙️ 自定义卡片格式")
-        st.caption("仅影响下方生成的 Prompt")
-        st.markdown("**卡片内容**")
-        r1a, r1b = st.columns(2)
-        with r1a:
-            tp_front = st.selectbox(
-                "正面",
-                options=["word", "phrase"],
-                format_func=lambda x: "单词" if x == "word" else "短语/词组",
-                index=1,
-                key="tp_prompt_front",
-            )
-        with r1b:
-            tp_def = st.selectbox(
-                "释义",
-                options=["cn", "en", "en_native", "both"],
-                format_func=lambda x: {
-                    "cn": "中文",
-                    "en": "英文（学习型词典）",
-                    "en_native": "英文（母语者词典）",
-                    "both": "中英双语",
-                }[x],
-                index=2,
-                key="tp_prompt_def",
-            )
-        r2a, r2b = st.columns(2)
-        with r2a:
-            tp_ex = st.selectbox(
-                "例句数量",
-                options=[1, 2, 3],
-                format_func=lambda x: f"{x} 条",
-                index=2,
-                key="tp_prompt_ex",
-            )
-        with r2b:
-            tp_ety = st.checkbox("词根词源词缀", value=True, key="tp_prompt_ety")
-        st.markdown("**例句样式**")
-        r3a, r3b = st.columns(2)
-        with r3a:
-            tp_ex_cn = st.checkbox("例句带中文翻译", value=False, key="tp_prompt_ex_cn")
-        with r3b:
-            tp_colloquial = st.checkbox("例句用口语", value=examples_colloquial, key="tp_prompt_colloquial", help="例句使用日常口语化表达")
-
-        st.markdown("---")
-        st.markdown("**分组与 Prompt**")
-        third_party_card_format: CardFormat = {
-            "front": tp_front,
-            "definition": tp_def,
-            "examples": tp_ex,
-            "examples_with_cn": tp_ex_cn,
-            "etymology": tp_ety,
-            "examples_colloquial": tp_colloquial,
-        }
-
-        st.caption("选择分组并复制下方 Prompt 到第三方 AI")
-        batch_size_prompt = int(
-            st.number_input(f"🔢 分组大小 (最大 {constants.MAX_AUTO_LIMIT})", min_value=1, max_value=constants.MAX_AUTO_LIMIT, value=50, step=10, key="batch_size_prompt")
-        )
-        current_batch_words = []
-
-        if words_only:
-            total_w = len(words_only)
-            if total_w <= constants.MAX_AUTO_LIMIT:
-                st.caption(f"💡 当前共 {total_w} 个单词（≤{constants.MAX_AUTO_LIMIT}），已全部放入一个 Prompt。")
-                current_batch_words = words_only
-            else:
-                num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
-                batch_options = [
-                    f"第 {i+1} 组 ({i*batch_size_prompt+1} - {min((i+1)*batch_size_prompt, total_w)})"
-                    for i in range(num_batches)
-                ]
-                selected_batch_str = st.selectbox("📂 选择当前分组", batch_options)
-                sel_idx = batch_options.index(selected_batch_str)
-                current_batch_words = words_only[
-                    sel_idx*batch_size_prompt:min((sel_idx+1)*batch_size_prompt, total_w)
-                ]
-        else:
-            st.warning("⚠️ 暂无单词数据，请先提取单词。")
-
-        words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[INSERT YOUR WORD LIST HERE]"
-        strict_prompt_template = build_card_prompt(words_str_for_prompt, third_party_card_format)
-        render_prompt_copy_button(strict_prompt_template, key="copy_tp_prompt")
-        st.code(strict_prompt_template, language="text")
-
-    st.caption("💡 复制 Prompt 到第三方 AI 后，请到「anki制卡」页粘贴结果并生成 .apkg。")
-
-    render_anki_download_button(
-        f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
-        button_type="primary",
-        use_container_width=True,
-    )
-    st.caption("⚠️ AI 结果请人工复核后再学习。")
-
-
 def _render_extract_results() -> None:
     """Render the extracted words results, AI card generation, and third-party prompt."""
     if not st.session_state.get('gen_words_data'):
@@ -589,21 +478,13 @@ def _render_extract_results() -> None:
     st.markdown("---")
     st.markdown("### 🤖 AI 生成 Anki 卡片")
 
-    # ---------- 公用设置（内置 AI 与第三方 Prompt 共用）----------
     st.markdown("#### ① 通用设置")
     enable_audio, voice_code, enable_example_audio = _render_audio_settings("auto")
-    examples_colloquial = st.checkbox(
-        "例句用口语",
-        value=False,
-        key="chk_examples_colloquial",
-        help="例句使用日常口语化表达，而非书面语",
-    )
 
-    # Fix 2: Configurable card format for built-in AI
-    with st.expander("⚙️ 卡片格式（内置 AI）", expanded=False):
-        st.caption("仅影响「内置 AI 一键生成」；第三方 AI Prompt 在下方单独设置。")
-        _cf_col_a, _cf_col_b = st.columns(2)
-        with _cf_col_a:
+    with st.expander("⚙️ 卡片格式（与 Prompt 同步）", expanded=False):
+        st.caption("以下设置会同步到 AI 制卡 Prompt，影响生成的卡片内容。")
+        _cf_a, _cf_b = st.columns(2)
+        with _cf_a:
             builtin_front = st.selectbox(
                 "正面",
                 options=["word", "phrase"],
@@ -614,16 +495,11 @@ def _render_extract_results() -> None:
             builtin_def = st.selectbox(
                 "释义",
                 options=["cn", "en", "en_native", "both"],
-                format_func=lambda x: {
-                    "cn": "中文",
-                    "en": "英文（学习型词典）",
-                    "en_native": "英文（母语者词典）",
-                    "both": "中英双语",
-                }[x],
+                format_func=lambda x: {"cn": "中文", "en": "英文（学习型）", "en_native": "英文（母语者词典）", "both": "中英双语"}[x],
                 index=3,
                 key="builtin_def",
             )
-        with _cf_col_b:
+        with _cf_b:
             builtin_ex = st.selectbox(
                 "例句数量",
                 options=[1, 2, 3],
@@ -633,6 +509,7 @@ def _render_extract_results() -> None:
             )
             builtin_ety = st.checkbox("词根词源", value=True, key="builtin_ety")
         builtin_ex_cn = st.checkbox("例句带中文翻译", value=True, key="builtin_ex_cn")
+        builtin_colloquial = st.checkbox("例句用口语", value=False, key="builtin_colloquial", help="例句使用日常口语化表达")
 
     shared_card_format: CardFormat = {
         "front": builtin_front,
@@ -640,28 +517,10 @@ def _render_extract_results() -> None:
         "examples": builtin_ex,
         "examples_with_cn": builtin_ex_cn,
         "etymology": builtin_ety,
-        "examples_colloquial": examples_colloquial,
+        "examples_colloquial": builtin_colloquial,
     }
 
-    st.markdown("---")
-    st.markdown("#### ② 生成方式")
-    st.markdown('<div id="ai-gen-mode-radio"></div>', unsafe_allow_html=True)
-    use_builtin_ai = st.radio(
-        "选择",
-        options=["builtin", "thirdparty"],
-        format_func=lambda x: "内置 AI 一键生成" if x == "builtin" else "第三方 AI（复制 Prompt）",
-        index=0,
-        horizontal=True,
-        key="ai_gen_mode",
-    )
-    st.markdown("")  # 间距
-
-    if use_builtin_ai == "thirdparty":
-        # 第三方 AI 选中时：全宽展示，充分利用空间
-        _render_thirdparty_prompt_section(words_only, examples_colloquial, use_builtin_ai, enable_audio, voice_code, enable_example_audio)
-    else:
-        # 内置 AI 时：不显示折叠栏，仅展示一键生成区
-        _render_builtin_ai_section(words_only, enable_audio, voice_code, enable_example_audio, shared_card_format, use_builtin_ai)
+    _render_builtin_ai_section(words_only, enable_audio, voice_code, enable_example_audio, shared_card_format)
 
 
 def _do_lookup(query_word: str) -> None:

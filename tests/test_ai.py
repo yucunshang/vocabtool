@@ -1,4 +1,5 @@
 # Tests for ai.build_card_prompt (no API calls).
+# Uses fixed built-in template; fmt parameter is ignored.
 
 import pytest
 
@@ -16,28 +17,30 @@ def test_build_card_prompt_contains_word_list():
     assert "hectic" in out
 
 
-def test_build_card_prompt_default_format_word_cn():
-    fmt = {
-        "front": "word",
-        "definition": "cn",
-        "examples": 2,
-        "examples_with_cn": True,
-        "etymology": False,
-    }
-    out = build_card_prompt("test", fmt)
-    assert "Field 1: Word" in out or "word" in out.lower()
-    assert "中文" in out or "Chinese" in out
+def test_build_card_prompt_fixed_template_has_field_constraints():
+    """Template includes Word/Phrase, Definition, Examples (and optionally Etymology)."""
+    out = build_card_prompt("test", None)
+    assert "Field 1:" in out and ("Word" in out or "Phrase" in out)
+    assert "Field 2:" in out
+    assert "Field 3:" in out
+    assert "|||" in out
 
 
-def test_build_card_prompt_phrase_format():
-    fmt = {"front": "phrase", "definition": "en", "examples": 1, "etymology": False}
-    out = build_card_prompt("rain", fmt)
-    assert "Phrase" in out or "phrase" in out.lower()
-    assert "collocation" in out.lower() or "phrase" in out.lower()
+def test_build_card_prompt_batch_limit_constraint():
+    """Fixed template enforces 10-word batch limit."""
+    out = build_card_prompt("word1", None)
+    assert "10 words" in out or "10-word" in out
 
 
-def test_build_card_prompt_en_native_format():
-    """En_native uses native-speaker dictionary style definition."""
+def test_build_card_prompt_etymology_zero_hallucination():
+    """Template includes 词源不可考 when etymology is enabled."""
+    fmt = {"front": "word", "definition": "both", "examples": 2, "etymology": True, "examples_with_cn": True}
+    out = build_card_prompt("boycott", fmt)
+    assert "词源不可考" in out
+
+
+def test_build_card_prompt_en_native_definition():
+    """en_native uses native-speaker dictionary style."""
     fmt = {"front": "word", "definition": "en_native", "examples": 1, "etymology": False}
     out = build_card_prompt("test", fmt)
     assert "Native" in out or "native" in out

@@ -65,18 +65,18 @@ compromise (n. 名词)
 
 
 # -----------------------------------------------------------------------------
-# ② 批量制卡（Card Generation）系统提示词：内置 AI 与第三方复制 Prompt 共用
+# ② 批量制卡（Card Generation）内置 AI 专用
+# 占位符由 ai.build_card_prompt() 根据卡片格式填入
 # -----------------------------------------------------------------------------
 CARD_GEN_SYSTEM_PROMPT = "You are a helpful assistant for vocabulary learning."
 
-
-# -----------------------------------------------------------------------------
-# ③ 批量制卡（Card Generation）用户提示词模板
-# 占位符由 ai.build_card_prompt() 根据卡片格式填入，请勿删除：{mandatory_note} {words_str} {f1_name} {f2_name} {ex_label} {f4_structure} {field_constraints} {f1_example_altruism} {f2_example_altruism} {f3_example_altruism} {f4_example_altruism} {f1_example_hectic} {f2_example_hectic} {f3_example_hectic} {f4_example_hectic}
-# -----------------------------------------------------------------------------
 CARD_GEN_USER_TEMPLATE = """# Role
 You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards.
-Make sure to process everything in one go, without missing anything.
+
+# CRITICAL CONSTRAINTS
+1. **BATCH LIMIT (Strictly 10 Words):** Process ONLY up to 10 words per request. If more are provided, process the first 10 and ignore the rest.
+2. **ZERO HALLUCINATION (Etymology):** If etymology is required, only use verified roots. If unsure, output `词源不可考`. Do NOT invent.
+3. **FORMATTING:** No conversational text. Output strictly inside a ```text code block.
 {mandatory_note}
 # Input Data
 {words_str}
@@ -91,7 +91,7 @@ Make sure to process everything in one go, without missing anything.
 # Field Constraints (Strict)
 {field_constraints}
 
-# Valid Example (Follow this logic strictly)
+# Valid Example
 Input: altruism
 Output:
 {f1_example_altruism} ||| {f2_example_altruism} ||| {f3_example_altruism}{f4_example_altruism}
@@ -101,4 +101,4 @@ Output:
 {f1_example_hectic} ||| {f2_example_hectic} ||| {f3_example_hectic}{f4_example_hectic}
 
 # Task
-Process the provided input list strictly adhering to the format above."""
+Process the provided input list strictly adhering to the 10-word limit and the format above."""

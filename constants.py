@@ -21,7 +21,7 @@ MAX_WORD_LENGTH = 25
 
 AI_BATCH_SIZE = 10     # 每组 10 词
 AI_CONCURRENCY = 10    # 并发 10
-MAX_AUTO_LIMIT = 500   # 一次性制卡上限
+MAX_AUTO_LIMIT = 1000  # 一次性制卡上限
 MAX_RETRIES = 2        # 失败重试 1 次，减少无效消耗
 
 TTS_CONCURRENCY = 5
