@@ -36,13 +36,17 @@ def load_nlp_resources() -> Tuple[Any, Any]:
         os.makedirs(nltk_data_dir, exist_ok=True)
         nltk.data.path.append(nltk_data_dir)
 
-        required_packages = ['averaged_perceptron_tagger', 'punkt', 'punkt_tab']
-        for pkg in required_packages:
+        required_packages = [
+            ('taggers', 'averaged_perceptron_tagger'),
+            ('tokenizers', 'punkt'),
+            ('tokenizers', 'punkt_tab'),
+        ]
+        for category, pkg in required_packages:
             try:
-                nltk.data.find(f'tokenizers/{pkg}')
+                nltk.data.find(f'{category}/{pkg}')
             except LookupError:
                 logger.info("Downloading NLTK package: %s", pkg)
-                nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)
+                nltk.download(pkg, download_dir=nltk_data_dir, quiet=True)  # pkg name only, no category
     except Exception as e:
         logger.error("NLP 资源加载失败: %s", e)
 

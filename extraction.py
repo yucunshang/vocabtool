@@ -89,7 +89,7 @@ def _is_safe_url(url: str) -> bool:
     if parsed.scheme not in ("http", "https"):
         return False
     hostname = (parsed.hostname or "").lower()
-    blocked = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]", "metadata.google")
+    blocked = ("localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]", "metadata.google")
     for b in blocked:
         if hostname == b or hostname.endswith("." + b):
             return False

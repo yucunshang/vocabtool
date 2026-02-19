@@ -591,7 +591,7 @@ def render_quick_lookup() -> None:
     if auto_word and not in_cooldown:
         _do_lookup(auto_word)
 
-    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else "🔍 deepseek"
+    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else f"🔍 {get_config()['openai_model']}"
     _has_content = bool(st.session_state.get("quick_lookup_word") or st.session_state.get("quick_lookup_last_result"))
 
     with st.form("quick_lookup_form", clear_on_submit=False, border=False):
@@ -738,6 +738,8 @@ def _render_shared_rank_selection() -> tuple[int, int]:
         if max_rank < min_rank:
             st.warning("⚠️ Max Rank 小于 Min Rank，已自动交换两者。")
             min_rank, max_rank = max_rank, min_rank
+            st.session_state["extract_min_rank"] = min_rank
+            st.session_state["extract_max_rank"] = max_rank
     return min_rank, max_rank
 
 

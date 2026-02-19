@@ -166,17 +166,17 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
     mandatory_note = ""
     if num_examples >= 2:
         if include_ety:
-            mandatory_note = """
+            mandatory_note = f"""
 # CRITICAL (Do not skip)
 - Every line MUST have exactly 4 parts separated by `|||`: (1) word/phrase, (2) definition, (3) examples, (4) etymology.
-- Field 3: exactly 2 example sentences (with or without Chinese per format). Separated by ` // `.
+- Field 3: exactly {num_examples} example sentence{'s' if num_examples > 1 else ''} (with or without Chinese per format). Separated by ` // `.
 - Field 4: etymology/roots in Chinese is REQUIRED for every word. If uncertain, give a brief origin note in Chinese.
 """
         else:
-            mandatory_note = """
+            mandatory_note = f"""
 # CRITICAL (Do not skip)
 - Every line MUST have exactly 3 parts separated by `|||`: (1) word/phrase, (2) definition, (3) examples. Do NOT add Field 4.
-- Field 3: exactly 2 example sentences. Separated by ` // `.
+- Field 3: exactly {num_examples} example sentence{'s' if num_examples > 1 else ''}. Separated by ` // `.
 """
 
     return CARD_GEN_USER_TEMPLATE.format(
