@@ -217,12 +217,26 @@ def get_openai_client() -> Optional[Any]:
         return None
 
 
-def _rank_after_correction(content: str, fallback_rank: int) -> int:
-    """Return rank for the corrected word if content has a spell-correction notice."""
-    first = content.split('\n', 1)[0].strip()
-    if first.startswith('✏️ 拼写纠正:') and '→' in first:
-        corrected = first.split('→', 1)[-1].strip()
-        return get_rank_for_word(corrected) if corrected else fallback_rank
+def _rank_from_ai_content(content: str, fallback_rank: int) -> int:
+    """Return the rank of the headword the AI chose to define.
+
+    The AI normalises inflected forms, misspellings, and non-standard casing
+    to the dictionary base form on its first content line:
+        'headword (pos CN-pos)'
+    Extracting that headword gives a correct rank for inputs like 'cats',
+    'RUNNING', 'ran', or 'recieve'.  The spell-correction notice line
+    (✏️ 拼写纠正: ...) is skipped when present.
+    Falls back to fallback_rank if no headword can be parsed.
+    """
+    for line in content.split('\n'):
+        line = line.strip()
+        if not line or line.startswith('✏️ 拼写纠正:'):
+            continue
+        if '(' in line:
+            headword = line.split('(', 1)[0].strip()
+            if headword:
+                return get_rank_for_word(headword)
+        break
     return fallback_rank
 
 
@@ -248,7 +262,7 @@ def get_word_quick_definition(
     if cache_key in _QUERY_CACHE:
         _QUERY_CACHE.move_to_end(cache_key)
         cached = _QUERY_CACHE[cache_key]
-        return {"result": cached, "rank": _rank_after_correction(cached, rank), "cached": True}
+        return {"result": cached, "rank": _rank_from_ai_content(cached, rank), "cached": True}
 
     try:
         if stream_callback is not None:
@@ -289,7 +303,7 @@ def get_word_quick_definition(
         if len(_QUERY_CACHE) > _QUERY_CACHE_MAX:
             _QUERY_CACHE.popitem(last=False)
 
-        return {"result": content, "rank": _rank_after_correction(content, rank)}
+        return {"result": content, "rank": _rank_from_ai_content(content, rank)}
 
     except Exception as e:
         logger.error("Error getting definition: %s", e)
