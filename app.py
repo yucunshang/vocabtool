@@ -849,12 +849,13 @@ with tab_extract:
                         status.update(label="⚠️ 文件内容为空或过短", state="error")
 
     with mode_manual:
-        st.markdown("#### 直接粘贴整理好的词表（不做 rank 筛选）")
+        st.markdown("#### 直接粘贴词表（不做 rank 筛选）")
+        st.caption("支持任意格式：可直接粘贴文章、列表、带序号或符号的文本，将自动提取其中所有英文单词。")
         manual_words_text = st.text_area(
-            "✍️ 单词列表（每行一个或逗号分隔）",
+            "✍️ 粘贴任意包含英文单词的文本",
             height=220,
             key="manual_words_2_5",
-            placeholder="altruism\nhectic\nserendipity",
+            placeholder="如：1. altruism 2. hectic  或 直接粘贴整段英文…",
         )
 
         col_gen_m, col_clr_m = st.columns([4, 1])
@@ -867,22 +868,15 @@ with tab_extract:
         if btn_gen_manual:
             with st.spinner("正在解析列表..."):
                 if manual_words_text.strip():
-                    raw_items = [w.strip() for w in re.split(r'[,\n\t]+', manual_words_text) if w.strip()]
-                    valid_words = []
-                    invalid_items = []
-                    for item in raw_items:
-                        if re.match(r"^[a-zA-Z]+(?:[-'][a-zA-Z]+)*$", item):
-                            valid_words.append(item)
-                        else:
-                            invalid_items.append(item)
-
-                    if invalid_items:
-                        preview = ", ".join(invalid_items[:10])
-                        suffix = f" 等共 {len(invalid_items)} 项" if len(invalid_items) > 10 else ""
-                        st.warning(f"⚠️ 已跳过格式不正确的条目：{preview}{suffix}")
+                    # 弱化格式要求：从整段文本中提取所有英文单词，自动去除符号、空格等
+                    valid_words = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", manual_words_text)
+                    valid_words = [
+                        w for w in valid_words
+                        if constants.MIN_WORD_LENGTH <= len(w) <= constants.MAX_WORD_LENGTH
+                    ]
 
                     if not valid_words:
-                        st.error("❌ 没有识别到有效的英文单词，请检查输入格式（每行一个单词或逗号分隔）。")
+                        st.error("❌ 没有识别到有效的英文单词（2–25 字母），请检查输入内容。")
                     else:
                         unique_words = []
                         seen = set()
