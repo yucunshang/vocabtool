@@ -470,7 +470,7 @@ def _render_builtin_ai_section(
                             audio_text2.markdown(f"**音频进度**：{text}")
 
                         current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
-                        file_path = generate_anki_package(
+                        file_path, audio_failed = generate_anki_package(
                             edited_data,
                             current_deck_name,
                             enable_tts=enable_audio,
@@ -479,8 +479,10 @@ def _render_builtin_ai_section(
                             progress_callback=update_pkg_progress,
                         )
                         set_anki_pkg(file_path, current_deck_name)
+                        st.session_state["_builtin_audio_failed_count"] = audio_failed
                         audio_bar2.progress(1.0)
-                        audio_text2.markdown("**音频进度**：✅ 完成")
+                        suffix = f"（{audio_failed} 条失败，可点击下方重试）" if audio_failed else ""
+                        audio_text2.markdown(f"**音频进度**：✅ 完成{suffix}")
                         st.balloons()
                         run_gc()
                     except Exception as e:
@@ -515,6 +517,31 @@ def _render_builtin_ai_section(
             studied.update(c.get("w", "").lower() for c in cards_to_mark if c.get("w"))
             st.session_state["studied_words_set"] = studied
             st.toast(f"已记录 {len(cards_to_mark)} 个词到学习历史", icon="📚")
+
+    # Audio retry: only re-run TTS for files still missing (cache skips successful ones)
+    audio_failed = st.session_state.get("_builtin_audio_failed_count", 0)
+    if audio_failed > 0 and st.session_state.get("_builtin_parsed_cards") and st.session_state.get("anki_pkg_path"):
+        st.warning(
+            f"⚠️ {audio_failed} 条音频生成失败。"
+            " 可能原因：网络超时、例句过短（≤3字符）或含非ASCII括号导致TTS收到中文文本。"
+            " 点击重试，已成功的音频会直接复用，只补全缺失部分。"
+        )
+        if st.button("🔄 重试失败音频", key="btn_retry_audio_builtin"):
+            cards = st.session_state["_builtin_parsed_cards"]
+            with st.spinner(f"⏳ 重试 {audio_failed} 条音频..."):
+                try:
+                    current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
+                    new_file, new_failed = generate_anki_package(
+                        cards, current_deck_name,
+                        enable_tts=enable_audio, tts_voice=voice_code,
+                        enable_example_tts=enable_example_audio,
+                    )
+                    set_anki_pkg(new_file, current_deck_name)
+                    st.session_state["_builtin_audio_failed_count"] = new_failed
+                    run_gc()
+                    st.rerun()
+                except Exception as e:
+                    ErrorHandler.handle(e, "重试音频失败")
 
     st.caption("⚠️ AI 结果请人工复核后再学习。")
 
@@ -638,7 +665,7 @@ def _render_thirdparty_prompt_section(
                 if parsed:
                     try:
                         _tp_voice = voice_code if voice_code else list(constants.VOICE_MAP.values())[0]
-                        file_path = generate_anki_package(
+                        file_path, tp_audio_failed = generate_anki_package(
                             parsed,
                             tp_deck_name,
                             enable_tts=enable_audio,
@@ -647,7 +674,10 @@ def _render_thirdparty_prompt_section(
                         )
                         set_anki_pkg(file_path, tp_deck_name)
                         st.session_state["anki_cards_cache"] = parsed
-                        st.success(f"✅ 已生成 {len(parsed)} 张卡片")
+                        msg = f"✅ 已生成 {len(parsed)} 张卡片"
+                        if tp_audio_failed:
+                            msg += f"（{tp_audio_failed} 条音频失败，请在「anki制卡」页重新生成）"
+                        st.success(msg)
                         st.balloons()
                         run_gc()
                     except Exception as e:
@@ -1301,7 +1331,7 @@ with tab_anki:
                 if parsed_data:
                     st.session_state['anki_cards_cache'] = parsed_data
                     try:
-                        file_path = generate_anki_package(
+                        file_path, manual_audio_failed = generate_anki_package(
                             parsed_data,
                             deck_name,
                             enable_tts=enable_audio,
@@ -1311,8 +1341,12 @@ with tab_anki:
                         )
 
                         set_anki_pkg(file_path, deck_name)
+                        st.session_state["_manual_audio_failed_count"] = manual_audio_failed
 
-                        status_manual.markdown(f"✅ **生成完毕！共制作 {len(parsed_data)} 张卡片**")
+                        done_msg = f"✅ **生成完毕！共制作 {len(parsed_data)} 张卡片**"
+                        if manual_audio_failed:
+                            done_msg += f"（{manual_audio_failed} 条音频失败，可点「重试失败音频」）"
+                        status_manual.markdown(done_msg)
                         st.balloons()
                         st.toast("任务完成！", icon="🎉")
                         run_gc()
@@ -1346,6 +1380,32 @@ with tab_anki:
                 studied.update(c.get("w", "").lower() for c in cards_to_mark if c.get("w"))
                 st.session_state["studied_words_set"] = studied
                 st.toast(f"已记录 {len(cards_to_mark)} 个词到学习历史", icon="📚")
+
+        # Audio retry for manual tab
+        manual_audio_failed = st.session_state.get("_manual_audio_failed_count", 0)
+        if manual_audio_failed > 0 and st.session_state.get("anki_cards_cache") and st.session_state.get("anki_pkg_path"):
+            st.warning(f"⚠️ {manual_audio_failed} 条音频生成失败，点击重试（已成功的音频将直接复用）。")
+            if st.button("🔄 重试失败音频", key="btn_retry_audio_manual"):
+                _retry_cards = st.session_state["anki_cards_cache"]
+                _retry_deck = st.session_state.get("anki_pkg_name", "deck.apkg").removesuffix(".apkg")
+                with st.spinner(f"⏳ 重试 {manual_audio_failed} 条音频..."):
+                    try:
+                        _retry_voice = constants.VOICE_MAP.get(
+                            st.session_state.get("sel_voice_manual", ""),
+                            list(constants.VOICE_MAP.values())[0]
+                        )
+                        _retry_file, _retry_failed = generate_anki_package(
+                            _retry_cards, _retry_deck,
+                            enable_tts=st.session_state.get("chk_audio_manual", True),
+                            tts_voice=_retry_voice,
+                            enable_example_tts=st.session_state.get("chk_example_audio_manual", True),
+                        )
+                        set_anki_pkg(_retry_file, _retry_deck)
+                        st.session_state["_manual_audio_failed_count"] = _retry_failed
+                        run_gc()
+                        st.rerun()
+                    except Exception as e:
+                        ErrorHandler.handle(e, "重试音频失败")
 
 st.markdown(
     '<div class="app-footer">Vocab Flow Ultra &nbsp;·&nbsp; Built for learners</div>',
