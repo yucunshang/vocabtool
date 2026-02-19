@@ -458,40 +458,6 @@ def _render_extract_results() -> None:
 
     words_only = _render_word_editor(data)
 
-    # AI 筛选：从词表筛选最值得学习的 N 个词（放在筛选单词栏目下面）
-    if len(words_only) > 10:
-        st.markdown("#### 🤖 AI 筛选最值得学习的单词")
-        st.caption("使用内置 AI 从当前词表中筛选出最值得优先学习的 N 个单词（基于频率、实用性、基础优先等标准）")
-        col_target, col_btn_filter = st.columns([1, 1])
-        with col_target:
-            target_count = st.number_input(
-                "目标单词数",
-                min_value=10,
-                max_value=min(len(words_only), constants.MAX_AI_FILTER_INPUT),
-                value=min(200, len(words_only)),
-                step=10,
-                key="ai_filter_target",
-            )
-        with col_btn_filter:
-            st.markdown("<br>", unsafe_allow_html=True)  # 与 number_input 对齐
-            if st.button("🤖 AI 筛选至 N 个", key="btn_ai_filter", type="secondary"):
-                allowed, msg = check_batch_limit()
-                if not allowed:
-                    st.warning(msg)
-                else:
-                    with st.spinner("AI 筛选中..."):
-                        result = filter_words_ai(words_only, target_count)
-                    if result is None:
-                        st.error("AI 筛选失败，请检查 API Key 或网络连接。")
-                    elif not result:
-                        st.warning("AI 返回格式异常，未能解析出有效单词。")
-                    else:
-                        record_batch()
-                        filtered_data = [(w, get_rank_for_word(w)) for w in result]
-                        set_generated_words_state(filtered_data, len(words_only), st.session_state.get("stats_info"))
-                        st.toast(f"✅ 已筛选为 {len(result)} 个单词", icon="🎉")
-                        st.rerun()
-
     st.markdown("---")
     st.markdown("### 🤖 AI 生成 Anki 卡片")
 
@@ -773,12 +739,13 @@ with tab_extract:
     shared_min_rank, shared_max_rank = _render_shared_rank_selection()
     st.markdown("---")
 
-    mode_paste, mode_url, mode_upload, mode_rank, mode_manual = st.tabs([
+    mode_paste, mode_url, mode_upload, mode_rank, mode_manual, mode_ai_filter = st.tabs([
         "文本",
         "链接",
         "文件",
         "词库",
         "词表",
+        "AI 筛选",
     ])
 
     with mode_paste:
@@ -938,6 +905,49 @@ with tab_extract:
                         st.toast(msg, icon="🎉")
                 else:
                     st.warning("⚠️ 内容为空。")
+
+    with mode_ai_filter:
+        if not st.session_state.get("gen_words_data"):
+            st.info("📌 请先从「文本」「链接」「文件」或「词库」提取单词，或从「词表」粘贴词表后，再使用 AI 筛选。")
+        else:
+            # 使用当前词表（含用户编辑后的内容）
+            editor_text = st.session_state.get("word_list_editor", "")
+            words_only = [w.strip() for w in editor_text.split("\n") if w.strip()]
+            if not words_only:
+                words_only = [w for w, _ in st.session_state["gen_words_data"]]
+            st.markdown("#### 🤖 AI 筛选最值得学习的单词")
+            st.caption("使用内置 AI 从当前词表中筛选出最值得优先学习的 N 个单词（基于频率、实用性、基础优先等标准）")
+            col_target, col_btn_filter = st.columns([1, 1])
+            with col_target:
+                target_count = st.number_input(
+                    "目标单词数",
+                    min_value=10,
+                    max_value=min(len(words_only), constants.MAX_AI_FILTER_INPUT),
+                    value=min(200, len(words_only)),
+                    step=10,
+                    key="ai_filter_target",
+                )
+            with col_btn_filter:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🤖 AI 筛选至 N 个", key="btn_ai_filter", type="secondary"):
+                    allowed, msg = check_batch_limit()
+                    if not allowed:
+                        st.warning(msg)
+                    else:
+                        with st.spinner("AI 筛选中..."):
+                            result = filter_words_ai(words_only, target_count)
+                        if result is None:
+                            st.error("AI 筛选失败，请检查 API Key 或网络连接。")
+                        elif not result:
+                            st.warning("AI 返回格式异常，未能解析出有效单词。")
+                        else:
+                            record_batch()
+                            filtered_data = [(w, get_rank_for_word(w)) for w in result]
+                            set_generated_words_state(
+                                filtered_data, len(words_only), st.session_state.get("stats_info")
+                            )
+                            st.toast(f"✅ 已筛选为 {len(result)} 个单词", icon="🎉")
+                            st.rerun()
 
     with mode_rank:
         st.caption("使用上方「词汇量 rank 选择」的区间；顺序生成从区间起点起取，随机抽取在区间内随机取。")
