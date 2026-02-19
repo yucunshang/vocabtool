@@ -909,6 +909,10 @@ with tab_extract:
         gen_type = st.radio("生成模式", ["🔢 顺序生成", "🔀 随机抽取"], horizontal=True)
 
         if "顺序生成" in gen_type:
+            # 当 rank 选择变化时，起始排名跟随 shared_min_rank 更新
+            if st.session_state.get("rank_start_sync_min") != shared_min_rank:
+                st.session_state["rank_start_2_4"] = shared_min_rank
+                st.session_state["rank_start_sync_min"] = shared_min_rank
             col_a, col_b = st.columns(2)
             start_rank = col_a.number_input("起始排名", 1, 20000, shared_min_rank, step=100, key="rank_start_2_4")
             count = col_b.number_input("数量", 10, 5000, 10, step=10)
