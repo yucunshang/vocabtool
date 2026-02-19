@@ -169,6 +169,11 @@ APP_STYLES_HTML = """
     .stRadio > div > label:hover {
         border-color: #93c5fd; background: #f0f9ff;
     }
+    /* ② 生成方式：内置 AI / 第三方 AI 选项更大 */
+    #ai-gen-mode-radio ~ div .stRadio label {
+        font-size: 1.18rem !important;
+        padding: 0.5rem 1rem !important;
+    }
 
     /* ===== Number inputs ===== */
     .stNumberInput input { border-radius: 10px; }

@@ -472,6 +472,7 @@ def _render_extract_results() -> None:
 
     st.markdown("---")
     st.markdown("#### ② 生成方式")
+    st.markdown('<div id="ai-gen-mode-radio"></div>', unsafe_allow_html=True)
     use_builtin_ai = st.radio(
         "选择",
         options=["builtin", "thirdparty"],
@@ -485,11 +486,9 @@ def _render_extract_results() -> None:
     col_left, col_gap, col_right = st.columns([1, 0.12, 1], vertical_alignment="top")
 
     with col_left:
-        st.markdown("##### " + ("● " if use_builtin_ai == "builtin" else "○ ") + "内置 AI 一键生成")
         _render_builtin_ai_section(words_only, enable_audio, voice_code, shared_card_format, use_builtin_ai)
 
     with col_right:
-        st.markdown("##### " + ("● " if use_builtin_ai == "thirdparty" else "○ ") + "第三方 AI（复制 Prompt）")
         _render_thirdparty_prompt_section(words_only, examples_colloquial, use_builtin_ai)
 
 
