@@ -699,7 +699,8 @@ def _render_rank_inputs(key_suffix: str) -> tuple[int, int]:
         key=f"max_rank_{key_suffix}"
     )
     if max_rank < min_rank:
-        st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
+        st.warning("⚠️ Max Rank 小于 Min Rank，已自动交换两者。")
+        min_rank, max_rank = max_rank, min_rank
     return min_rank, max_rank
 
 
@@ -782,7 +783,10 @@ with tab_extract:
                         start_time = time.time()
                         status.write(f"正在抓取：{input_url}")
                         raw_text = _cached_extract_url(input_url)
-                        if _analyze_and_set_words(raw_text, current_rank_url, target_rank_url):
+                        if raw_text.startswith("Error:"):
+                            st.error(f"❌ {raw_text}")
+                            status.update(label="❌ 抓取失败", state="error", expanded=False)
+                        elif _analyze_and_set_words(raw_text, current_rank_url, target_rank_url):
                             st.session_state['process_time'] = time.time() - start_time
                             run_gc()
                             status.update(label="✅ 生成完成", state="complete", expanded=False)

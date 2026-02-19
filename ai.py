@@ -290,14 +290,14 @@ def process_ai_in_batches(
     words_list: List[str],
     progress_callback: Optional[Callable[[int, int], None]] = None,
     card_format: Optional[CardFormat] = None
-) -> Optional[str]:
+) -> str:
     """Process words in batches using AI with progress reporting."""
     if not words_list:
         return ""
 
     client = get_openai_client()
     if not client:
-        return None
+        return ""
 
     model_name = get_config()["openai_model"]
     total_words = len(words_list)

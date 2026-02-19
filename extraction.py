@@ -178,9 +178,14 @@ def extract_from_csv(uploaded_file: Any) -> str:
     try:
         content = bytes_data.decode(encoding)
         df = pd.read_csv(StringIO(content))
+        if df.empty or len(df.columns) == 0:
+            return "Error: CSV 文件为空或无数据行。"
         text_parts = []
         for col in df.columns:
-            col_text = df[col].astype(str)
+            try:
+                col_text = df[col].astype(str)
+            except Exception:
+                col_text = df[col].apply(lambda x: str(x) if x is not None else "")
             col_text = col_text[col_text.notna() & (col_text != '') & (col_text != 'nan')]
             text_parts.extend(col_text.tolist())
         return " ".join(text_parts)
@@ -199,10 +204,17 @@ def extract_from_excel(uploaded_file: Any) -> str:
             return ErrorHandler.handle_file_error(e, "Excel")
 
     try:
+        if not df:
+            return "Error: Excel 文件无法读取任何工作表。"
         text_parts = []
         for sheet_name, sheet_df in df.items():
+            if sheet_df.empty:
+                continue
             for col in sheet_df.columns:
-                col_text = sheet_df[col].astype(str)
+                try:
+                    col_text = sheet_df[col].astype(str)
+                except Exception:
+                    col_text = sheet_df[col].apply(lambda x: str(x) if x is not None else "")
                 col_text = col_text[col_text.notna() & (col_text != '') & (col_text != 'nan')]
                 text_parts.extend(col_text.tolist())
         return " ".join(text_parts)
