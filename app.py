@@ -33,12 +33,6 @@ from ui_styles import APP_STYLES_HTML
 from utils import get_beijing_time_str, render_copy_button, run_gc
 from vocab import analyze_logic
 
-# Load vocab data for use in mode_rank tab and the vocab error check below.
-VOCAB_DICT, FULL_DF = resources.load_vocab_data()
-
-# Clean old .apkg files from our temp subdir (e.g. from previous sessions)
-cleanup_old_apkg_files()
-
 logger = logging.getLogger(__name__)
 
 # ==========================================
@@ -57,6 +51,12 @@ if not logging.getLogger().handlers:
         level=logging.INFO,
         format="%(levelname)s:%(name)s:%(message)s",
     )
+
+# Load vocab data for use in mode_rank tab and the vocab error check below.
+VOCAB_DICT, FULL_DF = resources.load_vocab_data()
+
+# Clean old .apkg files from our temp subdir (e.g. from previous sessions)
+cleanup_old_apkg_files()
 
 # Initialize Session State
 for key, default_value in constants.DEFAULT_SESSION_STATE.items():
