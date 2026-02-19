@@ -18,11 +18,10 @@ def test_build_card_prompt_contains_word_list():
 
 
 def test_build_card_prompt_fixed_template_has_field_constraints():
-    """Template includes Word/Phrase, Definition, Examples (and optionally Etymology)."""
+    """Template includes Target Word, definition, example (3 fields, no etymology)."""
     out = build_card_prompt("test", None)
-    assert "Field 1:" in out and ("Word" in out or "Phrase" in out)
-    assert "Field 2:" in out
-    assert "Field 3:" in out
+    assert "Target Word" in out
+    assert "3 fields" in out
     assert "|||" in out
 
 
@@ -32,18 +31,17 @@ def test_build_card_prompt_batch_limit_constraint():
     assert "10 words" in out or "10-word" in out
 
 
-def test_build_card_prompt_etymology_zero_hallucination():
-    """Template includes 词源不可考 when etymology is enabled."""
-    fmt = {"front": "word", "definition": "both", "examples": 2, "etymology": True, "examples_with_cn": True}
-    out = build_card_prompt("boycott", fmt)
-    assert "词源不可考" in out
+def test_build_card_prompt_no_etymology():
+    """Minimalist template explicitly excludes etymology/roots."""
+    out = build_card_prompt("boycott", None)
+    assert "NO ETYMOLOGY" in out or "no etymology" in out or "Do NOT output any etymology" in out
 
 
-def test_build_card_prompt_fixed_bilingual_and_etymology():
-    """Fixed template requires bilingual definition and includes deep etymology rules (fmt ignored)."""
+def test_build_card_prompt_chinese_only_minimalist():
+    """Minimalist template uses Chinese-only definition, one example."""
     out = build_card_prompt("test", None)
-    assert "中文释义" in out or "Definition (Bilingual)" in out
-    assert "Etymology" in out or "词源" in out
+    assert "中文" in out or "Chinese" in out
+    assert "ONE" in out or "one" in out  # one example
     assert "|||" in out
 
 

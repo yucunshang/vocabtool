@@ -527,51 +527,56 @@ def _render_extract_results() -> None:
 
     _render_builtin_ai_section(words_only, enable_audio, voice_code, enable_example_audio, shared_card_format)
 
-    st.markdown("---")
-    _render_thirdparty_prompt_section(words_only, enable_audio, voice_code, enable_example_audio)
 
+def _render_manual_card_section() -> None:
+    """手动制卡：第三方 AI Prompt + 粘贴结果 → 解析生成 .apkg。"""
+    st.markdown("#### 手动制卡")
+    st.caption("输入单词列表生成 Prompt，复制到 ChatGPT / Claude 等，再将 AI 返回的文本粘贴下方，解析生成 .apkg。")
 
-def _render_thirdparty_prompt_section(
-    words_only: list,
-    enable_audio: bool,
-    voice_code: str,
-    enable_example_audio: bool,
-) -> None:
-    """Third-party AI: copyable prompt + paste area + parse & package button."""
-    st.markdown("#### ② 第三方 AI：复制 Prompt → 粘贴结果制卡")
-    st.caption("将下方 Prompt 复制到 ChatGPT、Claude 等，再把 AI 返回的文本粘贴到下方，解析生成 .apkg。")
+    manual_words = st.text_area(
+        "✍️ 单词列表（每行一个或逗号分隔，用于生成 Prompt）",
+        height=120,
+        key="manual_card_words",
+        placeholder="altruism, hectic, compromise\n或每行一个单词",
+        label_visibility="collapsed",
+    )
 
-    # Build prompt (first 10 words per batch limit)
-    batch = words_only[:10]
-    words_str = ", ".join(batch)
-    prompt_text = build_card_prompt(words_str)
+    # Parse words from input
+    if manual_words.strip():
+        raw = re.sub(r"[,，、\s]+", " ", manual_words.strip())
+        words_list = [w.strip() for w in raw.split() if constants.MIN_WORD_LENGTH <= len(w.strip()) <= constants.MAX_WORD_LENGTH]
+        words_list = list(dict.fromkeys(w.lower() for w in words_list if w))
+    else:
+        words_list = []
 
-    col_prompt, col_copy = st.columns([5, 1])
-    with col_prompt:
-        st.text_area(
-            "📋 制卡 Prompt（可复制）",
-            value=prompt_text,
-            height=200,
-            key="thirdparty_prompt_display",
-            label_visibility="collapsed",
-        )
-    with col_copy:
-        render_copy_button(prompt_text, key="copy_thirdparty_prompt")
-    if len(words_only) > 10:
-        st.caption(f"共 {len(words_only)} 词，Prompt 已取前 10 词；其余请分批制卡。")
+    if words_list:
+        batch = words_list[:10]
+        words_str = ", ".join(batch)
+        prompt_text = build_card_prompt(words_str)
+        col_p, col_c = st.columns([5, 1])
+        with col_p:
+            st.text_area("Prompt", value=prompt_text, height=180, key="manual_prompt_display", label_visibility="collapsed")
+        with col_c:
+            render_copy_button(prompt_text, key="copy_manual_prompt")
+        if len(words_list) > 10:
+            st.caption(f"共 {len(words_list)} 词，Prompt 已取前 10 词；其余请分批制卡。")
+    else:
+        st.caption("输入单词后，将显示可复制的制卡 Prompt。")
 
     st.markdown("**粘贴 AI 输出**")
     pasted = st.text_area(
         "粘贴 ChatGPT / Claude 等返回的制卡结果",
         height=200,
-        key="thirdparty_pasted_output",
+        key="manual_pasted_output",
         placeholder="word1 ||| 释义 // 例句 ||| 词源\nword2 ||| ...",
         label_visibility="collapsed",
     )
 
-    deck_name = st.session_state.get("builtin_deck_name", f"Vocab_{get_beijing_time_str()}")
+    deck_name = st.text_input("🏷️ 牌组名称", value=f"Vocab_{get_beijing_time_str()}", key="manual_deck_name")
 
-    if st.button("🔁 解析并生成 .apkg", key="btn_thirdparty_parse", use_container_width=True):
+    enable_audio, voice_code, enable_example_audio = _render_audio_settings("manual")
+
+    if st.button("🔁 解析并生成 .apkg", key="btn_manual_parse", use_container_width=True):
         if not pasted.strip():
             st.warning("请先粘贴 AI 返回的制卡结果。")
             return
@@ -580,7 +585,7 @@ def _render_thirdparty_prompt_section(
             st.error("解析失败，格式不符。请确保每行格式为：`Word ||| 释义 ||| 例句1 // 例句2 // 例句3 ||| 词源`")
             return
         try:
-            file_path, audio_failed, failed_phrases = generate_anki_package(
+            file_path, _, _ = generate_anki_package(
                 parsed,
                 deck_name,
                 enable_tts=enable_audio,
@@ -595,11 +600,7 @@ def _render_thirdparty_prompt_section(
         except Exception as e:
             ErrorHandler.handle(e, "生成 .apkg 出错")
 
-    render_anki_download_button(
-        "📥 下载牌组",
-        use_container_width=True,
-        key="thirdparty_download_btn",
-    )
+    render_anki_download_button("📥 下载牌组", use_container_width=True, key="manual_download_btn")
 
 
 def _do_lookup(query_word: str) -> None:
@@ -785,13 +786,17 @@ with st.expander("使用指南 & 支持格式", expanded=False):
     TXT · PDF · DOCX · EPUB · CSV · XLSX · XLS · DB · SQLite · Anki 导出 (.txt)
     """)
 
-tab_lookup, tab_extract_anki = st.tabs([
+tab_lookup, tab_extract_anki, tab_manual = st.tabs([
     "AI查词",
     "筛选单词&制卡",
+    "手动制卡",
 ])
 
 with tab_lookup:
     render_quick_lookup()
+
+with tab_manual:
+    _render_manual_card_section()
 
 # ==========================================
 # Tab 1: Word Extraction（筛选单词）
