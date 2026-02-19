@@ -60,7 +60,6 @@ def generate_anki_package(
     enable_tts: bool = False,
     tts_voice: str = "en-US-JennyNeural",
     enable_example_tts: bool = True,
-    tts_provider: str = "edge",
     progress_callback: Optional[ProgressCallback] = None
 ) -> str:
     """Generate Anki package (.apkg) file with optional TTS audio.
@@ -225,7 +224,6 @@ def generate_anki_package(
                 audio_tasks,
                 concurrency=constants.TTS_CONCURRENCY,
                 progress_callback=internal_progress,
-                tts_provider=tts_provider,
             )
 
         for note in notes_buffer:

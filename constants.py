@@ -86,12 +86,3 @@ VOICE_MAP = {
     "👨 英音男声 (Ryan)": "en-GB-RyanNeural",
 }
 
-VOICE_MAP_GOOGLE = {
-    "👩 美音女声 (Neural2-A)": "en-US-Neural2-A",
-    "👨 美音男声 (Neural2-D)": "en-US-Neural2-D",
-    "👩 美音女声 (Wavenet-A)": "en-US-Wavenet-A",
-    "👨 美音男声 (Wavenet-D)": "en-US-Wavenet-D",
-    "👩 英音女声 (Neural2-A)": "en-GB-Neural2-A",
-    "👨 英音男声 (Neural2-B)": "en-GB-Neural2-B",
-}
-
