@@ -292,9 +292,12 @@ def _render_builtin_ai_section(
     # Handle auto-generate flag set by "继续下一批" button
     auto_generate = st.session_state.pop("_builtin_auto_generate", False)
 
-    col_btn, _ = st.columns([0.35, 1])
-    with col_btn:
-        clicked = st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", key="btn_builtin_gen")
+    clicked = st.button(
+        f"🚀 使用 {ai_model_label} 一键制卡",
+        type="primary",
+        key="btn_builtin_gen",
+        use_container_width=True,
+    )
 
     if clicked:
         # Fresh generate: reset page and clear previous cards
@@ -484,14 +487,19 @@ def _render_extract_results() -> None:
 
     enable_audio, voice_code, enable_example_audio = _render_audio_settings("auto")
 
-    col_builtin, col_third = st.columns(2)
+    use_thirdparty = st.radio(
+        "制卡方式",
+        options=["内置 AI 一键制卡", "第三方 AI（复制 Prompt + 粘贴制卡）"],
+        index=0,
+        horizontal=True,
+        key="card_gen_mode",
+    )
+    use_thirdparty = use_thirdparty.startswith("第三方")
 
-    with col_builtin:
-        st.markdown("#### ① 内置 AI 一键制卡")
+    if not use_thirdparty:
+        st.markdown("#### 内置 AI 一键制卡")
         _render_builtin_ai_section(words_only, enable_audio, voice_code, enable_example_audio, None)
-
-    with col_third:
-        st.markdown("#### ② 第三方 AI（复制 Prompt + 粘贴制卡）")
+    else:
         _render_thirdparty_section(words_only, enable_audio, voice_code, enable_example_audio)
 
 
@@ -501,7 +509,8 @@ def _render_thirdparty_section(
     voice_code: str,
     enable_example_audio: bool,
 ) -> None:
-    """第二栏：根据当前词表生成可复制 Prompt，粘贴 AI 结果后解析制卡。"""
+    """选择第三方时：根据当前词表生成可复制 Prompt，粘贴 AI 结果后解析制卡。"""
+    st.markdown("#### 第三方 AI")
     st.caption("复制下方 Prompt 到 ChatGPT / Claude 等，再将 AI 返回的文本粘贴到下方（或到第三栏「手动制卡」）解析制卡。")
 
     batch = words_only[:10]
