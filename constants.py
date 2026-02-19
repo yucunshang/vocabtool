@@ -19,9 +19,9 @@ APKG_CLEANUP_MAX_AGE_SECONDS = 24 * 3600  # 24 hours
 MIN_WORD_LENGTH = 2
 MAX_WORD_LENGTH = 25
 
-AI_BATCH_SIZE = 20     # 每组请求词数（每批 API 调用 20 个词）
+AI_BATCH_SIZE = 10     # 每组请求词数（每批 API 调用 10 个词）
 AI_CONCURRENCY = 5     # API 请求最大并发度
-MAX_AUTO_LIMIT = 1000  # 一次性制卡上限，仅一批（内部拆成 20 词/组，最多 50 组并发）
+MAX_AUTO_LIMIT = 500   # 一次性制卡上限
 MAX_RETRIES = 3
 
 TTS_CONCURRENCY = 3
