@@ -23,7 +23,7 @@ except ImportError:
 
 class CardFormat(TypedDict, total=False):
     front: str        # "word" | "phrase"
-    definition: str   # "cn" | "en" | "both"
+    definition: str   # "cn" | "en" | "en_native" | "both"
     examples: int     # 1 | 2 | 3
     etymology: bool   # True | False
     examples_with_cn: bool   # True = 例句带中文翻译
@@ -87,6 +87,13 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
    - Concise English definition (B2-C1 level, under 15 words)."""
         f2_example_altruism = "acting out of selfless concern for the well-being of others"
         f2_example_hectic = "full of frantic activity; very busy"
+    elif def_lang == "en_native":
+        f2_name = "English Definition (Native-Speaker Dictionary Style)"
+        f2_constraint = """2. **Field 2: Definition (Native-Speaker English)**
+   - Use native-speaker dictionary style (e.g. Merriam-Webster, Oxford English Dictionary).
+   - May use advanced vocabulary for precision. Concise but NOT restricted to learner/defining vocabulary."""
+        f2_example_altruism = "unselfish concern for the welfare of others"
+        f2_example_hectic = "characterized by intense activity, confusion, or haste"
     else:
         f2_name = "Chinese + English Definition"
         f2_constraint = """2. **Field 2: Definition (中英双语)**

@@ -379,8 +379,13 @@ def _render_thirdparty_prompt_section(
         with r1b:
             tp_def = st.selectbox(
                 "释义",
-                options=["cn", "en", "both"],
-                format_func=lambda x: {"cn": "中文", "en": "英文", "both": "中英双语"}[x],
+                options=["cn", "en", "en_native", "both"],
+                format_func=lambda x: {
+                    "cn": "中文",
+                    "en": "英文（学习型词典）",
+                    "en_native": "英文（母语者词典）",
+                    "both": "中英双语",
+                }[x],
                 index=0,
                 key="tp_prompt_def",
             )

@@ -36,6 +36,15 @@ def test_build_card_prompt_phrase_format():
     assert "collocation" in out.lower() or "phrase" in out.lower()
 
 
+def test_build_card_prompt_en_native_format():
+    """En_native uses native-speaker dictionary style definition."""
+    fmt = {"front": "word", "definition": "en_native", "examples": 1, "etymology": False}
+    out = build_card_prompt("test", fmt)
+    assert "Native" in out or "native" in out
+    assert "Merriam" in out or "Oxford" in out
+    assert "|||" in out
+
+
 def test_build_card_prompt_empty_words():
     out = build_card_prompt("", DEFAULT_CARD_FORMAT)
     assert "|||" in out
