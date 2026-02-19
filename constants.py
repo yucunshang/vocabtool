@@ -21,6 +21,7 @@ MAX_WORD_LENGTH = 25
 
 AI_BATCH_SIZE = 20   # 每批请求词数，越大 API 调用越少、整体越快，但单次响应更慢
 MAX_AUTO_LIMIT = 200  # 内置 AI 一次性制卡上限
+MAX_AI_FILTER_INPUT = 1500  # AI 筛选单次最多参与词数
 MAX_RETRIES = 3
 
 TTS_CONCURRENCY = 4
