@@ -11,7 +11,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 import constants
 from config import get_config
 from errors import ErrorHandler
-from prompts import CARD_GEN_SYSTEM_PROMPT, CARD_GEN_USER_TEMPLATE, LOOKUP_SYSTEM_PROMPT
+from prompts import (
+    CARD_GEN_SYSTEM_PROMPT,
+    CARD_GEN_USER_TEMPLATE,
+    LOOKUP_SYSTEM_PROMPT,
+    THIRD_PARTY_CARD_TEMPLATE,
+)
 from resources import get_rank_for_word
 
 logger = logging.getLogger(__name__)
@@ -48,8 +53,13 @@ _OPENAI_CLIENT: Optional[Any] = None
 
 
 def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
-    """Build the built-in AI card generation prompt. Template is fixed (Lexicographer/Etymologist); fmt is ignored but kept for API compatibility."""
+    """Build the built-in AI card generation prompt. Template is fixed; fmt is ignored but kept for API compatibility."""
     return CARD_GEN_USER_TEMPLATE.format(words_str=words_str)
+
+
+def build_thirdparty_prompt(words_str: str) -> str:
+    """Build third-party AI prompt (no limit, up to 500 words per batch)."""
+    return THIRD_PARTY_CARD_TEMPLATE.format(words_str=words_str)
 
 
 def get_openai_client() -> Optional[Any]:

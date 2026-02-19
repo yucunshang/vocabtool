@@ -15,7 +15,7 @@ import streamlit as st
 
 import constants
 import resources
-from ai import CardFormat, build_card_prompt, get_word_quick_definition, process_ai_in_batches
+from ai import CardFormat, build_card_prompt, build_thirdparty_prompt, get_word_quick_definition, process_ai_in_batches
 from anki_package import cleanup_old_apkg_files, generate_anki_package
 from anki_parse import parse_anki_data
 from config import get_config
@@ -509,57 +509,20 @@ def _render_thirdparty_section(
     voice_code: str,
     enable_example_audio: bool,
 ) -> None:
-    """选择第三方时：根据当前词表生成可复制 Prompt，粘贴 AI 结果后解析制卡。"""
+    """选择第三方时：仅显示可复制 Prompt。无上限，可分组，每批最多 500 词。粘贴制卡到第三栏。"""
     st.markdown("#### 第三方 AI")
-    st.caption("复制下方 Prompt 到 ChatGPT / Claude 等，再将 AI 返回的文本粘贴到下方（或到第三栏「手动制卡」）解析制卡。")
+    st.caption("无上限，可分组制卡，每批最多 500 词。复制下方 Prompt 到 ChatGPT / Claude 等，再到第三栏「手动制卡」粘贴结果解析制卡。")
 
-    batch = words_only[:10]
+    batch = words_only[: constants.MAX_AUTO_LIMIT]  # 500
     words_str = ", ".join(batch)
-    prompt_text = build_card_prompt(words_str)
+    prompt_text = build_thirdparty_prompt(words_str)
     col_p, col_c = st.columns([5, 1])
     with col_p:
-        st.text_area("Prompt", value=prompt_text, height=180, key="thirdparty_prompt_display", label_visibility="collapsed")
+        st.text_area("Prompt", value=prompt_text, height=220, key="thirdparty_prompt_display", label_visibility="collapsed")
     with col_c:
         render_copy_button(prompt_text, key="copy_thirdparty_prompt")
-    if len(words_only) > 10:
-        st.caption(f"共 {len(words_only)} 词，Prompt 已取前 10 词；其余请分批制卡。")
-
-    st.markdown("**粘贴 AI 输出**")
-    pasted = st.text_area(
-        "粘贴 ChatGPT / Claude 等返回的制卡结果",
-        height=160,
-        key="thirdparty_pasted_output",
-        placeholder="word1 ||| 释义 ||| 例句\nword2 ||| ...",
-        label_visibility="collapsed",
-    )
-
-    deck_name = st.session_state.get("builtin_deck_name", f"Vocab_{get_beijing_time_str()}")
-
-    if st.button("🔁 解析并生成 .apkg", key="btn_thirdparty_parse", use_container_width=True):
-        if not pasted.strip():
-            st.warning("请先粘贴 AI 返回的制卡结果。")
-            return
-        parsed = parse_anki_data(pasted.strip())
-        if not parsed:
-            st.error("解析失败，格式不符。请确保每行格式为：`Word ||| 释义 ||| 例句`（可选 `||| 词源`）。")
-            return
-        try:
-            file_path, _, _ = generate_anki_package(
-                parsed,
-                deck_name,
-                enable_tts=enable_audio,
-                tts_voice=voice_code,
-                enable_example_tts=enable_example_audio,
-            )
-            set_anki_pkg(file_path, deck_name)
-            st.session_state["anki_cards_cache"] = parsed
-            st.success(f"✅ 解析完成，共 {len(parsed)} 张卡片。")
-            st.balloons()
-            run_gc()
-        except Exception as e:
-            ErrorHandler.handle(e, "生成 .apkg 出错")
-
-    render_anki_download_button("📥 下载牌组", use_container_width=True, key="thirdparty_download_btn")
+    if len(words_only) > constants.MAX_AUTO_LIMIT:
+        st.caption(f"共 {len(words_only)} 词，Prompt 已取前 {constants.MAX_AUTO_LIMIT} 词；其余请分批复制制卡。")
 
 
 def _render_manual_card_section() -> None:
