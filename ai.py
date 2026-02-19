@@ -337,7 +337,8 @@ def _process_one_batch(
                     {"role": "system", "content": CARD_GEN_SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.7
+                temperature=0.7,
+                max_tokens=4096,  # 限制输出，避免超长响应浪费 tokens
             )
             content = (response.choices[0].message.content or "").strip()
             if not content:
