@@ -509,20 +509,76 @@ def _render_thirdparty_section(
     voice_code: str,
     enable_example_audio: bool,
 ) -> None:
-    """选择第三方时：可复制 Prompt（短语词组 + 英文释义 + 例句 + 词源）。无上限，可分组，每批最多 500 词。"""
+    """选择第三方时：自定义格式 + 分组 Prompt。无上限，每批最多 500 词。"""
     st.markdown("#### 第三方 AI")
     st.caption("无上限，可分组制卡，每批最多 500 词。复制下方 Prompt 到 ChatGPT / Claude 等，再到第三栏「手动制卡」粘贴结果解析制卡。")
 
-    batch = words_only[: constants.MAX_AUTO_LIMIT]  # 500
-    words_str = ", ".join(batch)
-    prompt_text = build_thirdparty_prompt(words_str)
-    col_p, col_c = st.columns([5, 1])
-    with col_p:
-        st.text_area("Prompt", value=prompt_text, height=220, key="thirdparty_prompt_display", label_visibility="collapsed")
-    with col_c:
-        render_copy_button(prompt_text, key="copy_thirdparty_prompt")
-    if len(words_only) > constants.MAX_AUTO_LIMIT:
-        st.caption(f"共 {len(words_only)} 词，Prompt 已取前 {constants.MAX_AUTO_LIMIT} 词；其余请分批复制制卡。")
+    with st.expander("⚙️ 自定义卡片格式", expanded=True):
+        tp_front = st.radio(
+            "正面",
+            options=["word", "phrase"],
+            format_func=lambda x: "单词" if x == "word" else "短语/词组",
+            index=1,
+            key="thirdparty_front",
+            horizontal=True,
+        )
+        tp_def = st.radio(
+            "反面释义",
+            options=["cn", "en", "en_native", "both"],
+            format_func=lambda x: {"cn": "中文", "en": "英文(学习型)", "en_native": "英文(母语者词典)", "both": "中英双语"}[x],
+            index=2,
+            key="thirdparty_def",
+            horizontal=True,
+        )
+        tp_ex = st.selectbox("例句数量", options=[1, 2, 3], format_func=lambda x: f"{x} 条", index=1, key="thirdparty_ex")
+        tp_ex_cn = st.checkbox("例句带中文翻译", value=False, key="thirdparty_ex_cn")
+        tp_ety = st.checkbox("词根词源词缀", value=True, key="thirdparty_ety")
+
+    thirdparty_fmt: CardFormat = {
+        "front": tp_front,
+        "definition": tp_def,
+        "examples": tp_ex,
+        "examples_with_cn": tp_ex_cn,
+        "etymology": tp_ety,
+    }
+
+    # 分组：每批最多 500 词
+    batch_size = constants.MAX_AUTO_LIMIT
+    total = len(words_only)
+    num_batches = (total + batch_size - 1) // batch_size
+
+    for i in range(num_batches):
+        start = i * batch_size
+        end = min((i + 1) * batch_size, total)
+        batch_words = words_only[start:end]
+        words_str = ", ".join(batch_words)
+        prompt_text = build_thirdparty_prompt(words_str, thirdparty_fmt)
+
+        if num_batches > 1:
+            with st.expander(f"📋 第 {i + 1} 批（{start + 1}–{end} 词，共 {len(batch_words)} 词）", expanded=(i == 0)):
+                col_p, col_c = st.columns([5, 1])
+                with col_p:
+                    st.text_area(
+                        "Prompt",
+                        value=prompt_text,
+                        height=200,
+                        key=f"thirdparty_prompt_{i}",
+                        label_visibility="collapsed",
+                    )
+                with col_c:
+                    render_copy_button(prompt_text, key=f"copy_thirdparty_{i}")
+        else:
+            col_p, col_c = st.columns([5, 1])
+            with col_p:
+                st.text_area(
+                    "Prompt",
+                    value=prompt_text,
+                    height=220,
+                    key="thirdparty_prompt_0",
+                    label_visibility="collapsed",
+                )
+            with col_c:
+                render_copy_button(prompt_text, key="copy_thirdparty_0")
 
 
 def _render_manual_card_section() -> None:

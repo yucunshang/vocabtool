@@ -101,11 +101,11 @@ apple ||| 苹果 ||| She ate a red apple. (她吃了一个红苹果。)
 Process the input list strictly adhering to the 10-word limit, minimalist design, absolute single meaning, and formatting above."""
 
 # -----------------------------------------------------------------------------
-# ③ 第三方 AI 专用（短语词组 + 英文释义 + 例句 + 词源，每批最多 500 词）
-# 占位符：{words_str} 由 ai.build_thirdparty_prompt() 填入
+# ③ 第三方 AI 专用（可自定义格式，每批最多 500 词）
+# 占位符由 ai.build_thirdparty_prompt(words_str, fmt) 填入
 # -----------------------------------------------------------------------------
 THIRD_PARTY_CARD_TEMPLATE = """# Role
-You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
+You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** when phrase mode is required.
 Make sure to process everything in one go, without missing anything.
 
 # Input Data
@@ -116,33 +116,16 @@ Make sure to process everything in one go, without missing anything.
 2. **Layout**: One entry per line.
 3. **Separator**: Use `|||` as the delimiter.
 4. **Target Structure**:
-   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
+   {structure_line}
 
 # Field Constraints (Strict)
-1. **Field 1: Phrase (CRITICAL)**
-   - DO NOT output the single target word.
-   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
-   - Example: If input is "rain", output "heavy rain" or "torrential rain".
+{field1_instruction}
+{field2_instruction}
+{field3_instruction}
+{field4_instruction}
 
-2. **Field 2: Definition (English)**
-   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
-
-3. **Field 3: Example**
-   - A short, authentic sentence containing the phrase.
-
-4. **Field 4: Roots/Etymology (Simplified Chinese)**
-   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
-   - If no classical roots exist, explain the origin briefly in Chinese.
-   - Use Simplified Chinese for meanings.
-
-# Valid Example (Follow this logic strictly)
-Input: altruism
-Output:
-motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
-
-Input: hectic
-Output:
-a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
+# Valid Example
+{example_line}
 
 # Task
 Process the provided input list strictly adhering to the format above."""

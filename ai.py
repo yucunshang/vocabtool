@@ -58,8 +58,86 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
 
 
 def build_thirdparty_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
-    """Build third-party AI prompt (fixed collocation format, up to 500 words per batch). fmt ignored."""
-    return THIRD_PARTY_CARD_TEMPLATE.format(words_str=words_str)
+    """Build third-party AI prompt from card format (up to 500 words per batch)."""
+    if fmt is None:
+        fmt = {
+            "front": "phrase",
+            "definition": "en_native",
+            "examples": 2,
+            "examples_with_cn": False,
+            "etymology": True,
+        }
+
+    front = fmt.get("front", "phrase")
+    def_lang = fmt.get("definition", "en_native")
+    num_ex = fmt.get("examples", 2)
+    with_cn = fmt.get("examples_with_cn", False)
+    include_ety = fmt.get("etymology", True)
+
+    # Field 1
+    if front == "phrase":
+        field1_instruction = """1. **Field 1: Phrase (CRITICAL)**
+   - DO NOT output the single target word.
+   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
+   - Example: If input is "rain", output "heavy rain" or "torrential rain"."""
+    else:
+        field1_instruction = """1. **Field 1: Word**
+   - Output the target word in lowercase. No extra text."""
+
+    # Field 2
+    if def_lang == "cn":
+        field2_instruction = """2. **Field 2: Definition (Chinese)**
+   - ONE concise Chinese definition only. No slashes, no English."""
+    elif def_lang == "en":
+        field2_instruction = """2. **Field 2: Definition (English)**
+   - Define the phrase/word. Keep it concise (B2-C1 learner dictionary style)."""
+    elif def_lang == "en_native":
+        field2_instruction = """2. **Field 2: Definition (English)**
+   - Define the *phrase* or word in native-speaker dictionary style (e.g. Merriam-Webster, Oxford). Keep it concise."""
+    else:
+        field2_instruction = """2. **Field 2: Definition (Bilingual)**
+   - Format: `中文释义 / English definition`. Both required."""
+
+    # Field 3
+    ex_label = f"{num_ex} example sentence{'s' if num_ex > 1 else ''}"
+    if with_cn:
+        field3_instruction = f"""3. **Field 3: Example{'s' if num_ex > 1 else ''}**
+   - {ex_label.capitalize()}. Each MUST include a Chinese translation: `English sentence. (中文翻译。)` Separate with ` // `."""
+    else:
+        field3_instruction = f"""3. **Field 3: Example{'s' if num_ex > 1 else ''}**
+   - {ex_label.capitalize()}. English only, NO Chinese translation. Separate with ` // `."""
+
+    # Field 4
+    if include_ety:
+        field4_instruction = """4. **Field 4: Roots/Etymology (Simplified Chinese)**
+   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
+   - If no classical roots exist, explain the origin briefly in Chinese. Use "词源不可考" only when genuinely unknown."""
+        structure_line = "`Field1` ||| `Field2` ||| `Field3` ||| `Field4 (Etymology)`"
+    else:
+        field4_instruction = ""
+        structure_line = "`Field1` ||| `Field2` ||| `Field3`"
+
+    # Example line
+    if front == "phrase" and def_lang == "en_native" and num_ex >= 1 and not with_cn and include_ety:
+        example_line = """Input: altruism
+Output:
+motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
+
+Input: hectic
+Output:
+a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的 - 来自希腊语hektikos) + -ic (形容词后缀)"""
+    else:
+        example_line = "Input: word\nOutput:\nphrase_or_word ||| definition ||| Example sentence." + (" ||| 词源" if include_ety else "")
+
+    return THIRD_PARTY_CARD_TEMPLATE.format(
+        field1_instruction=field1_instruction,
+        field2_instruction=field2_instruction,
+        field3_instruction=field3_instruction,
+        field4_instruction=field4_instruction,
+        structure_line=structure_line,
+        example_line=example_line,
+        words_str=words_str,
+    )
 
 
 def get_openai_client() -> Optional[Any]:
