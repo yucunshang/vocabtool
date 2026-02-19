@@ -414,41 +414,6 @@ def _render_builtin_ai_section(
                 key="card_editor",
             )
 
-            # Fix 6: Individual card regeneration
-            word_list_for_regen = [c.get("w", "") for c in cards if c.get("w")]
-            if word_list_for_regen:
-                col_sel, col_regen_btn = st.columns([3, 1])
-                with col_sel:
-                    regen_word = st.selectbox(
-                        "选择要重新生成的词",
-                        options=word_list_for_regen,
-                        key="regen_word_select",
-                    )
-                with col_regen_btn:
-                    if st.button("🔄 重新生成", key="btn_regen_single"):
-                        with st.spinner(f"正在重新生成「{regen_word}」..."):
-                            new_result, _ = process_ai_in_batches([regen_word], card_format=card_format)
-                            if new_result:
-                                new_cards = parse_anki_data(new_result)
-                                if new_cards:
-                                    current_cards = list(st.session_state["_builtin_parsed_cards"])
-                                    idx = next(
-                                        (i for i, c in enumerate(current_cards) if c.get("w") == regen_word),
-                                        None,
-                                    )
-                                    if idx is not None:
-                                        current_cards[idx] = new_cards[0]
-                                        st.session_state["_builtin_parsed_cards"] = current_cards
-                                        st.session_state.pop("card_editor", None)
-                                        st.toast(f"「{regen_word}」已重新生成", icon="✅")
-                                        st.rerun()
-                                    else:
-                                        st.warning(f"未找到词条「{regen_word}」")
-                                else:
-                                    st.warning("重新生成失败，AI 返回格式错误。")
-                            else:
-                                st.warning("重新生成失败，请检查网络连接。")
-
             # Confirm button + next-batch button
             col_confirm, col_continue = st.columns([2, 1])
             with col_confirm:
