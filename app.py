@@ -14,7 +14,7 @@ import streamlit as st
 
 import constants
 import resources
-from ai import CardFormat, get_word_quick_definition, process_ai_in_batches
+from ai import CardFormat, build_card_prompt, get_word_quick_definition, process_ai_in_batches
 from anki_package import cleanup_old_apkg_files, generate_anki_package
 from anki_parse import parse_anki_data
 from config import get_config
@@ -96,7 +96,8 @@ def render_anki_download_button(
     label: str,
     *,
     button_type: str = "primary",
-    use_container_width: bool = False
+    use_container_width: bool = False,
+    key: str | None = None,
 ) -> None:
     """Safely render Anki package download button if file exists."""
     file_path = st.session_state.get('anki_pkg_path')
@@ -111,14 +112,17 @@ def render_anki_download_button(
 
     try:
         with open(file_path, "rb") as f:
-            st.download_button(
+            kwargs = dict(
                 label=label,
                 data=f.read(),
                 file_name=file_name,
                 mime="application/octet-stream",
                 type=button_type,
-                use_container_width=use_container_width
+                use_container_width=use_container_width,
             )
+            if key is not None:
+                kwargs["key"] = key
+            st.download_button(**kwargs)
         st.caption("💡 如下载无反应，请在浏览器（Safari / Chrome）中打开本页面再点击下载。")
     except OSError as e:
         logger.error("Failed to open package for download: %s", e)
@@ -420,6 +424,7 @@ def _render_builtin_ai_section(
         f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
         button_type="primary",
         use_container_width=True,
+        key="builtin_download_btn",
     )
 
     # Audio retry: only re-run TTS for files still missing (cache skips successful ones)
@@ -521,6 +526,80 @@ def _render_extract_results() -> None:
     }
 
     _render_builtin_ai_section(words_only, enable_audio, voice_code, enable_example_audio, shared_card_format)
+
+    st.markdown("---")
+    _render_thirdparty_prompt_section(words_only, enable_audio, voice_code, enable_example_audio)
+
+
+def _render_thirdparty_prompt_section(
+    words_only: list,
+    enable_audio: bool,
+    voice_code: str,
+    enable_example_audio: bool,
+) -> None:
+    """Third-party AI: copyable prompt + paste area + parse & package button."""
+    st.markdown("#### ② 第三方 AI：复制 Prompt → 粘贴结果制卡")
+    st.caption("将下方 Prompt 复制到 ChatGPT、Claude 等，再把 AI 返回的文本粘贴到下方，解析生成 .apkg。")
+
+    # Build prompt (first 10 words per batch limit)
+    batch = words_only[:10]
+    words_str = ", ".join(batch)
+    prompt_text = build_card_prompt(words_str)
+
+    col_prompt, col_copy = st.columns([5, 1])
+    with col_prompt:
+        st.text_area(
+            "📋 制卡 Prompt（可复制）",
+            value=prompt_text,
+            height=200,
+            key="thirdparty_prompt_display",
+            label_visibility="collapsed",
+        )
+    with col_copy:
+        render_copy_button(prompt_text, key="copy_thirdparty_prompt")
+    if len(words_only) > 10:
+        st.caption(f"共 {len(words_only)} 词，Prompt 已取前 10 词；其余请分批制卡。")
+
+    st.markdown("**粘贴 AI 输出**")
+    pasted = st.text_area(
+        "粘贴 ChatGPT / Claude 等返回的制卡结果",
+        height=200,
+        key="thirdparty_pasted_output",
+        placeholder="word1 ||| 释义 // 例句 ||| 词源\nword2 ||| ...",
+        label_visibility="collapsed",
+    )
+
+    deck_name = st.session_state.get("builtin_deck_name", f"Vocab_{get_beijing_time_str()}")
+
+    if st.button("🔁 解析并生成 .apkg", key="btn_thirdparty_parse", use_container_width=True):
+        if not pasted.strip():
+            st.warning("请先粘贴 AI 返回的制卡结果。")
+            return
+        parsed = parse_anki_data(pasted.strip())
+        if not parsed:
+            st.error("解析失败，格式不符。请确保每行格式为：`Word ||| 释义 ||| 例句1 // 例句2 // 例句3 ||| 词源`")
+            return
+        try:
+            file_path, audio_failed, failed_phrases = generate_anki_package(
+                parsed,
+                deck_name,
+                enable_tts=enable_audio,
+                tts_voice=voice_code,
+                enable_example_tts=enable_example_audio,
+            )
+            set_anki_pkg(file_path, deck_name)
+            st.session_state["anki_cards_cache"] = parsed
+            st.success(f"✅ 解析完成，共 {len(parsed)} 张卡片。")
+            st.balloons()
+            run_gc()
+        except Exception as e:
+            ErrorHandler.handle(e, "生成 .apkg 出错")
+
+    render_anki_download_button(
+        "📥 下载牌组",
+        use_container_width=True,
+        key="thirdparty_download_btn",
+    )
 
 
 def _do_lookup(query_word: str) -> None:
