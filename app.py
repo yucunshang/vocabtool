@@ -143,11 +143,21 @@ def _rank_badge_style(rank: int) -> tuple[str, str]:
     return "#6b7280", "未收录"
 
 
+@st.cache_data(show_spinner=False)
+def _cached_analyze(text: str, min_rank: int, max_rank: int, include_unknown: bool):
+    return analyze_logic(text, min_rank, max_rank, include_unknown)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_extract_url(url: str) -> str:
+    return extract_text_from_url(url)
+
+
 def _analyze_and_set_words(raw_text: str, min_rank: int, max_rank: int) -> bool:
     """Run rank-based analysis and update session state. Returns success."""
     if len(raw_text) <= 2:
         return False
-    final_data, raw_count, stats_info = analyze_logic(raw_text, min_rank, max_rank, False)
+    final_data, raw_count, stats_info = _cached_analyze(raw_text, min_rank, max_rank, False)
     set_generated_words_state(final_data, raw_count, stats_info)
     if not final_data:
         st.info(
@@ -771,7 +781,7 @@ with tab_extract:
                     with st.status("🌐 正在抓取并分析网页文本...", expanded=True) as status:
                         start_time = time.time()
                         status.write(f"正在抓取：{input_url}")
-                        raw_text = extract_text_from_url(input_url)
+                        raw_text = _cached_extract_url(input_url)
                         if _analyze_and_set_words(raw_text, current_rank_url, target_rank_url):
                             st.session_state['process_time'] = time.time() - start_time
                             run_gc()
