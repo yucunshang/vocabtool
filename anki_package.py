@@ -156,9 +156,11 @@ def generate_anki_package(
     deck = genanki.Deck(DECK_ID, deck_name)
 
     with tempfile_mod.TemporaryDirectory() as tmp_dir:
-        notes_buffer = []
         audio_tasks = []
 
+        # Pass 1: plan audio tasks and pre-compute display fields; do NOT build
+        # note fields yet because we don't know which TTS files will succeed.
+        card_plans = []
         for idx, card in enumerate(cards_data):
             phrase = safe_str_clean(card.get('w', ''))
             meaning = safe_str_clean(card.get('m', ''))
@@ -171,24 +173,18 @@ def generate_anki_package(
                 f"• {s}" for s in example_sentences
             ) if example_sentences else ""
 
-            audio_phrase_field = ""
-            audio_example_field = ""
+            phrase_plan = None       # (path, filename) or None
+            example_plans = []       # [(path, filename), ...]
 
             if enable_tts and phrase:
                 safe_phrase = _SAFE_PHRASE_RE.sub('_', phrase)[:20]
-                unique_id = int(time.time() * 1000) + random.randint(0, 9999)
+                unique_id = int(time.time() * 1000) + idx * 10000 + random.randint(0, 999)
 
                 phrase_filename = f"tts_{safe_phrase}_{unique_id}_p.mp3"
                 phrase_path = os.path.join(tmp_dir, phrase_filename)
-                audio_tasks.append({
-                    'text': phrase,
-                    'path': phrase_path,
-                    'voice': tts_voice
-                })
-                media_files.append(phrase_path)
-                audio_phrase_field = f"[sound:{phrase_filename}]"
+                audio_tasks.append({'text': phrase, 'path': phrase_path, 'voice': tts_voice})
+                phrase_plan = (phrase_path, phrase_filename)
 
-                audio_example_parts = []
                 if enable_example_tts:
                     for ei, sent in enumerate(example_sentences):
                         if sent and len(sent) > 3:
@@ -200,21 +196,19 @@ def generate_anki_package(
                                 'path': ex_path,
                                 'voice': tts_voice
                             })
-                            media_files.append(ex_path)
-                            audio_example_parts.append(f"[sound:{ex_filename}]")
-                audio_example_field = "".join(audio_example_parts)
+                            example_plans.append((ex_path, ex_filename))
 
-            fields = [
-                phrase, meaning, example_display, etymology,
-                audio_phrase_field, audio_example_field
-            ]
+            card_plans.append({
+                'phrase': phrase,
+                'meaning': meaning,
+                'example_display': example_display,
+                'etymology': etymology,
+                'note_id': note_id,
+                'phrase_plan': phrase_plan,
+                'example_plans': example_plans,
+            })
 
-            if note_id:
-                note = genanki.Note(model=model, fields=fields, guid=note_id)
-            else:
-                note = genanki.Note(model=model, fields=fields)
-            notes_buffer.append(note)
-
+        # Run TTS — some files may fail; survivors are identified by os.path.exists
         if audio_tasks:
             def internal_progress(ratio: float, msg: str) -> None:
                 if progress_callback:
@@ -226,14 +220,41 @@ def generate_anki_package(
                 progress_callback=internal_progress,
             )
 
-        for note in notes_buffer:
+        # Pass 2: build notes using only audio files that actually exist
+        for plan in card_plans:
+            audio_phrase_field = ""
+            audio_example_field = ""
+
+            if plan['phrase_plan']:
+                phrase_path, phrase_filename = plan['phrase_plan']
+                if os.path.exists(phrase_path):
+                    audio_phrase_field = f"[sound:{phrase_filename}]"
+                    media_files.append(phrase_path)
+
+            audio_example_parts = []
+            for ex_path, ex_filename in plan['example_plans']:
+                if os.path.exists(ex_path):
+                    audio_example_parts.append(f"[sound:{ex_filename}]")
+                    media_files.append(ex_path)
+            audio_example_field = "".join(audio_example_parts)
+
+            fields = [
+                plan['phrase'], plan['meaning'], plan['example_display'],
+                plan['etymology'], audio_phrase_field, audio_example_field,
+            ]
+
+            note_id = plan['note_id']
+            if note_id:
+                note = genanki.Note(model=model, fields=fields, guid=note_id)
+            else:
+                note = genanki.Note(model=model, fields=fields)
             deck.add_note(note)
 
         if progress_callback:
             progress_callback(1.0, "📦 正在打包 .apkg 文件...")
 
         package = genanki.Package(deck)
-        package.media_files = [f for f in media_files if os.path.exists(f)]
+        package.media_files = media_files  # already contains only existing files
 
         os.makedirs(APKG_TEMP_DIR, exist_ok=True)
         output_file = tempfile_mod.NamedTemporaryFile(
