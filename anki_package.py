@@ -16,6 +16,8 @@ from utils import safe_str_clean
 
 APKG_TEMP_DIR = os.path.join(tempfile.gettempdir(), constants.APKG_TEMP_SUBDIR)
 
+_SAFE_PHRASE_RE = re.compile(r'[^a-zA-Z0-9]')
+
 
 def cleanup_old_apkg_files(max_age_seconds: int = constants.APKG_CLEANUP_MAX_AGE_SECONDS) -> None:
     """Remove .apkg files in our temp subdir older than max_age_seconds."""
@@ -172,7 +174,7 @@ def generate_anki_package(
             audio_example_field = ""
 
             if enable_tts and phrase:
-                safe_phrase = re.sub(r'[^a-zA-Z0-9]', '_', phrase)[:20]
+                safe_phrase = _SAFE_PHRASE_RE.sub('_', phrase)[:20]
                 unique_id = int(time.time() * 1000) + random.randint(0, 9999)
 
                 phrase_filename = f"tts_{safe_phrase}_{unique_id}_p.mp3"

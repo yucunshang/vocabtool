@@ -19,15 +19,33 @@ from utils import detect_file_encoding
 
 logger = __import__("logging").getLogger(__name__)
 
+_RE_CLOZE = re.compile(r'\{\{c\d+::(.*?)(?::.*?)?\}\}')
+_RE_HTML  = re.compile(r'<[^>]+>')
+_RE_SOUND = re.compile(r'\[sound:.*?\]')
+_RE_IMAGE = re.compile(r'\[Image:.*?\]')
+
 
 def clean_anki_field(text: str) -> str:
     """Helper to clean a single Anki field content."""
-    text = re.sub(r'\{\{c\d+::(.*?)(?::.*?)?\}\}', r'\1', text)
-    text = re.sub(r'<[^>]+>', ' ', text)
+    text = _RE_CLOZE.sub(r'\1', text)
+    text = _RE_HTML.sub(' ', text)
     text = html.unescape(text)
-    text = re.sub(r'\[sound:.*?\]', '', text)
-    text = re.sub(r'\[Image:.*?\]', '', text)
+    text = _RE_SOUND.sub('', text)
+    text = _RE_IMAGE.sub('', text)
     return text.strip()
+
+
+def _extract_df_columns_text(df: pd.DataFrame) -> list:
+    """Flatten non-empty string values from all columns of a DataFrame."""
+    parts = []
+    for col in df.columns:
+        try:
+            col_text = df[col].astype(str)
+        except Exception:
+            col_text = df[col].apply(lambda x: str(x) if x is not None else "")
+        col_text = col_text[col_text.notna() & (col_text != '') & (col_text != 'nan')]
+        parts.extend(col_text.tolist())
+    return parts
 
 
 def parse_anki_txt_export(uploaded_file: Any) -> str:
@@ -180,14 +198,7 @@ def extract_from_csv(uploaded_file: Any) -> str:
         df = pd.read_csv(StringIO(content))
         if df.empty or len(df.columns) == 0:
             return "Error: CSV 文件为空或无数据行。"
-        text_parts = []
-        for col in df.columns:
-            try:
-                col_text = df[col].astype(str)
-            except Exception:
-                col_text = df[col].apply(lambda x: str(x) if x is not None else "")
-            col_text = col_text[col_text.notna() & (col_text != '') & (col_text != 'nan')]
-            text_parts.extend(col_text.tolist())
+        text_parts = _extract_df_columns_text(df)
         return " ".join(text_parts)
     except Exception as e:
         return ErrorHandler.handle_file_error(e, "CSV")
@@ -210,13 +221,7 @@ def extract_from_excel(uploaded_file: Any) -> str:
         for sheet_name, sheet_df in df.items():
             if sheet_df.empty:
                 continue
-            for col in sheet_df.columns:
-                try:
-                    col_text = sheet_df[col].astype(str)
-                except Exception:
-                    col_text = sheet_df[col].apply(lambda x: str(x) if x is not None else "")
-                col_text = col_text[col_text.notna() & (col_text != '') & (col_text != 'nan')]
-                text_parts.extend(col_text.tolist())
+            text_parts.extend(_extract_df_columns_text(sheet_df))
         return " ".join(text_parts)
     except Exception as e:
         return ErrorHandler.handle_file_error(e, "Excel")

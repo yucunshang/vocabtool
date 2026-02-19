@@ -76,24 +76,20 @@ def analyze_logic(
         lemma = get_lemma(word, lemminflect)
         # Try exact case first so "May" vs "may" are distinct
         rank_lemma = vocab_dict.get(lemma, vocab_dict.get(lemma.lower(), 99999)) if lemma else 99999
-        rank_orig = vocab_dict.get(word, vocab_dict.get(word.lower(), 99999))
+        rank_orig = vocab_dict.get(word, 99999)  # word is already lowercase
 
-        if rank_lemma != 99999 and rank_orig != 99999:
-            best_rank = min(rank_lemma, rank_orig)
-        elif rank_lemma != 99999:
-            best_rank = rank_lemma
-        else:
-            best_rank = rank_orig
+        best_rank = min(rank_lemma, rank_orig)
 
         if best_rank < current_level:
             stats_known_count += count
+            include_word = False
         elif current_level <= best_rank <= target_level:
             stats_target_count += count
+            include_word = True
+        else:
+            include_word = (best_rank == 99999 and include_unknown)
 
-        is_in_range = (best_rank >= current_level and best_rank <= target_level)
-        is_unknown_included = (best_rank == 99999 and include_unknown)
-
-        if is_in_range or is_unknown_included:
+        if include_word:
             word_to_keep = lemma if rank_lemma != 99999 else word
             if lemma not in seen_lemmas:
                 final_candidates.append((word_to_keep, best_rank))
