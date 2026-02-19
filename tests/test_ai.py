@@ -39,12 +39,11 @@ def test_build_card_prompt_etymology_zero_hallucination():
     assert "词源不可考" in out
 
 
-def test_build_card_prompt_en_native_definition():
-    """en_native uses native-speaker dictionary style."""
-    fmt = {"front": "word", "definition": "en_native", "examples": 1, "etymology": False}
-    out = build_card_prompt("test", fmt)
-    assert "Native" in out or "native" in out
-    assert "Merriam" in out or "Oxford" in out
+def test_build_card_prompt_fixed_bilingual_and_etymology():
+    """Fixed template requires bilingual definition and includes deep etymology rules (fmt ignored)."""
+    out = build_card_prompt("test", None)
+    assert "中文释义" in out or "Definition (Bilingual)" in out
+    assert "Etymology" in out or "词源" in out
     assert "|||" in out
 
 
