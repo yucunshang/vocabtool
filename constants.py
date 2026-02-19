@@ -63,9 +63,8 @@ MAX_LOOKUP_INPUT_LENGTH = 100   # single word/phrase lookup
 MAX_PASTE_TEXT_LENGTH = 500_000 # ~500 KB of text
 MAX_URL_LENGTH = 2048
 
-# PDF & analysis performance: limit work to keep response fast
+# PDF: limit pages to keep extraction fast (text analysis has no character limit)
 PDF_MAX_PAGES = 50              # only extract first N pages from PDF
-MAX_TEXT_ANALYSIS_CHARS = 3_000_000  # max chars passed to vocab analysis (≈ 300 万字)
 
 VOICE_MAP = {
     "👩 美音女声 (Jenny)": "en-US-JennyNeural",
