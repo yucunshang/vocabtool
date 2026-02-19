@@ -685,26 +685,48 @@ with tab_lookup:
     render_quick_lookup()
 
 # ==========================================
-# Tab 1: Word Extraction
+# Tab 1: Word Extraction（筛选单词）
 # ==========================================
-def _render_rank_inputs(key_suffix: str) -> tuple[int, int]:
-    """Render min/max rank number inputs with validation warning. Returns (min_rank, max_rank)."""
-    col1, col2 = st.columns(2)
-    min_rank = col1.number_input(
-        "忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100,
-        key=f"min_rank_{key_suffix}"
+def _render_shared_rank_selection() -> tuple[int, int]:
+    """渲染通用词汇量 rank 选择（文本/链接/文件/词库共用，词表不适用）。返回 (min_rank, max_rank)。"""
+    st.markdown("#### 词汇量 rank 选择（文本 / 链接 / 文件 / 词库 通用）")
+    preset_choices = [f"{label} ({min_r}–{max_r})" for label, min_r, max_r in constants.RANK_PRESETS] + ["自定义"]
+    selected = st.radio(
+        "词汇量区间",
+        preset_choices,
+        key="extract_rank_preset",
+        horizontal=True,
+        format_func=lambda x: x,
     )
-    max_rank = col2.number_input(
-        "忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500,
-        key=f"max_rank_{key_suffix}"
-    )
-    if max_rank < min_rank:
-        st.warning("⚠️ Max Rank 小于 Min Rank，已自动交换两者。")
-        min_rank, max_rank = max_rank, min_rank
+    if selected != "自定义":
+        for _label, min_r, max_r in constants.RANK_PRESETS:
+            if selected == f"{_label} ({min_r}–{max_r})":
+                st.session_state["extract_min_rank"] = min_r
+                st.session_state["extract_max_rank"] = max_r
+                break
+        min_rank = st.session_state["extract_min_rank"]
+        max_rank = st.session_state["extract_max_rank"]
+    else:
+        col1, col2 = st.columns(2)
+        min_rank = col1.number_input(
+            "忽略前 N 高频词 (Min Rank)", 1, 20000, st.session_state["extract_min_rank"], step=100,
+            key="extract_min_rank"
+        )
+        max_rank = col2.number_input(
+            "忽略后 N 低频词 (Max Rank)", 2000, 50000, st.session_state["extract_max_rank"], step=500,
+            key="extract_max_rank"
+        )
+        if max_rank < min_rank:
+            st.warning("⚠️ Max Rank 小于 Min Rank，已自动交换两者。")
+            min_rank, max_rank = max_rank, min_rank
     return min_rank, max_rank
 
 
 with tab_extract:
+    # 通用 rank 区间（文本/链接/文件/词库共用；词表不筛 rank）
+    shared_min_rank, shared_max_rank = _render_shared_rank_selection()
+    st.markdown("---")
+
     mode_paste, mode_url, mode_upload, mode_rank, mode_manual = st.tabs([
         "文本",
         "链接",
@@ -714,8 +736,6 @@ with tab_extract:
     ])
 
     with mode_paste:
-        current_rank, target_rank = _render_rank_inputs("2_1")
-
         pasted_text = st.text_area(
             "粘贴文章文本",
             height=100,
@@ -731,8 +751,8 @@ with tab_extract:
                        on_click=lambda: st.session_state.update({"paste_key_2_1": ""}))
 
         if btn_paste:
-            if target_rank < current_rank:
-                st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
+            if shared_max_rank < shared_min_rank:
+                st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
             elif len(pasted_text) > constants.MAX_PASTE_TEXT_LENGTH:
                 st.error(f"❌ 文本过长（最大约 {constants.MAX_PASTE_TEXT_LENGTH // 1000}K 字符），请缩短后重试。")
             else:
@@ -741,7 +761,7 @@ with tab_extract:
                     raw_text = pasted_text
 
                     status.write("🧠 正在进行 NLP 词形还原与分级...")
-                    if _analyze_and_set_words(raw_text, current_rank, target_rank):
+                    if _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
                         st.session_state['process_time'] = time.time() - start_time
                         run_gc()
                         status.update(label="✅ 分析完成", state="complete", expanded=False)
@@ -749,8 +769,6 @@ with tab_extract:
                         status.update(label="⚠️ 内容为空或太短", state="error")
 
     with mode_url:
-        current_rank_url, target_rank_url = _render_rank_inputs("2_2")
-
         input_url = st.text_input(
             "🔗 输入文章 URL（自动抓取）",
             placeholder="https://www.economist.com/...",
@@ -765,8 +783,8 @@ with tab_extract:
                        on_click=lambda: st.session_state.update({"url_input_key_2_2": ""}))
 
         if btn_url:
-            if target_rank_url < current_rank_url:
-                st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
+            if shared_max_rank < shared_min_rank:
+                st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
             elif not input_url.strip():
                 st.warning("⚠️ 请输入有效链接。")
             elif len(input_url) > constants.MAX_URL_LENGTH:
@@ -786,7 +804,7 @@ with tab_extract:
                         if raw_text.startswith("Error:"):
                             st.error(f"❌ {raw_text}")
                             status.update(label="❌ 抓取失败", state="error", expanded=False)
-                        elif _analyze_and_set_words(raw_text, current_rank_url, target_rank_url):
+                        elif _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
                             st.session_state['process_time'] = time.time() - start_time
                             run_gc()
                             status.update(label="✅ 生成完成", state="complete", expanded=False)
@@ -794,8 +812,6 @@ with tab_extract:
                             status.update(label="⚠️ 抓取内容为空或过短", state="error")
 
     with mode_upload:
-        current_rank_upload, target_rank_upload = _render_rank_inputs("2_3")
-
         uploaded_file = st.file_uploader(
             "上传文件（TXT/PDF/DOCX/EPUB/CSV/Excel/DB）",
             type=['txt', 'pdf', 'docx', 'epub', 'csv', 'xlsx', 'xls', 'db', 'sqlite'],
@@ -806,15 +822,15 @@ with tab_extract:
             uploaded_file = None
 
         if st.button("📁 从文件生成重点词", type="primary", key="btn_mode_2_3"):
-            if target_rank_upload < current_rank_upload:
-                st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
+            if shared_max_rank < shared_min_rank:
+                st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
             elif uploaded_file is None:
                 st.warning("⚠️ 请先上传文件。")
             else:
                 with st.status("📄 正在解析文件并提取重点词...", expanded=True) as status:
                     start_time = time.time()
                     raw_text = extract_text_from_file(uploaded_file)
-                    if _analyze_and_set_words(raw_text, current_rank_upload, target_rank_upload):
+                    if _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
                         st.session_state['process_time'] = time.time() - start_time
                         run_gc()
                         status.update(label="✅ 生成完成", state="complete", expanded=False)
@@ -878,11 +894,12 @@ with tab_extract:
                     st.warning("⚠️ 内容为空。")
 
     with mode_rank:
+        st.caption("使用上方「词汇量 rank 选择」的区间；顺序生成从区间起点起取，随机抽取在区间内随机取。")
         gen_type = st.radio("生成模式", ["🔢 顺序生成", "🔀 随机抽取"], horizontal=True)
 
         if "顺序生成" in gen_type:
             col_a, col_b = st.columns(2)
-            start_rank = col_a.number_input("起始排名", 1, 20000, 8000, step=100)
+            start_rank = col_a.number_input("起始排名", 1, 20000, shared_min_rank, step=100, key="rank_start_2_4")
             count = col_b.number_input("数量", 10, 5000, 10, step=10)
 
             if st.button("🚀 生成列表"):
@@ -900,17 +917,12 @@ with tab_extract:
                                 None
                             )
         else:
-            col_min, col_max, col_cnt = st.columns([1, 1, 1])
-            min_rank = col_min.number_input("最小排名", 1, 20000, 12000, step=100)
-            max_rank = col_max.number_input("最大排名", 1, 25000, 15000, step=100)
-            random_count = col_cnt.number_input("抽取数量", 10, 5000, 10, step=10)
-
-            if max_rank < min_rank:
-                st.warning("⚠️ 最大排名必须大于等于最小排名")
+            random_count = st.number_input("抽取数量", 10, 5000, 10, step=10, key="rank_random_count_2_4")
+            st.caption(f"当前区间：{shared_min_rank} – {shared_max_rank}（在上方修改）")
 
             if st.button("🎲 随机抽取"):
-                if max_rank < min_rank:
-                    st.error("❌ 最大排名必须大于等于最小排名，请修正后重试。")
+                if shared_max_rank < shared_min_rank:
+                    st.error("❌ 最大排名必须大于等于最小排名，请在上方修正后重试。")
                 else:
                     with st.spinner("正在抽取..."):
                         if FULL_DF is not None:
@@ -919,7 +931,7 @@ with tab_extract:
                             if rank_col is None or word_col is None:
                                 st.error("❌ 词库CSV格式异常：缺少 rank 或 word 列")
                             else:
-                                pool = FULL_DF[(FULL_DF[rank_col] >= min_rank) & (FULL_DF[rank_col] <= max_rank)]
+                                pool = FULL_DF[(FULL_DF[rank_col] >= shared_min_rank) & (FULL_DF[rank_col] <= shared_max_rank)]
                                 if len(pool) < random_count:
                                     st.warning(f"⚠️ 该范围只有 {len(pool)} 个单词，已全部选中")
                                 sample = pool.sample(n=min(random_count, len(pool)))

@@ -40,6 +40,9 @@ DEFAULT_SESSION_STATE = {
     'quick_lookup_is_loading': False,
     'quick_lookup_block_until': 0.0,
     'quick_lookup_cache_keys': [],
+    'extract_rank_preset': '中级 (6001–10000)',
+    'extract_min_rank': 6001,
+    'extract_max_rank': 10000,
 }
 
 # ---- Rate limiting (generous – designed to stop bots, not humans) ----
@@ -65,6 +68,15 @@ MAX_URL_LENGTH = 2048
 
 # PDF: limit pages to keep extraction fast (text analysis has no character limit)
 PDF_MAX_PAGES = 50              # only extract first N pages from PDF
+
+# 词汇量区间预设（筛选单词通用，词表模式不适用）
+RANK_PRESETS = [
+    ("初学者", 1, 3000),
+    ("初级", 3001, 6000),
+    ("中级", 6001, 10000),
+    ("高级", 10001, 15000),
+    ("专业", 15001, 21000),
+]
 
 VOICE_MAP = {
     "👩 美音女声 (Jenny)": "en-US-JennyNeural",
