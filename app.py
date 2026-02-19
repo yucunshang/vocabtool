@@ -28,7 +28,7 @@ from rate_limiter import (
     check_batch_limit, check_lookup_limit, check_url_limit,
     record_batch, record_lookup, record_url,
 )
-from state import export_session_json, import_session_json, set_generated_words_state
+from state import set_generated_words_state
 from ui_styles import APP_STYLES_HTML
 from utils import get_beijing_time_str, render_copy_button, render_prompt_copy_button, run_gc
 from vocab import analyze_logic
@@ -862,32 +862,6 @@ with st.expander("使用指南 & 支持格式", expanded=False):
     **支持的文件格式**
     TXT · PDF · DOCX · EPUB · CSV · XLSX · XLS · DB · SQLite · Anki 导出 (.txt)
     """)
-
-# Fix 9: Session save/restore
-with st.expander("💾 存档 / 📂 读取进度", expanded=False):
-    col_save, col_load = st.columns(2)
-    with col_save:
-        st.caption("导出当前单词列表和卡片缓存。")
-        json_blob = export_session_json()
-        st.download_button(
-            "💾 导出当前进度",
-            data=json_blob,
-            file_name=f"vocabflow_{get_beijing_time_str()}.json",
-            mime="application/json",
-            key="btn_export_session",
-        )
-    with col_load:
-        st.caption("导入之前导出的 .json 存档文件。")
-        uploaded_session = st.file_uploader(
-            "📂 导入存档文件", type=["json"], key="session_import"
-        )
-        if uploaded_session is not None:
-            try:
-                import_session_json(uploaded_session.read().decode())
-                st.success("✅ 已恢复进度")
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ 存档文件格式错误：{e}")
 
 tab_lookup, tab_extract, tab_anki = st.tabs([
     "AI查词",
