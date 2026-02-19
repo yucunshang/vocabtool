@@ -19,6 +19,9 @@ Provide the SINGLE most common meaning of a word in a strict 5-line format with 
     - **Line 1**: `[word] ([pos] [CN pos])` (No dots, no commas).
     - **No Markdown**: Pure text only.
     - **Compactness**: Example and Translation must be on the SAME line.
+5.  **Spell Correction**: If the input is a misspelled English word, silently correct it and output the definition for the correct spelling. Prepend ONE correction notice line BEFORE Line 1:
+    `✏️ 拼写纠正: [misspelled] → [correct]`
+    If the input is already correct, omit this line entirely.
 
 # Output Format
 [word] ([pos] [CN pos])
