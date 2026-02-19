@@ -364,7 +364,7 @@ def _render_builtin_ai_section(
                 if parsed_data:
                     card_bar.progress(1.0)
                     card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
-                    audio_text.markdown("**音频进度**：请在下方确认卡片后开始。")
+                    audio_text.markdown("**音频进度**：请点击「生成 .apkg」开始。")
 
                     # Fix 4: Checkpoint — save raw AI text in case packaging fails
                     st.session_state["_builtin_ai_partial_result"] = ai_result
@@ -377,10 +377,7 @@ def _render_builtin_ai_section(
                     else:
                         st.session_state["_builtin_parsed_cards"] = parsed_data
 
-                    st.info(
-                        f"✅ 解析完成，共 {len(st.session_state['_builtin_parsed_cards'])} 张卡片。"
-                        " 请在下方确认并编辑后生成 .apkg。"
-                    )
+                    st.info(f"✅ 解析完成，共 {len(st.session_state['_builtin_parsed_cards'])} 张卡片。")
                 else:
                     card_text.markdown("**制卡进度**：❌ 解析失败")
                     audio_text.markdown("**音频进度**：未开始")
@@ -390,39 +387,19 @@ def _render_builtin_ai_section(
                 audio_text.markdown("**音频进度**：未开始")
                 st.error("AI 生成失败，请检查 API Key 或网络连接。")
 
-        # Fix 5: Card editor — shown whenever cards are in session state
+        # Fix 5: Generate apkg — shown whenever cards are in session state
         if st.session_state.get("_builtin_parsed_cards"):
             cards = st.session_state["_builtin_parsed_cards"]
 
-            st.markdown("#### ✏️ 确认并编辑卡片")
-            st.caption(f"共 {len(cards)} 张卡片，可直接在下方编辑后点击「确认并生成」。")
-
-            cards_df = pd.DataFrame(cards)
-            col_config = {
-                "w": st.column_config.TextColumn("单词/短语"),
-                "m": st.column_config.TextColumn("释义"),
-                "e": st.column_config.TextColumn("例句"),
-            }
-            if "r" in cards_df.columns:
-                col_config["r"] = st.column_config.TextColumn("词源")
-
-            edited_df = st.data_editor(
-                cards_df,
-                column_config=col_config,
-                use_container_width=True,
-                num_rows="dynamic",
-                key="card_editor",
-            )
-
-            # Confirm button + next-batch button
+            # Generate button + next-batch button
             col_confirm, col_continue = st.columns([2, 1])
             with col_confirm:
                 if st.button(
-                    "✅ 确认并生成 .apkg", key="btn_confirm_gen",
+                    "✅ 生成 .apkg", key="btn_confirm_gen",
                     type="primary", use_container_width=True
                 ):
                     try:
-                        edited_data = edited_df.to_dict("records")
+                        edited_data = cards
                         st.session_state["_builtin_parsed_cards"] = edited_data
                         st.session_state["anki_cards_cache"] = edited_data  # Fix 10: for mark-as-studied
 
