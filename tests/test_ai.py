@@ -26,9 +26,9 @@ def test_build_card_prompt_fixed_template_has_field_constraints():
 
 
 def test_build_card_prompt_batch_limit_constraint():
-    """Fixed template enforces 10-word batch limit."""
+    """Fixed template enforces batch limit (30 words)."""
     out = build_card_prompt("word1", None)
-    assert "10 words" in out or "10-word" in out
+    assert "30 words" in out or "30-word" in out
 
 
 def test_build_card_prompt_no_etymology():

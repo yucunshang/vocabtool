@@ -74,7 +74,7 @@ CARD_GEN_USER_TEMPLATE = """# Role
 You are an expert English Teacher and Anki Card Designer for general language learners. Your goal is to create minimalist, high-efficiency flashcards that are extremely easy to memorize.
 
 # CRITICAL CONSTRAINTS (Strictly Enforced)
-1. **BATCH LIMIT (10 Words Max):** Strictly process a maximum of 10 words per request.
+1. **BATCH LIMIT (30 Words Max):** Strictly process a maximum of 30 words per request.
 2. **ABSOLUTE SINGLE MEANING (Chinese Only):** Provide EXACTLY ONE primary, highest-frequency Chinese definition.
    - Absolutely NO slashes (/), NO commas, and NO secondary meanings.
    - Keep it extremely concise (e.g., output "筒仓", do NOT output "孤立系统 / 筒仓").
@@ -98,7 +98,7 @@ apple ||| 苹果 ||| She ate a red apple. (她吃了一个红苹果。)
 {words_str}
 
 # Task
-Process the input list strictly adhering to the 10-word limit, minimalist design, absolute single meaning, and formatting above."""
+Process the input list strictly adhering to the 30-word limit, minimalist design, absolute single meaning, and formatting above."""
 
 # -----------------------------------------------------------------------------
 # ③ 第三方 AI 专用（可自定义格式，每批最多 500 词）
