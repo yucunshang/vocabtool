@@ -586,7 +586,7 @@ def render_quick_lookup() -> None:
 
     with st.form("quick_lookup_form", clear_on_submit=False, border=False):
         if _has_content:
-            col_word, col_btn, col_clear = st.columns([4, 2, 1.2])
+            col_word, col_btn, col_clear, _ = st.columns([2, 0.8, 0.15, 1])
         else:
             col_word, col_btn = st.columns([5, 2])
         with col_word:
@@ -754,7 +754,7 @@ with tab_extract:
             placeholder="支持直接粘贴文章内容..."
         )
 
-        col_gen_p, col_clr_p = st.columns([4, 1])
+        col_gen_p, col_clr_p, _ = st.columns([1, 0.12, 2])
         with col_gen_p:
             btn_paste = st.button("🚀 从文本生成重点词", type="primary", key="btn_mode_2_1", use_container_width=True)
         with col_clr_p:
@@ -786,7 +786,7 @@ with tab_extract:
             key="url_input_key_2_2"
         )
 
-        col_gen_u, col_clr_u = st.columns([4, 1])
+        col_gen_u, col_clr_u, _ = st.columns([1, 0.12, 2])
         with col_gen_u:
             btn_url = st.button("🌐 从链接生成重点词", type="primary", key="btn_mode_2_2", use_container_width=True)
         with col_clr_u:
@@ -858,7 +858,7 @@ with tab_extract:
             placeholder="如：1. altruism 2. hectic  或 直接粘贴整段英文…",
         )
 
-        col_gen_m, col_clr_m = st.columns([4, 1])
+        col_gen_m, col_clr_m, _ = st.columns([1, 0.12, 2])
         with col_gen_m:
             btn_gen_manual = st.button("🧾 生成词表（不筛 rank）", key="btn_mode_2_5", type="primary", use_container_width=True)
         with col_clr_m:
@@ -995,7 +995,7 @@ with tab_anki:
 
     enable_audio = st.checkbox("启用语音", value=True, key="chk_audio_manual")
 
-    col_btn1, col_btn2 = st.columns([1, 4])
+    col_btn1, col_btn2, _ = st.columns([1, 0.2, 2])
     with col_btn1:
         start_gen = st.button("🚀 生成卡片", type="primary", use_container_width=True)
     with col_btn2:
