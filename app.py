@@ -706,10 +706,9 @@ with st.expander("使用指南 & 支持格式", expanded=False):
     TXT · PDF · DOCX · EPUB · CSV · XLSX · XLS · DB · SQLite · Anki 导出 (.txt)
     """)
 
-tab_lookup, tab_extract, tab_anki = st.tabs([
+tab_lookup, tab_extract_anki = st.tabs([
     "AI查词",
-    "筛选单词",
-    "anki制卡",
+    "筛选单词&制卡",
 ])
 
 with tab_lookup:
@@ -755,7 +754,7 @@ def _render_shared_rank_selection() -> tuple[int, int]:
     return min_rank, max_rank
 
 
-with tab_extract:
+with tab_extract_anki:
     # 通用 rank 区间（文本/链接/文件/词库共用；词表不筛 rank）
     shared_min_rank, shared_max_rank = _render_shared_rank_selection()
     st.markdown("---")
@@ -975,10 +974,7 @@ with tab_extract:
     # Display results (shared across all modes)
     _render_extract_results()
 
-# ==========================================
-# Tab 2: Manual Anki Card Creation
-# ==========================================
-with tab_anki:
+    st.markdown("---")
     st.markdown("### 📦 手动制作 Anki 牌组")
 
     if 'anki_cards_cache' not in st.session_state:
