@@ -585,10 +585,11 @@ def render_quick_lookup() -> None:
     _has_content = bool(st.session_state.get("quick_lookup_word") or st.session_state.get("quick_lookup_last_result"))
 
     with st.form("quick_lookup_form", clear_on_submit=False, border=False):
-        if _has_content:
-            col_word, col_btn, col_clear = st.columns([4, 2, 1.2])
-        else:
-            col_word, col_btn = st.columns([5, 2])
+        # Always render 3 columns so the form structure stays constant across
+        # reruns.  A changing column count (2 vs 3) shifts the submit button's
+        # element ID, causing Streamlit to lose the "clicked" signal and making
+        # the lookup button silently do nothing on the first submission.
+        col_word, col_btn, col_clear = st.columns([4, 2, 1.2])
         with col_word:
             lookup_word = st.text_input(
                 "输入单词或短语",
@@ -604,11 +605,8 @@ def render_quick_lookup() -> None:
                 use_container_width=True,
                 disabled=lookup_disabled
             )
-        if _has_content:
-            with col_clear:
-                clear_submit = st.form_submit_button("清空", use_container_width=True)
-        else:
-            clear_submit = False
+        with col_clear:
+            clear_submit = st.form_submit_button("清空", use_container_width=True, disabled=not _has_content)
         if clear_submit:
             st.session_state["_quick_lookup_pending_clear"] = True
             st.rerun()
