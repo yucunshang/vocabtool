@@ -755,121 +755,113 @@ def _render_shared_rank_selection() -> tuple[int, int]:
 
 
 with tab_extract_anki:
-    # 通用 rank 区间（文本/链接/文件/词库共用；词表不筛 rank）
+    # 通用 rank 区间（文本/链接/文件/词库共用；词库直接制卡不筛 rank）
     shared_min_rank, shared_max_rank = _render_shared_rank_selection()
     st.markdown("---")
 
-    mode_paste, mode_url, mode_upload, mode_rank, mode_manual = st.tabs([
-        "文本",
-        "链接",
-        "文件",
+    mode_input_text, mode_rank, mode_direct = st.tabs([
+        "输入文本",
         "词库",
-        "词表",
+        "直接制卡",
     ])
 
-    with mode_paste:
-        pasted_text = st.text_area(
-            "粘贴文章文本",
-            height=100,
-            key="paste_key_2_1",
-            placeholder="支持直接粘贴文章内容..."
-        )
-
-        col_gen_p, col_clr_p = st.columns([4, 1])
-        with col_gen_p:
-            btn_paste = st.button("🚀 从文本生成重点词", type="primary", key="btn_mode_2_1", use_container_width=True)
-        with col_clr_p:
-            st.button("清空", key="clr_paste", use_container_width=True,
-                       on_click=lambda: st.session_state.update({"paste_key_2_1": ""}))
-
-        if btn_paste:
-            if shared_max_rank < shared_min_rank:
-                st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
-            elif len(pasted_text) > constants.MAX_PASTE_TEXT_LENGTH:
-                st.error(f"❌ 文本过长（最大约 {constants.MAX_PASTE_TEXT_LENGTH // 1000}K 字符），请缩短后重试。")
-            else:
-                with st.status("🔍 正在加载资源并分析文本...", expanded=True) as status:
-                    start_time = time.time()
-                    raw_text = pasted_text
-
-                    status.write("🧠 正在进行 NLP 词形还原与分级...")
-                    if _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
-                        st.session_state['process_time'] = time.time() - start_time
-                        run_gc()
-                        status.update(label="✅ 分析完成", state="complete", expanded=False)
-                    else:
-                        status.update(label="⚠️ 内容为空或太短", state="error")
-
-    with mode_url:
-        input_url = st.text_input(
-            "🔗 输入文章 URL（自动抓取）",
-            placeholder="https://www.economist.com/...",
-            key="url_input_key_2_2"
-        )
-
-        col_gen_u, col_clr_u = st.columns([4, 1])
-        with col_gen_u:
-            btn_url = st.button("🌐 从链接生成重点词", type="primary", key="btn_mode_2_2", use_container_width=True)
-        with col_clr_u:
-            st.button("清空", key="clr_url", use_container_width=True,
-                       on_click=lambda: st.session_state.update({"url_input_key_2_2": ""}))
-
-        if btn_url:
-            if shared_max_rank < shared_min_rank:
-                st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
-            elif not input_url.strip():
-                st.warning("⚠️ 请输入有效链接。")
-            elif len(input_url) > constants.MAX_URL_LENGTH:
-                st.error(f"❌ URL 过长（最大 {constants.MAX_URL_LENGTH} 字符）。")
-            elif not re.match(r'^https?://', input_url.strip()):
-                st.error("❌ 请输入以 http:// 或 https:// 开头的有效链接。")
-            else:
-                url_allowed, url_msg = check_url_limit()
-                if not url_allowed:
-                    st.warning(url_msg)
+    with mode_input_text:
+        sub_paste, sub_upload, sub_url = st.tabs(["粘贴文本", "上传文件", "链接"])
+        with sub_paste:
+            pasted_text = st.text_area(
+                "粘贴文章文本",
+                height=100,
+                key="paste_key_2_1",
+                placeholder="支持直接粘贴文章内容..."
+            )
+            col_gen_p, col_clr_p = st.columns([4, 1])
+            with col_gen_p:
+                btn_paste = st.button("🚀 从文本生成重点词", type="primary", key="btn_mode_2_1", use_container_width=True)
+            with col_clr_p:
+                st.button("清空", key="clr_paste", use_container_width=True,
+                          on_click=lambda: st.session_state.update({"paste_key_2_1": ""}))
+            if btn_paste:
+                if shared_max_rank < shared_min_rank:
+                    st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
+                elif len(pasted_text) > constants.MAX_PASTE_TEXT_LENGTH:
+                    st.error(f"❌ 文本过长（最大约 {constants.MAX_PASTE_TEXT_LENGTH // 1000}K 字符），请缩短后重试。")
                 else:
-                    record_url()
-                    with st.status("🌐 正在抓取并分析网页文本...", expanded=True) as status:
+                    with st.status("🔍 正在加载资源并分析文本...", expanded=True) as status:
                         start_time = time.time()
-                        status.write(f"正在抓取：{input_url}")
-                        raw_text = _cached_extract_url(input_url)
-                        if raw_text.startswith("Error:"):
-                            st.error(f"❌ {raw_text}")
-                            status.update(label="❌ 抓取失败", state="error", expanded=False)
-                        elif _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
+                        raw_text = pasted_text
+                        status.write("🧠 正在进行 NLP 词形还原与分级...")
+                        if _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
+                            st.session_state['process_time'] = time.time() - start_time
+                            run_gc()
+                            status.update(label="✅ 分析完成", state="complete", expanded=False)
+                        else:
+                            status.update(label="⚠️ 内容为空或太短", state="error")
+        with sub_upload:
+            uploaded_file = st.file_uploader(
+                "上传文件（TXT/PDF/DOCX/EPUB/CSV/Excel/DB）",
+                type=['txt', 'pdf', 'docx', 'epub', 'csv', 'xlsx', 'xls', 'db', 'sqlite'],
+                key="upload_2_3",
+            )
+            if uploaded_file and is_upload_too_large(uploaded_file):
+                st.error(f"❌ 文件过大，已限制为 {constants.MAX_UPLOAD_MB}MB。请缩小文件后重试。")
+                uploaded_file = None
+            if st.button("📁 从文件生成重点词", type="primary", key="btn_mode_2_3"):
+                if shared_max_rank < shared_min_rank:
+                    st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
+                elif uploaded_file is None:
+                    st.warning("⚠️ 请先上传文件。")
+                else:
+                    with st.status("📄 正在解析文件并提取重点词...", expanded=True) as status:
+                        start_time = time.time()
+                        raw_text = extract_text_from_file(uploaded_file)
+                        if _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
                             st.session_state['process_time'] = time.time() - start_time
                             run_gc()
                             status.update(label="✅ 生成完成", state="complete", expanded=False)
                         else:
-                            status.update(label="⚠️ 抓取内容为空或过短", state="error")
-
-    with mode_upload:
-        uploaded_file = st.file_uploader(
-            "上传文件（TXT/PDF/DOCX/EPUB/CSV/Excel/DB）",
-            type=['txt', 'pdf', 'docx', 'epub', 'csv', 'xlsx', 'xls', 'db', 'sqlite'],
-            key="upload_2_3",
-        )
-        if uploaded_file and is_upload_too_large(uploaded_file):
-            st.error(f"❌ 文件过大，已限制为 {constants.MAX_UPLOAD_MB}MB。请缩小文件后重试。")
-            uploaded_file = None
-
-        if st.button("📁 从文件生成重点词", type="primary", key="btn_mode_2_3"):
-            if shared_max_rank < shared_min_rank:
-                st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
-            elif uploaded_file is None:
-                st.warning("⚠️ 请先上传文件。")
-            else:
-                with st.status("📄 正在解析文件并提取重点词...", expanded=True) as status:
-                    start_time = time.time()
-                    raw_text = extract_text_from_file(uploaded_file)
-                    if _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
-                        st.session_state['process_time'] = time.time() - start_time
-                        run_gc()
-                        status.update(label="✅ 生成完成", state="complete", expanded=False)
+                            status.update(label="⚠️ 文件内容为空或过短", state="error")
+        with sub_url:
+            input_url = st.text_input(
+                "🔗 输入文章 URL（自动抓取）",
+                placeholder="https://www.economist.com/...",
+                key="url_input_key_2_2"
+            )
+            col_gen_u, col_clr_u = st.columns([4, 1])
+            with col_gen_u:
+                btn_url = st.button("🌐 从链接生成重点词", type="primary", key="btn_mode_2_2", use_container_width=True)
+            with col_clr_u:
+                st.button("清空", key="clr_url", use_container_width=True,
+                          on_click=lambda: st.session_state.update({"url_input_key_2_2": ""}))
+            if btn_url:
+                if shared_max_rank < shared_min_rank:
+                    st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
+                elif not input_url.strip():
+                    st.warning("⚠️ 请输入有效链接。")
+                elif len(input_url) > constants.MAX_URL_LENGTH:
+                    st.error(f"❌ URL 过长（最大 {constants.MAX_URL_LENGTH} 字符）。")
+                elif not re.match(r'^https?://', input_url.strip()):
+                    st.error("❌ 请输入以 http:// 或 https:// 开头的有效链接。")
+                else:
+                    url_allowed, url_msg = check_url_limit()
+                    if not url_allowed:
+                        st.warning(url_msg)
                     else:
-                        status.update(label="⚠️ 文件内容为空或过短", state="error")
+                        record_url()
+                        with st.status("🌐 正在抓取并分析网页文本...", expanded=True) as status:
+                            start_time = time.time()
+                            status.write(f"正在抓取：{input_url}")
+                            raw_text = _cached_extract_url(input_url)
+                            if raw_text.startswith("Error:"):
+                                st.error(f"❌ {raw_text}")
+                                status.update(label="❌ 抓取失败", state="error", expanded=False)
+                            elif _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
+                                st.session_state['process_time'] = time.time() - start_time
+                                run_gc()
+                                status.update(label="✅ 生成完成", state="complete", expanded=False)
+                            else:
+                                status.update(label="⚠️ 抓取内容为空或过短", state="error")
 
-    with mode_manual:
+    with mode_direct:
         st.markdown("#### 直接粘贴词表（不做 rank 筛选）")
         st.caption("💡 词表模式：无需筛选，直接生成。")
         st.caption("支持任意格式：可直接粘贴文章、列表、带序号或符号的文本，将自动提取其中所有英文单词。")
