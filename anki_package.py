@@ -87,12 +87,13 @@ def generate_anki_package(
     tts_voice: str = "en-US-JennyNeural",
     enable_example_tts: bool = True,
     progress_callback: Optional[ProgressCallback] = None
-) -> Tuple[str, int]:
+) -> Tuple[str, int, List[str]]:
     """Generate Anki package (.apkg) file with optional TTS audio.
 
     Returns:
-        (apkg_path, failed_audio_count): path to the generated file and the
-        number of audio clips that could not be produced.  On retry the
+        (apkg_path, failed_audio_count, failed_phrases): path to the generated file,
+        the number of audio clips that could not be produced, and the list of
+        phrase strings (words) for cards that had at least one audio failure.  On retry the
         persistent audio cache (AUDIO_CACHE_DIR) means only genuinely missing
         clips are re-requested from the TTS service.
 
@@ -258,12 +259,14 @@ def generate_anki_package(
         )
 
     # Pass 2: build notes; include [sound:] tags only for files that exist.
-    # Count failures so the caller can surface a retry prompt.
+    # Count failures and collect failed phrase strings for retry UI.
     failed_audio_count = 0
+    failed_phrases: List[str] = []
     for plan in card_plans:
         audio_phrase_field = ""
         audio_example_field = ""
 
+        plan_has_failure = False
         if plan['phrase_plan']:
             phrase_path, phrase_filename = plan['phrase_plan']
             if os.path.exists(phrase_path):
@@ -271,6 +274,7 @@ def generate_anki_package(
                 media_files.append(phrase_path)
             else:
                 failed_audio_count += 1
+                plan_has_failure = True
 
         audio_example_parts = []
         for ex_path, ex_filename in plan['example_plans']:
@@ -279,6 +283,9 @@ def generate_anki_package(
                 media_files.append(ex_path)
             else:
                 failed_audio_count += 1
+                plan_has_failure = True
+        if plan_has_failure and plan['phrase']:
+            failed_phrases.append(plan['phrase'])
         audio_example_field = "".join(audio_example_parts)
 
         fields = [
@@ -305,4 +312,4 @@ def generate_anki_package(
     )
     output_file.close()
     package.write_to_file(output_file.name)
-    return output_file.name, failed_audio_count
+    return output_file.name, failed_audio_count, failed_phrases

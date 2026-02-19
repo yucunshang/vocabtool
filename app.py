@@ -470,7 +470,7 @@ def _render_builtin_ai_section(
                             audio_text2.markdown(f"**音频进度**：{text}")
 
                         current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
-                        file_path, audio_failed = generate_anki_package(
+                        file_path, audio_failed, failed_phrases = generate_anki_package(
                             edited_data,
                             current_deck_name,
                             enable_tts=enable_audio,
@@ -480,6 +480,7 @@ def _render_builtin_ai_section(
                         )
                         set_anki_pkg(file_path, current_deck_name)
                         st.session_state["_builtin_audio_failed_count"] = audio_failed
+                        st.session_state["_builtin_audio_failed_phrases"] = failed_phrases or []
                         audio_bar2.progress(1.0)
                         suffix = f"（{audio_failed} 条失败，可点击下方重试）" if audio_failed else ""
                         audio_text2.markdown(f"**音频进度**：✅ 完成{suffix}")
@@ -520,24 +521,36 @@ def _render_builtin_ai_section(
 
     # Audio retry: only re-run TTS for files still missing (cache skips successful ones)
     audio_failed = st.session_state.get("_builtin_audio_failed_count", 0)
+    failed_phrases = st.session_state.get("_builtin_audio_failed_phrases", [])
     if audio_failed > 0 and st.session_state.get("_builtin_parsed_cards") and st.session_state.get("anki_pkg_path"):
         st.warning(
-            f"⚠️ {audio_failed} 条音频生成失败。"
-            " 可能原因：网络超时、例句过短（≤3字符）或含非ASCII括号导致TTS收到中文文本。"
+            f"⚠️ {audio_failed} 条音频生成失败，涉及 {len(failed_phrases)} 个词。"
             " 点击重试，已成功的音频会直接复用，只补全缺失部分。"
         )
+        with st.expander("❓ 音频失败可能原因", expanded=False):
+            st.markdown("""
+- **网络超时**：edge-tts 需联网，网络不稳或超时会导致失败
+- **文本过短**：例句 ≤3 字符可能被 TTS 忽略或生成失败
+- **非 ASCII 括号**：例句含中文括号 `（）` 等，TTS 可能收到错误文本
+- **速率限制**：大批量时服务端可能限流
+- **临时目录**：权限或磁盘空间不足导致写入失败
+- **语音不支持**：极少数字符或语言组合不被所选语音支持
+""")
+        if failed_phrases:
+            st.caption("失败词汇：" + "、".join(failed_phrases[:20]) + (" …" if len(failed_phrases) > 20 else ""))
         if st.button("🔄 重试失败音频", key="btn_retry_audio_builtin"):
             cards = st.session_state["_builtin_parsed_cards"]
             with st.spinner(f"⏳ 重试 {audio_failed} 条音频..."):
                 try:
                     current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
-                    new_file, new_failed = generate_anki_package(
+                    new_file, new_failed, new_phrases = generate_anki_package(
                         cards, current_deck_name,
                         enable_tts=enable_audio, tts_voice=voice_code,
                         enable_example_tts=enable_example_audio,
                     )
                     set_anki_pkg(new_file, current_deck_name)
                     st.session_state["_builtin_audio_failed_count"] = new_failed
+                    st.session_state["_builtin_audio_failed_phrases"] = new_phrases or []
                     run_gc()
                     st.rerun()
                 except Exception as e:
@@ -643,49 +656,7 @@ def _render_thirdparty_prompt_section(
         render_prompt_copy_button(strict_prompt_template, key="copy_tp_prompt")
         st.code(strict_prompt_template, language="text")
 
-    # Fix 8: Inline paste area — users can paste the AI response without switching tabs
-    st.markdown("---")
-    st.markdown("#### ② 粘贴 AI 返回结果（可选，无需切换到「anki制卡」页）")
-    st.info("💡 将第三方 AI 的返回结果粘贴到下方，直接生成 .apkg，无需切换标签页。")
-    tp_deck_name = st.text_input(
-        "牌组名称",
-        value=f"Vocab_{get_beijing_time_str()}",
-        key="tp_inline_deck_name",
-    )
-    inline_ai_response = st.text_area(
-        "粘贴第三方 AI 返回内容",
-        height=200,
-        key="inline_thirdparty_response",
-        placeholder="hectic ||| 忙乱的 ||| She has a hectic schedule today. |||…",
-    )
-    if st.button("📦 解析并生成 .apkg", key="btn_inline_thirdparty_gen"):
-        if inline_ai_response.strip():
-            with st.spinner("⏳ 正在解析并生成..."):
-                parsed = parse_anki_data(inline_ai_response)
-                if parsed:
-                    try:
-                        _tp_voice = voice_code if voice_code else list(constants.VOICE_MAP.values())[0]
-                        file_path, tp_audio_failed = generate_anki_package(
-                            parsed,
-                            tp_deck_name,
-                            enable_tts=enable_audio,
-                            tts_voice=_tp_voice,
-                            enable_example_tts=enable_example_audio,
-                        )
-                        set_anki_pkg(file_path, tp_deck_name)
-                        st.session_state["anki_cards_cache"] = parsed
-                        msg = f"✅ 已生成 {len(parsed)} 张卡片"
-                        if tp_audio_failed:
-                            msg += f"（{tp_audio_failed} 条音频失败，请在「anki制卡」页重新生成）"
-                        st.success(msg)
-                        st.balloons()
-                        run_gc()
-                    except Exception as e:
-                        ErrorHandler.handle(e, "生成文件出错")
-                else:
-                    st.error("❌ 解析失败，请检查输入格式。")
-        else:
-            st.warning("⚠️ 请先粘贴 AI 返回内容。")
+    st.caption("💡 复制 Prompt 到第三方 AI 后，请到「anki制卡」页粘贴结果并生成 .apkg。")
 
     render_anki_download_button(
         f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
@@ -1331,7 +1302,7 @@ with tab_anki:
                 if parsed_data:
                     st.session_state['anki_cards_cache'] = parsed_data
                     try:
-                        file_path, manual_audio_failed = generate_anki_package(
+                        file_path, manual_audio_failed, manual_failed_phrases = generate_anki_package(
                             parsed_data,
                             deck_name,
                             enable_tts=enable_audio,
@@ -1342,6 +1313,7 @@ with tab_anki:
 
                         set_anki_pkg(file_path, deck_name)
                         st.session_state["_manual_audio_failed_count"] = manual_audio_failed
+                        st.session_state["_manual_audio_failed_phrases"] = manual_failed_phrases or []
 
                         done_msg = f"✅ **生成完毕！共制作 {len(parsed_data)} 张卡片**"
                         if manual_audio_failed:
@@ -1383,8 +1355,20 @@ with tab_anki:
 
         # Audio retry for manual tab
         manual_audio_failed = st.session_state.get("_manual_audio_failed_count", 0)
+        manual_failed_phrases = st.session_state.get("_manual_audio_failed_phrases", [])
         if manual_audio_failed > 0 and st.session_state.get("anki_cards_cache") and st.session_state.get("anki_pkg_path"):
-            st.warning(f"⚠️ {manual_audio_failed} 条音频生成失败，点击重试（已成功的音频将直接复用）。")
+            st.warning(f"⚠️ {manual_audio_failed} 条音频生成失败，涉及 {len(manual_failed_phrases)} 个词。点击重试（已成功的音频将直接复用）。")
+            with st.expander("❓ 音频失败可能原因", expanded=False):
+                st.markdown("""
+- **网络超时**：edge-tts 需联网，网络不稳或超时会导致失败
+- **文本过短**：例句 ≤3 字符可能被 TTS 忽略或生成失败
+- **非 ASCII 括号**：例句含中文括号 `（）` 等，TTS 可能收到错误文本
+- **速率限制**：大批量时服务端可能限流
+- **临时目录**：权限或磁盘空间不足导致写入失败
+- **语音不支持**：极少数字符或语言组合不被所选语音支持
+""")
+            if manual_failed_phrases:
+                st.caption("失败词汇：" + "、".join(manual_failed_phrases[:20]) + (" …" if len(manual_failed_phrases) > 20 else ""))
             if st.button("🔄 重试失败音频", key="btn_retry_audio_manual"):
                 _retry_cards = st.session_state["anki_cards_cache"]
                 _retry_deck = st.session_state.get("anki_pkg_name", "deck.apkg").removesuffix(".apkg")
@@ -1394,7 +1378,7 @@ with tab_anki:
                             st.session_state.get("sel_voice_manual", ""),
                             list(constants.VOICE_MAP.values())[0]
                         )
-                        _retry_file, _retry_failed = generate_anki_package(
+                        _retry_file, _retry_failed, _retry_phrases = generate_anki_package(
                             _retry_cards, _retry_deck,
                             enable_tts=st.session_state.get("chk_audio_manual", True),
                             tts_voice=_retry_voice,
@@ -1402,6 +1386,7 @@ with tab_anki:
                         )
                         set_anki_pkg(_retry_file, _retry_deck)
                         st.session_state["_manual_audio_failed_count"] = _retry_failed
+                        st.session_state["_manual_audio_failed_phrases"] = _retry_phrases or []
                         run_gc()
                         st.rerun()
                     except Exception as e:

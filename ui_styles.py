@@ -203,10 +203,17 @@ APP_STYLES_HTML = """
         font-size: 18px;
     }
 
-    /* ===== Dark mode refinement ===== */
+    /* ===== Dark mode / night UI refinement ===== */
     @media (prefers-color-scheme: dark) {
         /* -- Base -- */
-        .stApp { background: #0b1120; color: #e2e8f0; }
+        .stApp {
+            background: linear-gradient(180deg, #0b1120 0%, #0f172a 50%, #0b1120 100%);
+            color: #e2e8f0;
+        }
+        [data-testid="stSidebar"] {
+            background: #0f172a !important;
+            border-right: 1px solid #1e293b;
+        }
 
         /* -- Hero gradient for dark bg -- */
         .app-hero h1 {
@@ -284,11 +291,15 @@ APP_STYLES_HTML = """
         }
         .stExpander summary span { color: #e2e8f0; }
 
-        /* -- Alerts -- */
+        /* -- Alerts (info/success/warning/error) -- */
         .stAlert {
             background: #0f172a;
             border-color: #1e293b;
             color: #e2e8f0;
+        }
+        [data-testid="stAlert"][data-baseweb="notification"] {
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
         }
 
         /* -- Radio chips -- */
@@ -353,6 +364,16 @@ APP_STYLES_HTML = """
 
         /* -- Streaming box -- */
         .ql-stream { background: #1e293b !important; border-color: #334155 !important; color: #e2e8f0 !important; }
+
+        /* -- Scrollbar -- */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        /* -- Link color -- */
+        a { color: #60a5fa; }
+        a:hover { color: #93c5fd; }
     }
 
     /* ===== Mobile (iOS/Android) ===== */
