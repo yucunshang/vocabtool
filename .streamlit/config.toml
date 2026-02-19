@@ -8,3 +8,6 @@ enableXsrfProtection = true
 
 [logger]
 level = "warning"
+
+[theme]
+primaryColor = "#3b82f6"
