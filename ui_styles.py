@@ -160,7 +160,7 @@ APP_STYLES_HTML = """
         font-weight: 600;
     }
     /* ===== Radio buttons: chip style ===== */
-    .stRadio > div { gap: 0.4rem; }
+    .stRadio > div { gap: 0.4rem; display: grid !important; grid-template-columns: repeat(2, 1fr) !important; }
     .stRadio > div > label {
         border: 1px solid #e2e8f0; border-radius: 8px;
         padding: 0.35rem 0.85rem; font-size: 0.95rem;
