@@ -229,26 +229,41 @@ def _render_word_editor(data: list) -> list:
         return words_only
 
 
-def _render_audio_settings(key_prefix: str) -> tuple[bool, str]:
-    """Render audio toggle + voice selector. Returns (enable_audio, voice_code)."""
-    enable_audio = st.checkbox("启用语音", value=True, key=f"chk_audio_{key_prefix}")
+def _render_audio_settings(key_prefix: str) -> tuple[bool, str, bool, str]:
+    """Render audio toggle + TTS provider + voice selector + example audio.
+    Returns (enable_audio, voice_code, enable_example_audio, tts_provider)."""
+    enable_audio = st.checkbox("启用语音", value=False, key=f"chk_audio_{key_prefix}")
+    enable_example_audio = True
+    tts_provider = "edge"
     if enable_audio:
+        tts_provider = st.radio(
+            "🔊 TTS 引擎",
+            options=["edge", "google"],
+            format_func=lambda x: "edge-tts（免费）" if x == "edge" else "Google Cloud TTS",
+            index=0,
+            horizontal=True,
+            key=f"tts_provider_{key_prefix}",
+        )
+        if tts_provider == "google":
+            st.caption("💡 Google Cloud TTS：配置 GOOGLE_TTS_API_KEY（API 密钥）或 GOOGLE_APPLICATION_CREDENTIALS（服务账号 JSON 路径）")
+        voice_map = constants.VOICE_MAP_GOOGLE if tts_provider == "google" else constants.VOICE_MAP
         selected_voice_label = st.radio(
             "🎙️ 发音人",
-            options=list(constants.VOICE_MAP.keys()),
+            options=list(voice_map.keys()),
             index=0,
             horizontal=False,
             key=f"sel_voice_{key_prefix}",
         )
-        voice_code = constants.VOICE_MAP[selected_voice_label]
+        voice_code = voice_map[selected_voice_label]
+        enable_example_audio = st.checkbox("例句发音", value=True, key=f"chk_example_audio_{key_prefix}", help="为例句生成语音")
     else:
         voice_code = list(constants.VOICE_MAP.values())[0]
-    return enable_audio, voice_code
+    return enable_audio, voice_code, enable_example_audio, tts_provider
 
 
 def _render_builtin_ai_section(
-    words_only: list, enable_audio: bool, voice_code: str,
-    card_format, use_builtin_ai: str
+    words_only: list, enable_audio: bool, voice_code: str, enable_example_audio: bool,
+    tts_provider: str, card_format, use_builtin_ai: str
 ) -> None:
     """Builtin AI generation flow: button → progress → parse → package → download."""
     ai_model_label = get_config()["openai_model"]
@@ -322,6 +337,8 @@ def _render_builtin_ai_section(
                             deck_name,
                             enable_tts=enable_audio,
                             tts_voice=voice_code,
+                            enable_example_tts=enable_example_audio,
+                            tts_provider=tts_provider,
                             progress_callback=update_pkg_progress
                         )
 
@@ -468,7 +485,7 @@ def _render_extract_results() -> None:
 
     # ---------- 公用设置（内置 AI 与第三方 Prompt 共用）----------
     st.markdown("#### ① 通用设置")
-    enable_audio, voice_code = _render_audio_settings("auto")
+    enable_audio, voice_code, enable_example_audio, tts_provider = _render_audio_settings("auto")
     examples_colloquial = st.checkbox(
         "例句用口语",
         value=False,
@@ -504,7 +521,7 @@ def _render_extract_results() -> None:
         _render_thirdparty_prompt_section(words_only, examples_colloquial, use_builtin_ai)
     else:
         # 内置 AI 时：不显示折叠栏，仅展示一键生成区
-        _render_builtin_ai_section(words_only, enable_audio, voice_code, shared_card_format, use_builtin_ai)
+        _render_builtin_ai_section(words_only, enable_audio, voice_code, enable_example_audio, tts_provider, shared_card_format, use_builtin_ai)
 
 
 def _do_lookup(query_word: str) -> None:
@@ -988,16 +1005,28 @@ with tab_anki:
         placeholder='hectic ||| 忙乱的 ||| She has a hectic schedule today.',
     )
 
+    manual_tts_provider = st.radio(
+        "🔊 TTS 引擎",
+        options=["edge", "google"],
+        format_func=lambda x: "edge-tts（免费）" if x == "edge" else "Google Cloud TTS",
+        index=0,
+        horizontal=True,
+        key="tts_provider_manual",
+    )
+    if manual_tts_provider == "google":
+        st.caption("💡 Google Cloud TTS：配置 GOOGLE_TTS_API_KEY 或 GOOGLE_APPLICATION_CREDENTIALS")
+    manual_voice_map = constants.VOICE_MAP_GOOGLE if manual_tts_provider == "google" else constants.VOICE_MAP
     manual_voice_label = st.radio(
         "🎙️ 发音人",
-        options=list(constants.VOICE_MAP.keys()),
+        options=list(manual_voice_map.keys()),
         index=0,
         horizontal=False,
         key="sel_voice_manual",
     )
-    manual_voice_code = constants.VOICE_MAP[manual_voice_label]
+    manual_voice_code = manual_voice_map[manual_voice_label]
 
-    enable_audio = st.checkbox("启用语音", value=True, key="chk_audio_manual")
+    enable_audio = st.checkbox("启用语音", value=False, key="chk_audio_manual")
+    manual_enable_example_audio = st.checkbox("例句发音", value=True, key="chk_example_audio_manual", help="为例句生成语音")
 
     col_btn1, col_btn2 = st.columns([1, 4])
     with col_btn1:
@@ -1028,6 +1057,8 @@ with tab_anki:
                             deck_name,
                             enable_tts=enable_audio,
                             tts_voice=manual_voice_code,
+                            enable_example_tts=manual_enable_example_audio,
+                            tts_provider=manual_tts_provider,
                             progress_callback=update_progress_manual
                         )
 

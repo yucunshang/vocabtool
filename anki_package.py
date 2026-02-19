@@ -59,6 +59,8 @@ def generate_anki_package(
     deck_name: str,
     enable_tts: bool = False,
     tts_voice: str = "en-US-JennyNeural",
+    enable_example_tts: bool = True,
+    tts_provider: str = "edge",
     progress_callback: Optional[ProgressCallback] = None
 ) -> str:
     """Generate Anki package (.apkg) file with optional TTS audio.
@@ -188,18 +190,19 @@ def generate_anki_package(
                 audio_phrase_field = f"[sound:{phrase_filename}]"
 
                 audio_example_parts = []
-                for ei, sent in enumerate(example_sentences):
-                    if sent and len(sent) > 3:
-                        ex_filename = f"tts_{safe_phrase}_{unique_id}_e{ei}.mp3"
-                        ex_path = os.path.join(tmp_dir, ex_filename)
-                        tts_text = _example_text_for_tts(sent)
-                        audio_tasks.append({
-                            'text': tts_text if tts_text else sent,
-                            'path': ex_path,
-                            'voice': tts_voice
-                        })
-                        media_files.append(ex_path)
-                        audio_example_parts.append(f"[sound:{ex_filename}]")
+                if enable_example_tts:
+                    for ei, sent in enumerate(example_sentences):
+                        if sent and len(sent) > 3:
+                            ex_filename = f"tts_{safe_phrase}_{unique_id}_e{ei}.mp3"
+                            ex_path = os.path.join(tmp_dir, ex_filename)
+                            tts_text = _example_text_for_tts(sent)
+                            audio_tasks.append({
+                                'text': tts_text if tts_text else sent,
+                                'path': ex_path,
+                                'voice': tts_voice
+                            })
+                            media_files.append(ex_path)
+                            audio_example_parts.append(f"[sound:{ex_filename}]")
                 audio_example_field = "".join(audio_example_parts)
 
             fields = [
@@ -218,7 +221,12 @@ def generate_anki_package(
                 if progress_callback:
                     progress_callback(ratio, msg)
 
-            run_async_batch(audio_tasks, concurrency=constants.TTS_CONCURRENCY, progress_callback=internal_progress)
+            run_async_batch(
+                audio_tasks,
+                concurrency=constants.TTS_CONCURRENCY,
+                progress_callback=internal_progress,
+                tts_provider=tts_provider,
+            )
 
         for note in notes_buffer:
             deck.add_note(note)
