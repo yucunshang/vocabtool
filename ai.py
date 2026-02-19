@@ -9,13 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, TypedDict
 import constants
 from config import get_config
 from errors import ErrorHandler
-from prompts import (
-    CARD_GEN_SYSTEM_PROMPT,
-    CARD_GEN_USER_TEMPLATE,
-    LOOKUP_SYSTEM_PROMPT,
-    WORD_FILTER_SYSTEM_PROMPT,
-    WORD_FILTER_USER_TEMPLATE,
-)
+from prompts import CARD_GEN_SYSTEM_PROMPT, CARD_GEN_USER_TEMPLATE, LOOKUP_SYSTEM_PROMPT
 from resources import get_rank_for_word
 
 logger = logging.getLogger(__name__)
@@ -375,64 +369,3 @@ def process_ai_in_batches(
                     )
 
     return "\n".join(full_results)
-
-
-def filter_words_ai(words: List[str], target_count: int) -> Optional[List[str]]:
-    """Filter word list via AI to the top N most worth learning. Returns filtered list or None on error."""
-    if not words or target_count <= 0:
-        return []
-    if target_count >= len(words):
-        return list(words)
-
-    client = get_openai_client()
-    if not client:
-        return None
-
-    # Limit input size
-    input_words = words[:constants.MAX_AI_FILTER_INPUT]
-    words_str = ", ".join(input_words)
-    original_lower_to_word: Dict[str, str] = {w.strip().lower(): w.strip() for w in input_words}
-
-    user_prompt = WORD_FILTER_USER_TEMPLATE.format(
-        target_count=target_count,
-        total=len(input_words),
-        words_str=words_str,
-    )
-
-    try:
-        response = client.chat.completions.create(
-            model=get_config()["openai_model"],
-            messages=[
-                {"role": "system", "content": WORD_FILTER_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.3,
-            max_tokens=4096,
-        )
-        content = (response.choices[0].message.content or "").strip()
-        if not content:
-            return None
-
-        result: List[str] = []
-        seen_lower: set = set()
-        for line in content.split("\n"):
-            word = line.strip()
-            # Strip leading numbering like "1.", "2)", "3 "
-            for i, c in enumerate(word):
-                if c.isalpha() or c in "'-":
-                    word = word[i:]
-                    break
-            word = word.strip(".-) ")
-            if not word or len(word) > constants.MAX_WORD_LENGTH:
-                continue
-            key = word.lower()
-            if key in original_lower_to_word and key not in seen_lower:
-                result.append(original_lower_to_word[key])
-                seen_lower.add(key)
-                if len(result) >= target_count:
-                    break
-
-        return result[:target_count] if result else None
-    except Exception as e:
-        logger.error("AI word filter failed: %s", e)
-        return None

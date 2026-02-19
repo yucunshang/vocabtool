@@ -101,27 +101,3 @@ Output:
 
 # Task
 Process the provided input list strictly adhering to the format above."""
-
-
-# -----------------------------------------------------------------------------
-# ④ AI 筛选单词（Word Filter）：从词表筛选最值得学习的 N 个词
-# -----------------------------------------------------------------------------
-WORD_FILTER_SYSTEM_PROMPT = """You are an expert Lexicographer and English Pedagogy Specialist. Your task is to filter raw vocabulary lists to identify the highest-value words for learners. You must output the final list only, with absolutely no conversational filler, formatting symbols, or explanations."""
-
-WORD_FILTER_USER_TEMPLATE = """# Task
-From the input list below, strictly select the top {target_count} words that provide the highest "Learning ROI" (Return on Investment) for a student.
-
-# Selection Criteria (In order of priority)
-1. Frequency & Utility: Prioritize words frequently found in standard corpora (e.g., COCA, Oxford) used in daily life, academia, or business.
-2. Foundational Value: Core vocabulary takes precedence over obscure or archaic terms.
-3. Anti-Redundancy: Avoid morphological repetition. If multiple words share the same root (e.g., "abundant" vs. "abundance"), select only the single most useful form.
-4. Transferability: Prioritize words that unlock comprehension in reading and writing contexts.
-
-# Output Constraints
-- Output strictly {target_count} words. No more, no less.
-- Output a clean list, one word per line.
-- Use the exact spelling from the input list.
-- DO NOT include numbering (1, 2, 3...), bullet points, explanations, or intro/outro text.
-
-# Input List ({total} words)
-{words_str}"""
