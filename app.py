@@ -237,7 +237,7 @@ def _render_audio_settings(key_prefix: str) -> tuple[bool, str]:
             "🎙️ 发音人",
             options=list(constants.VOICE_MAP.keys()),
             index=0,
-            horizontal=True,
+            horizontal=False,
             key=f"sel_voice_{key_prefix}",
         )
         voice_code = constants.VOICE_MAP[selected_voice_label]
@@ -453,7 +453,6 @@ def _render_extract_results() -> None:
     # ---------- 公用设置（内置 AI 与第三方 Prompt 共用）----------
     st.markdown("#### ① 通用设置")
     enable_audio, voice_code = _render_audio_settings("auto")
-
     examples_colloquial = st.checkbox(
         "例句用口语",
         value=False,
@@ -471,6 +470,7 @@ def _render_extract_results() -> None:
         "examples_colloquial": examples_colloquial,
     }
 
+    st.markdown("---")
     st.markdown("#### ② 生成方式")
     use_builtin_ai = st.radio(
         "选择",
@@ -979,7 +979,7 @@ with tab_anki:
         "🎙️ 发音人",
         options=list(constants.VOICE_MAP.keys()),
         index=0,
-        horizontal=True,
+        horizontal=False,
         key="sel_voice_manual",
     )
     manual_voice_code = constants.VOICE_MAP[manual_voice_label]
