@@ -278,7 +278,7 @@ def _render_builtin_ai_section(
         if page == 0:
             st.caption(
                 f"⚠️ 共 {total_word_count} 词，首批处理前 {len(words_for_auto_ai)} 词。"
-                " 生成并确认后可继续处理剩余词汇。"
+                " 生成完成后可继续处理剩余词汇。"
             )
         else:
             st.caption(
@@ -315,6 +315,7 @@ def _render_builtin_ai_section(
             card_text = st.empty()
             card_bar = st.progress(0.0)
             audio_text = st.empty()
+            audio_bar = st.progress(0.0)
 
             total_words = len(words_for_auto_ai)
             batch_size = constants.AI_BATCH_SIZE
@@ -354,12 +355,12 @@ def _render_builtin_ai_section(
                 if parsed_data:
                     card_bar.progress(1.0)
                     card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
-                    audio_text.markdown("**音频进度**：请点击「生成 .apkg」开始。")
+                    audio_text.markdown("**音频进度**：进行中...")
 
                     # Fix 4: Checkpoint — save raw AI text in case packaging fails
                     st.session_state["_builtin_ai_partial_result"] = ai_result
 
-                    # Fix 5: Save cards for editing; append if continuing a batch
+                    # Fix 5: Save cards; append if continuing a batch
                     if auto_generate:
                         existing = st.session_state.get("_builtin_parsed_cards") or []
                         st.session_state["_builtin_parsed_cards"] = existing + parsed_data
@@ -367,40 +368,13 @@ def _render_builtin_ai_section(
                     else:
                         st.session_state["_builtin_parsed_cards"] = parsed_data
 
-                    st.info(f"✅ 解析完成，共 {len(st.session_state['_builtin_parsed_cards'])} 张卡片。")
-                else:
-                    card_text.markdown("**制卡进度**：❌ 解析失败")
-                    audio_text.markdown("**音频进度**：未开始")
-                    st.error("解析失败，AI 返回内容为空或格式错误。")
-            else:
-                card_text.markdown("**制卡进度**：❌ AI 生成失败")
-                audio_text.markdown("**音频进度**：未开始")
-                st.error("AI 生成失败，请检查 API Key 或网络连接。")
+                    edited_data = st.session_state["_builtin_parsed_cards"]
 
-        # Fix 5: Generate apkg — shown whenever cards are in session state
-        if st.session_state.get("_builtin_parsed_cards"):
-            cards = st.session_state["_builtin_parsed_cards"]
+                    def update_pkg_progress(ratio: float, text: str) -> None:
+                        audio_bar.progress(ratio)
+                        audio_text.markdown(f"**音频进度**：{text}")
 
-            # Generate button + next-batch button
-            col_confirm, col_continue = st.columns([2, 1])
-            with col_confirm:
-                if st.button(
-                    "✅ 生成 .apkg", key="btn_confirm_gen",
-                    type="primary", use_container_width=True
-                ):
                     try:
-                        edited_data = cards
-                        st.session_state["_builtin_parsed_cards"] = edited_data
-                        st.session_state["anki_cards_cache"] = edited_data
-
-                        audio_text2 = st.empty()
-                        audio_bar2 = st.progress(0.0)
-                        audio_text2.markdown("**音频进度**：进行中...")
-
-                        def update_pkg_progress(ratio: float, text: str) -> None:
-                            audio_bar2.progress(ratio)
-                            audio_text2.markdown(f"**音频进度**：{text}")
-
                         current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
                         file_path, audio_failed, failed_phrases = generate_anki_package(
                             edited_data,
@@ -411,27 +385,37 @@ def _render_builtin_ai_section(
                             progress_callback=update_pkg_progress,
                         )
                         set_anki_pkg(file_path, current_deck_name)
+                        st.session_state["anki_cards_cache"] = edited_data
                         st.session_state["_builtin_audio_failed_count"] = audio_failed
                         st.session_state["_builtin_audio_failed_phrases"] = failed_phrases or []
-                        audio_bar2.progress(1.0)
+                        audio_bar.progress(1.0)
                         suffix = f"（{audio_failed} 条失败，可点击下方重试）" if audio_failed else ""
-                        audio_text2.markdown(f"**音频进度**：✅ 完成{suffix}")
+                        audio_text.markdown(f"**音频进度**：✅ 完成{suffix}")
+                        st.info(f"✅ 解析完成，共 {len(edited_data)} 张卡片。")
                         st.balloons()
                         run_gc()
                     except Exception as e:
-                        ErrorHandler.handle(e, "生成出错")
+                        audio_text.markdown("**音频进度**：❌ 生成失败")
+                        ErrorHandler.handle(e, "生成 .apkg 出错")
+                else:
+                    card_text.markdown("**制卡进度**：❌ 解析失败")
+                    audio_text.markdown("**音频进度**：未开始")
+                    st.error("解析失败，AI 返回内容为空或格式错误。")
+            else:
+                card_text.markdown("**制卡进度**：❌ AI 生成失败")
+                audio_text.markdown("**音频进度**：未开始")
+                st.error("AI 生成失败，请检查 API Key 或网络连接。")
 
-            # Fix 7: Continue with next batch
-            with col_continue:
-                if remaining_words > 0:
-                    if st.button(
-                        f"▶ 下一批（剩余 {remaining_words} 词）",
-                        key="btn_gen_next_page",
-                        use_container_width=True,
-                    ):
-                        st.session_state["_builtin_gen_page"] = page + 1
-                        st.session_state["_builtin_auto_generate"] = True
-                        st.rerun()
+        # Fix 5: Next batch button — shown whenever cards are in session state
+        if st.session_state.get("_builtin_parsed_cards") and remaining_words > 0:
+            if st.button(
+                f"▶ 下一批（剩余 {remaining_words} 词）",
+                key="btn_gen_next_page",
+                use_container_width=True,
+            ):
+                st.session_state["_builtin_gen_page"] = page + 1
+                st.session_state["_builtin_auto_generate"] = True
+                st.rerun()
 
     else:
         st.info("请使用右侧「复制 Prompt」到第三方 AI，格式与上方通用设置一致。")
@@ -636,7 +620,7 @@ def _render_extract_results() -> None:
                     "en_native": "英文（母语者词典）",
                     "both": "中英双语",
                 }[x],
-                index=3,
+                index=0,
                 key="builtin_def",
             )
         with _cf_col_b:
@@ -644,10 +628,10 @@ def _render_extract_results() -> None:
                 "例句数量",
                 options=[1, 2, 3],
                 format_func=lambda x: f"{x} 条",
-                index=2,
+                index=1,
                 key="builtin_ex",
             )
-            builtin_ety = st.checkbox("词根词源", value=True, key="builtin_ety")
+            builtin_ety = st.checkbox("词根词源", value=False, key="builtin_ety")
         builtin_ex_cn = st.checkbox("例句带中文翻译", value=True, key="builtin_ex_cn")
 
     shared_card_format: CardFormat = {
