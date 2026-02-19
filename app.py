@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import time
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
@@ -235,10 +236,9 @@ def _render_word_editor(data: list) -> list:
 
 
 def _render_audio_settings(key_prefix: str) -> tuple[bool, str, bool]:
-    """Render audio toggle + voice selector + example audio.
+    """Render audio toggle + voice selector. Example audio always on when TTS enabled.
     Returns (enable_audio, voice_code, enable_example_audio)."""
     enable_audio = st.checkbox("启用语音", value=True, key=f"chk_audio_{key_prefix}")
-    enable_example_audio = True
     if enable_audio:
         selected_voice_label = st.radio(
             "🎙️ 发音人",
@@ -248,15 +248,14 @@ def _render_audio_settings(key_prefix: str) -> tuple[bool, str, bool]:
             key=f"sel_voice_{key_prefix}",
         )
         voice_code = constants.VOICE_MAP[selected_voice_label]
-        enable_example_audio = st.checkbox("例句发音", value=True, key=f"chk_example_audio_{key_prefix}", help="为例句生成语音")
     else:
         voice_code = list(constants.VOICE_MAP.values())[0]
-    return enable_audio, voice_code, enable_example_audio
+    return enable_audio, voice_code, True  # 例句默认发音，不提供选项
 
 
 def _render_builtin_ai_section(
     words_only: list, enable_audio: bool, voice_code: str, enable_example_audio: bool,
-    card_format: CardFormat
+    card_format: Optional[CardFormat] = None,
 ) -> None:
     """Builtin AI generation flow: button → progress → parse → edit → package → download."""
     ai_model_label = get_config()["openai_model"]
@@ -483,97 +482,91 @@ def _render_extract_results() -> None:
     st.markdown("---")
     st.markdown("### 🤖 AI 生成 Anki 卡片")
 
-    st.markdown("#### ① 通用设置")
     enable_audio, voice_code, enable_example_audio = _render_audio_settings("auto")
 
-    with st.expander("⚙️ 卡片格式（与 Prompt 同步）", expanded=False):
-        st.caption("以下设置会同步到 AI 制卡 Prompt，影响生成的卡片内容。")
-        _cf_a, _cf_b = st.columns(2)
-        with _cf_a:
-            builtin_front = st.selectbox(
-                "正面",
-                options=["word", "phrase"],
-                format_func=lambda x: "单词" if x == "word" else "短语/词组",
-                index=0,
-                key="builtin_front",
-            )
-            builtin_def = st.selectbox(
-                "释义",
-                options=["cn", "en", "en_native", "both"],
-                format_func=lambda x: {"cn": "中文", "en": "英文（学习型）", "en_native": "英文（母语者词典）", "both": "中英双语"}[x],
-                index=3,
-                key="builtin_def",
-            )
-        with _cf_b:
-            builtin_ex = st.selectbox(
-                "例句数量",
-                options=[1, 2, 3],
-                format_func=lambda x: f"{x} 条",
-                index=2,
-                key="builtin_ex",
-            )
-            builtin_ety = st.checkbox("词根词源", value=True, key="builtin_ety")
-        builtin_ex_cn = st.checkbox("例句带中文翻译", value=True, key="builtin_ex_cn")
-        builtin_colloquial = st.checkbox("例句用口语", value=False, key="builtin_colloquial", help="例句使用日常口语化表达")
+    col_builtin, col_third = st.columns(2)
 
-    shared_card_format: CardFormat = {
-        "front": builtin_front,
-        "definition": builtin_def,
-        "examples": builtin_ex,
-        "examples_with_cn": builtin_ex_cn,
-        "etymology": builtin_ety,
-        "examples_colloquial": builtin_colloquial,
-    }
+    with col_builtin:
+        st.markdown("#### ① 内置 AI 一键制卡")
+        _render_builtin_ai_section(words_only, enable_audio, voice_code, enable_example_audio, None)
 
-    _render_builtin_ai_section(words_only, enable_audio, voice_code, enable_example_audio, shared_card_format)
+    with col_third:
+        st.markdown("#### ② 第三方 AI（复制 Prompt + 粘贴制卡）")
+        _render_thirdparty_section(words_only, enable_audio, voice_code, enable_example_audio)
 
 
-def _render_manual_card_section() -> None:
-    """手动制卡：第三方 AI Prompt + 粘贴结果 → 解析生成 .apkg。"""
-    st.markdown("#### 手动制卡")
-    st.caption("输入单词列表生成 Prompt，复制到 ChatGPT / Claude 等，再将 AI 返回的文本粘贴下方，解析生成 .apkg。")
+def _render_thirdparty_section(
+    words_only: list,
+    enable_audio: bool,
+    voice_code: str,
+    enable_example_audio: bool,
+) -> None:
+    """第二栏：根据当前词表生成可复制 Prompt，粘贴 AI 结果后解析制卡。"""
+    st.caption("复制下方 Prompt 到 ChatGPT / Claude 等，再将 AI 返回的文本粘贴到下方（或到第三栏「手动制卡」）解析制卡。")
 
-    manual_words = st.text_area(
-        "✍️ 单词列表（每行一个或逗号分隔，用于生成 Prompt）",
-        height=120,
-        key="manual_card_words",
-        placeholder="altruism, hectic, compromise\n或每行一个单词",
-        label_visibility="collapsed",
-    )
-
-    # Parse words from input
-    if manual_words.strip():
-        raw = re.sub(r"[,，、\s]+", " ", manual_words.strip())
-        words_list = [w.strip() for w in raw.split() if constants.MIN_WORD_LENGTH <= len(w.strip()) <= constants.MAX_WORD_LENGTH]
-        words_list = list(dict.fromkeys(w.lower() for w in words_list if w))
-    else:
-        words_list = []
-
-    if words_list:
-        batch = words_list[:10]
-        words_str = ", ".join(batch)
-        prompt_text = build_card_prompt(words_str)
-        col_p, col_c = st.columns([5, 1])
-        with col_p:
-            st.text_area("Prompt", value=prompt_text, height=180, key="manual_prompt_display", label_visibility="collapsed")
-        with col_c:
-            render_copy_button(prompt_text, key="copy_manual_prompt")
-        if len(words_list) > 10:
-            st.caption(f"共 {len(words_list)} 词，Prompt 已取前 10 词；其余请分批制卡。")
-    else:
-        st.caption("输入单词后，将显示可复制的制卡 Prompt。")
+    batch = words_only[:10]
+    words_str = ", ".join(batch)
+    prompt_text = build_card_prompt(words_str)
+    col_p, col_c = st.columns([5, 1])
+    with col_p:
+        st.text_area("Prompt", value=prompt_text, height=180, key="thirdparty_prompt_display", label_visibility="collapsed")
+    with col_c:
+        render_copy_button(prompt_text, key="copy_thirdparty_prompt")
+    if len(words_only) > 10:
+        st.caption(f"共 {len(words_only)} 词，Prompt 已取前 10 词；其余请分批制卡。")
 
     st.markdown("**粘贴 AI 输出**")
     pasted = st.text_area(
         "粘贴 ChatGPT / Claude 等返回的制卡结果",
-        height=200,
+        height=160,
+        key="thirdparty_pasted_output",
+        placeholder="word1 ||| 释义 ||| 例句\nword2 ||| ...",
+        label_visibility="collapsed",
+    )
+
+    deck_name = st.session_state.get("builtin_deck_name", f"Vocab_{get_beijing_time_str()}")
+
+    if st.button("🔁 解析并生成 .apkg", key="btn_thirdparty_parse", use_container_width=True):
+        if not pasted.strip():
+            st.warning("请先粘贴 AI 返回的制卡结果。")
+            return
+        parsed = parse_anki_data(pasted.strip())
+        if not parsed:
+            st.error("解析失败，格式不符。请确保每行格式为：`Word ||| 释义 ||| 例句`（可选 `||| 词源`）。")
+            return
+        try:
+            file_path, _, _ = generate_anki_package(
+                parsed,
+                deck_name,
+                enable_tts=enable_audio,
+                tts_voice=voice_code,
+                enable_example_tts=enable_example_audio,
+            )
+            set_anki_pkg(file_path, deck_name)
+            st.session_state["anki_cards_cache"] = parsed
+            st.success(f"✅ 解析完成，共 {len(parsed)} 张卡片。")
+            st.balloons()
+            run_gc()
+        except Exception as e:
+            ErrorHandler.handle(e, "生成 .apkg 出错")
+
+    render_anki_download_button("📥 下载牌组", use_container_width=True, key="thirdparty_download_btn")
+
+
+def _render_manual_card_section() -> None:
+    """第三栏：仅粘贴 AI 生成的内容，解析并制卡（不生成 Prompt）。"""
+    st.markdown("#### 手动制卡")
+    st.caption("将任意来源的 AI 制卡结果（如 ChatGPT、Claude 复制的内容）粘贴到下方，解析后生成 .apkg。")
+
+    pasted = st.text_area(
+        "粘贴 AI 生成的制卡结果",
+        height=280,
         key="manual_pasted_output",
-        placeholder="word1 ||| 释义 // 例句 ||| 词源\nword2 ||| ...",
+        placeholder="word1 ||| 释义 ||| 例句\nword2 ||| 释义 ||| 例句\n...",
         label_visibility="collapsed",
     )
 
     deck_name = st.text_input("🏷️ 牌组名称", value=f"Vocab_{get_beijing_time_str()}", key="manual_deck_name")
-
     enable_audio, voice_code, enable_example_audio = _render_audio_settings("manual")
 
     if st.button("🔁 解析并生成 .apkg", key="btn_manual_parse", use_container_width=True):
@@ -582,7 +575,7 @@ def _render_manual_card_section() -> None:
             return
         parsed = parse_anki_data(pasted.strip())
         if not parsed:
-            st.error("解析失败，格式不符。请确保每行格式为：`Word ||| 释义 ||| 例句1 // 例句2 // 例句3 ||| 词源`")
+            st.error("解析失败，格式不符。请确保每行格式为：`Word ||| 释义 ||| 例句`（可选 `||| 词源`）。")
             return
         try:
             file_path, _, _ = generate_anki_package(
