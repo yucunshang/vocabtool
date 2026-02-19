@@ -217,6 +217,15 @@ def get_openai_client() -> Optional[Any]:
         return None
 
 
+def _rank_after_correction(content: str, fallback_rank: int) -> int:
+    """Return rank for the corrected word if content has a spell-correction notice."""
+    first = content.split('\n', 1)[0].strip()
+    if first.startswith('✏️ 拼写纠正:') and '→' in first:
+        corrected = first.split('→', 1)[-1].strip()
+        return get_rank_for_word(corrected) if corrected else fallback_rank
+    return fallback_rank
+
+
 def get_word_quick_definition(
     word: str,
     stream_callback: Optional[Callable[[str], None]] = None,
@@ -238,7 +247,8 @@ def get_word_quick_definition(
     cache_key = word_clean
     if cache_key in _QUERY_CACHE:
         _QUERY_CACHE.move_to_end(cache_key)
-        return {"result": _QUERY_CACHE[cache_key], "rank": rank, "cached": True}
+        cached = _QUERY_CACHE[cache_key]
+        return {"result": cached, "rank": _rank_after_correction(cached, rank), "cached": True}
 
     try:
         if stream_callback is not None:
@@ -279,7 +289,7 @@ def get_word_quick_definition(
         if len(_QUERY_CACHE) > _QUERY_CACHE_MAX:
             _QUERY_CACHE.popitem(last=False)
 
-        return {"result": content, "rank": rank}
+        return {"result": content, "rank": _rank_after_correction(content, rank)}
 
     except Exception as e:
         logger.error("Error getting definition: %s", e)
