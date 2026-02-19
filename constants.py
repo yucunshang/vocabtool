@@ -19,12 +19,12 @@ APKG_CLEANUP_MAX_AGE_SECONDS = 24 * 3600  # 24 hours
 MIN_WORD_LENGTH = 2
 MAX_WORD_LENGTH = 25
 
-AI_BATCH_SIZE = 10   # 每批请求词数，越大 API 调用越少、整体越快，但单次响应更慢
+AI_BATCH_SIZE = 20   # 每批请求词数，越大 API 调用越少、整体越快，但单次响应更慢
 AI_CONCURRENCY = 3   # 内置 AI 制卡并发批次数
-MAX_AUTO_LIMIT = 200  # 内置 AI 一次性制卡上限
+MAX_AUTO_LIMIT = 500  # 内置 AI 一次性制卡上限
 MAX_RETRIES = 3
 
-TTS_CONCURRENCY = 3
+TTS_CONCURRENCY = 5
 TTS_RETRY_ATTEMPTS = 3
 MIN_AUDIO_FILE_SIZE = 100
 
