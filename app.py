@@ -588,14 +588,14 @@ def _render_thirdparty_prompt_section(
 
         st.caption("选择分组并复制下方 Prompt 到第三方 AI")
         batch_size_prompt = int(
-            st.number_input("🔢 分组大小 (最大 500)", min_value=1, max_value=500, value=50, step=10, key="batch_size_prompt")
+            st.number_input(f"🔢 分组大小 (最大 {constants.MAX_AUTO_LIMIT})", min_value=1, max_value=constants.MAX_AUTO_LIMIT, value=50, step=10, key="batch_size_prompt")
         )
         current_batch_words = []
 
         if words_only:
             total_w = len(words_only)
-            if total_w <= 500:
-                st.caption(f"💡 当前共 {total_w} 个单词（≤500），已全部放入一个 Prompt。")
+            if total_w <= constants.MAX_AUTO_LIMIT:
+                st.caption(f"💡 当前共 {total_w} 个单词（≤{constants.MAX_AUTO_LIMIT}），已全部放入一个 Prompt。")
                 current_batch_words = words_only
             else:
                 num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
