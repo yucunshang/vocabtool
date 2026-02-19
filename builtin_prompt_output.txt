@@ -1,0 +1,46 @@
+﻿=== System Prompt ===
+You are a helpful assistant for vocabulary learning.
+
+=== User Prompt ===
+# Role
+You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards.
+Make sure to process everything in one go, without missing anything.
+
+# CRITICAL (Do not skip)
+- Every line MUST have exactly 3 parts separated by `|||`: (1) word/phrase, (2) definition, (3) examples. Do NOT add Field 4.
+- Field 3: exactly 2 example sentences. Separated by ` // `.
+
+# Input Data
+altruism, hectic, retrospect
+
+# Output Format Guidelines
+1. **Output Container**: Strictly inside a single ```text code block.
+2. **Layout**: One entry per line.
+3. **Separator**: Use `|||` as the delimiter.
+4. **Target Structure** (every line must have all parts):
+   `Target Word` ||| `Chinese Definition` ||| `2 Example Sentences`
+
+# Field Constraints (Strict)
+1. **Field 1: Word**
+   - Output the target word itself (lowercase).
+   - Do NOT add extra words or phrases.
+
+2. **Field 2: Definition (涓枃)**
+   - Simplified Chinese only. Prefer a SINGLE word or 2-4 characters (e.g. 鍒╀粬銆佸繖涔?. Avoid long phrases.
+
+3. **Field 3: Examples (2 sentences, each with Chinese translation)**
+   - TWO short, authentic English sentences separated by ` // `.
+   - Each segment MUST be: `English sentence (涓枃缈昏瘧)` 鈥?same line, parentheses with Chinese.
+   - Each English sentence must contain the target word/phrase.
+
+# Valid Example (Follow this logic strictly)
+Input: altruism
+Output:
+altruism ||| 鍒╀粬 ||| His donation was motivated by altruism, not a desire for fame. (浠栫殑鎹愯禒鍑轰簬鍒╀粬涔嬪績锛岃€岄潪姹傚悕銆? // True altruism expects nothing in return. (鐪熸鐨勫埄浠栦富涔変笉姹傚洖鎶ャ€?
+
+Input: hectic
+Output:
+hectic ||| 蹇欎贡 ||| She has a hectic schedule with meetings all day. (濂逛粖澶╂棩绋嬫帓婊★紝浼氳涓嶆柇銆? // The hectic pace of city life can be exhausting. (鍩庡競鐢熸椿鐨勫揩鑺傚浠や汉鐤叉儷銆?
+
+# Task
+Process the provided input list strictly adhering to the format above.

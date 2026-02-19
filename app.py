@@ -620,7 +620,7 @@ def _render_extract_results() -> None:
                     "en_native": "英文（母语者词典）",
                     "both": "中英双语",
                 }[x],
-                index=0,
+                index=3,
                 key="builtin_def",
             )
         with _cf_col_b:
@@ -628,10 +628,10 @@ def _render_extract_results() -> None:
                 "例句数量",
                 options=[1, 2, 3],
                 format_func=lambda x: f"{x} 条",
-                index=1,
+                index=2,
                 key="builtin_ex",
             )
-            builtin_ety = st.checkbox("词根词源", value=False, key="builtin_ety")
+            builtin_ety = st.checkbox("词根词源", value=True, key="builtin_ety")
         builtin_ex_cn = st.checkbox("例句带中文翻译", value=True, key="builtin_ex_cn")
 
     shared_card_format: CardFormat = {
