@@ -107,10 +107,22 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
         f3_example_hectic = "She has a hectic schedule today. (她今天日程很满。) // The hectic pace can be exhausting. (快节奏令人疲惫。) // After a hectic week, he relaxed. (忙了一周后他放松了。)" if examples_with_cn else "She has a hectic schedule today. // The hectic pace can be exhausting. // After a hectic week, he relaxed."
     f3_constraint = f"Exactly {f3_fmt}.{colloquial_note}"
 
-    # Field 4: Etymology (optional)
-    ety_note = " If no clear roots or unsure, output `词源不可考`."
+    # Field 4: Deep Etymology & Roots (optional)
     if include_ety:
-        f4_constraint = f"Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)` in Simplified Chinese.{ety_note}"
+        f4_constraint = """**Deep Etymology & Roots (STRICT CONSTRAINTS)**
+
+1. **Deep Classical Roots:** You MUST trace words back to their classical roots (Latin, Greek, Old English, etc.). DO NOT settle for shallow, modern morphological splits.
+   - *Bad:* protectionist → protect (保护) + -ion (行为) + -ist (主义者)
+   - *Good:* protectionist → pro- (向前/在前) + teg-/tect- (覆盖/掩蔽) + -ion (名词后缀) + -ist (主义者)
+
+2. **Format:** Output strictly as: `prefix- (Chinese meaning) + root (Chinese meaning) + -suffix (Chinese meaning)`. Use Simplified Chinese for all meanings.
+
+3. **Ban on Lazy Fallbacks:** DO NOT abuse "词源不可考" (Etymology unverified) as a shortcut. Words like synergy, prudence, latency have clear classical origins and MUST be broken down.
+
+4. **Modern/Cultural Words:** For modern coinages, portmanteaus, eponyms (e.g., vegan, stoic, boycott), DO NOT label as unverified. Provide a concise 1–2 sentence origin story in Simplified Chinese.
+   - *Example (vegan):* 现代造词：1944年由 veg(etari)an 的首尾字母拼接而成。
+
+5. **Zero Hallucination:** Only if a word is genuinely of unknown origin, true slang, or purely onomatopoeic (e.g., clink, hiccup), output exactly: `词源不可考`. Never invent or fabricate roots."""
         f4_structure = " ||| `Etymology (Simplified Chinese)`"
         f4_example_altruism = " ||| alter- (其他) + -ism (主义/行为)"
         f4_example_hectic = " ||| hect- (持续的) + -ic (形容词后缀)"
@@ -131,7 +143,7 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
         mandatory_note = f"""
 - Every line MUST have exactly 4 parts separated by `|||`: (1) word/phrase, (2) definition, (3) examples, (4) etymology.
 - Field 3: exactly {num_examples} example sentence{'s' if num_examples > 1 else ''}. Separated by ` // `.
-- Field 4: required. Output `词源不可考` if uncertain.
+- Field 4: required. Deep classical roots; use `词源不可考` only when genuinely unknown/slang/onomatopoeic.
 """
     else:
         mandatory_note = f"""
