@@ -283,6 +283,7 @@ def _render_builtin_ai_section(
             batch_size = constants.AI_BATCH_SIZE
             first_end = min(batch_size, total_words)
             progress_title.markdown("#### ⏳ 内置 AI 制卡进度")
+            st.caption("💡 第一组可能稍慢（建立连接），后续组并发进行。")
             card_text.markdown(f"**制卡进度**：第 1 组（1–{first_end}/{total_words}）AI 生成中...")
             audio_text.markdown("**音频进度**：等待制卡完成...")
 
@@ -475,13 +476,13 @@ def _render_extract_results() -> None:
         help="例句使用日常口语化表达，而非书面语",
     )
 
-    # 固定模板：正面单词，反面中文释义 + 2 条例句带中文翻译，不加词根词缀
+    # 固定模板：正面单词，反面中英释义（学习型词典）+ 3 条例句带中文翻译 + 词源
     shared_card_format: CardFormat = {
         "front": "word",
-        "definition": "cn",
-        "examples": 2,
+        "definition": "both",
+        "examples": 3,
         "examples_with_cn": True,
-        "etymology": False,
+        "etymology": True,
         "examples_colloquial": examples_colloquial,
     }
 
