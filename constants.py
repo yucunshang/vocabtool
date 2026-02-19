@@ -65,7 +65,7 @@ MAX_URL_LENGTH = 2048
 
 # PDF & analysis performance: limit work to keep response fast
 PDF_MAX_PAGES = 50              # only extract first N pages from PDF
-MAX_TEXT_ANALYSIS_CHARS = 300_000  # max chars passed to vocab analysis (≈ 30 万字)
+MAX_TEXT_ANALYSIS_CHARS = 3_000_000  # max chars passed to vocab analysis (≈ 300 万字)
 
 VOICE_MAP = {
     "👩 美音女声 (Jenny)": "en-US-JennyNeural",
