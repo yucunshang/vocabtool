@@ -183,7 +183,8 @@ def _process_one_batch(
     """Process a single batch, return (batch_index, content). Empty string on failure."""
     current_batch_str = ", ".join(batch)
     user_prompt = build_card_prompt(current_batch_str, card_format)
-    for attempt in range(constants.MAX_RETRIES):
+    max_attempts = constants.AI_BATCH_MAX_RETRIES
+    for attempt in range(max_attempts):
         try:
             response = client.chat.completions.create(
                 model=model_name,
@@ -199,13 +200,13 @@ def _process_one_batch(
                 raise ValueError("Empty AI batch response")
             return (batch_index, content)
         except Exception as e:
-            if attempt < constants.MAX_RETRIES - 1:
+            if attempt < max_attempts - 1:
                 time.sleep(2 ** (attempt + 1))
                 continue
             else:
                 ErrorHandler.handle(
                     e,
-                    f"Batch {batch_index + 1} failed after {constants.MAX_RETRIES} attempts",
+                    f"Batch {batch_index + 1} failed after {max_attempts} attempts",
                     show_user=True
                 )
                 return (batch_index, "")
@@ -245,14 +246,13 @@ def process_ai_in_batches(
 
     def _on_batch_done(idx: int, content: str) -> None:
         results.append((idx, content))
-        if content:
-            if progress_callback:
-                with progress_lock:
-                    completed_words[0] += len(batches[idx][1])
-                    progress_callback(min(completed_words[0], total_words), total_words)
-        else:
-            with progress_lock:
+        batch_word_count = len(batches[idx][1])
+        with progress_lock:
+            completed_words[0] += batch_word_count
+            if not content:
                 failed_words.extend(batches[idx][1])
+        if progress_callback:
+            progress_callback(min(completed_words[0], total_words), total_words)
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = {

@@ -20,9 +20,10 @@ MIN_WORD_LENGTH = 2
 MAX_WORD_LENGTH = 25
 
 AI_BATCH_SIZE = 10     # 每组 10 词
-AI_CONCURRENCY = 10    # 并发 10
+AI_CONCURRENCY = 5     # 并发 5，降低限流概率
 MAX_AUTO_LIMIT = 1000  # 一次性制卡上限
 MAX_RETRIES = 2        # 失败重试 1 次，减少无效消耗
+AI_BATCH_MAX_RETRIES = 4  # 批量制卡每组最多尝试 4 次（3 次重试），应对限流/超时
 
 TTS_CONCURRENCY = 5
 TTS_RETRY_ATTEMPTS = 3
