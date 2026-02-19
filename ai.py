@@ -57,8 +57,8 @@ def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
     return CARD_GEN_USER_TEMPLATE.format(words_str=words_str)
 
 
-def build_thirdparty_prompt(words_str: str) -> str:
-    """Build third-party AI prompt (no limit, up to 500 words per batch)."""
+def build_thirdparty_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
+    """Build third-party AI prompt (fixed collocation format, up to 500 words per batch). fmt ignored."""
     return THIRD_PARTY_CARD_TEMPLATE.format(words_str=words_str)
 
 

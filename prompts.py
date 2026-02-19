@@ -101,32 +101,48 @@ apple ||| 苹果 ||| She ate a red apple. (她吃了一个红苹果。)
 Process the input list strictly adhering to the 10-word limit, minimalist design, absolute single meaning, and formatting above."""
 
 # -----------------------------------------------------------------------------
-# ③ 第三方 AI 专用（无上限，可分组，每批最多 500 词）
+# ③ 第三方 AI 专用（短语词组 + 英文释义 + 例句 + 词源，每批最多 500 词）
+# 占位符：{words_str} 由 ai.build_thirdparty_prompt() 填入
 # -----------------------------------------------------------------------------
 THIRD_PARTY_CARD_TEMPLATE = """# Role
-You are an expert English Teacher and Anki Card Designer for general language learners. Your goal is to create minimalist, high-efficiency flashcards that are extremely easy to memorize.
-
-# CRITICAL CONSTRAINTS (Strictly Enforced)
-1. **BATCH LIMIT (500 Words Max):** Strictly process a maximum of 500 words per request. You may receive fewer; process all provided.
-2. **ABSOLUTE SINGLE MEANING (Chinese Only):** Provide EXACTLY ONE primary, highest-frequency Chinese definition per word.
-   - Absolutely NO slashes (/), NO commas, and NO secondary meanings.
-   - Keep it extremely concise (e.g., output "筒仓", do NOT output "孤立系统 / 筒仓").
-   - Do NOT include English definitions.
-3. **ONE SHORT EXAMPLE:** Provide exactly ONE short, practical English example sentence (ideally under 12 words) per word. It MUST include a natural Chinese translation.
-4. **NO ETYMOLOGY/ROOTS:** Do NOT output any etymology, roots, or affixes.
-
-# Output Format
-1. Strictly inside a single `text` code block.
-2. One entry per line. Separator: `|||`
-3. Structure: `Target Word` ||| `中文释义` ||| `English sentence. (中文翻译。)`
-
-# Valid Examples
-unbelievable ||| 难以置信的 ||| The news was completely unbelievable. (这消息完全令人难以置信。)
-silo ||| 筒仓 ||| The farm built a new silo for the corn. (农场建了一个新的玉米筒仓。)
-apple ||| 苹果 ||| She ate a red apple. (她吃了一个红苹果。)
+You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
+Make sure to process everything in one go, without missing anything.
 
 # Input Data
 {words_str}
 
+# Output Format Guidelines
+1. **Output Container**: Strictly inside a single ```text code block.
+2. **Layout**: One entry per line.
+3. **Separator**: Use `|||` as the delimiter.
+4. **Target Structure**:
+   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
+
+# Field Constraints (Strict)
+1. **Field 1: Phrase (CRITICAL)**
+   - DO NOT output the single target word.
+   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
+   - Example: If input is "rain", output "heavy rain" or "torrential rain".
+
+2. **Field 2: Definition (English)**
+   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
+
+3. **Field 3: Example**
+   - A short, authentic sentence containing the phrase.
+
+4. **Field 4: Roots/Etymology (Simplified Chinese)**
+   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
+   - If no classical roots exist, explain the origin briefly in Chinese.
+   - Use Simplified Chinese for meanings.
+
+# Valid Example (Follow this logic strictly)
+Input: altruism
+Output:
+motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
+
+Input: hectic
+Output:
+a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
+
 # Task
-Process ALL words in the input list (up to 500), one line per word, minimalist design, and formatting above."""
+Process the provided input list strictly adhering to the format above."""

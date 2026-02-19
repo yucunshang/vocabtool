@@ -509,7 +509,7 @@ def _render_thirdparty_section(
     voice_code: str,
     enable_example_audio: bool,
 ) -> None:
-    """选择第三方时：仅显示可复制 Prompt。无上限，可分组，每批最多 500 词。粘贴制卡到第三栏。"""
+    """选择第三方时：可复制 Prompt（短语词组 + 英文释义 + 例句 + 词源）。无上限，可分组，每批最多 500 词。"""
     st.markdown("#### 第三方 AI")
     st.caption("无上限，可分组制卡，每批最多 500 词。复制下方 Prompt 到 ChatGPT / Claude 等，再到第三栏「手动制卡」粘贴结果解析制卡。")
 
