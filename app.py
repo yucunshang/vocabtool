@@ -263,7 +263,10 @@ def _render_builtin_ai_section(
         words_for_auto_ai = words_for_auto_ai[:constants.MAX_AUTO_LIMIT]
 
     if use_builtin_ai == "builtin":
-        if st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", use_container_width=True):
+        col_btn, _ = st.columns([0.35, 1])
+        with col_btn:
+            clicked = st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", key="btn_builtin_gen")
+        if clicked:
             batch_allowed, batch_msg = check_batch_limit()
             if not batch_allowed:
                 st.warning(batch_msg)
@@ -493,11 +496,8 @@ def _render_extract_results() -> None:
         # 第三方 AI 选中时：全宽展示，充分利用空间
         _render_thirdparty_prompt_section(words_only, examples_colloquial, use_builtin_ai)
     else:
-        col_left, col_gap, col_right = st.columns([1, 0.12, 1], vertical_alignment="top")
-        with col_left:
-            _render_builtin_ai_section(words_only, enable_audio, voice_code, shared_card_format, use_builtin_ai)
-        with col_right:
-            _render_thirdparty_prompt_section(words_only, examples_colloquial, use_builtin_ai)
+        # 内置 AI 时：不显示折叠栏，仅展示一键生成区
+        _render_builtin_ai_section(words_only, enable_audio, voice_code, shared_card_format, use_builtin_ai)
 
 
 def _do_lookup(query_word: str) -> None:

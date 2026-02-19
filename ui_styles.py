@@ -172,8 +172,14 @@ APP_STYLES_HTML = """
     }
     /* ② 生成方式：内置 AI / 第三方 AI 选项更大 */
     #ai-gen-mode-radio ~ div .stRadio label {
-        font-size: 1.18rem !important;
-        padding: 0.5rem 1rem !important;
+        font-size: 1.28rem !important;
+        padding: 0.6rem 1.2rem !important;
+        min-height: 2.8rem !important;
+    }
+    /* 一键生成按钮更紧凑（位于 35% 窄列内） */
+    #ai-gen-mode-radio ~ * [data-testid="column"] .stButton > button {
+        min-height: 40px !important;
+        font-size: 16px !important;
     }
 
     /* ===== Number inputs ===== */
