@@ -2,9 +2,11 @@
 # 提示词模板见 prompts.py，可直接修改，不影响制卡 / apkg / 语音 / 卡片格式。
 
 import logging
+import threading
 import time
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Optional, TypedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
 import constants
 from config import get_config
@@ -317,12 +319,49 @@ def get_word_quick_definition(
         return {"error": str(e)}
 
 
+def _process_one_batch(
+    batch_index: int,
+    batch: List[str],
+    client: Any,
+    model_name: str,
+    card_format: Optional[CardFormat],
+) -> Tuple[int, str]:
+    """Process a single batch, return (batch_index, content). Empty string on failure."""
+    current_batch_str = ", ".join(batch)
+    user_prompt = build_card_prompt(current_batch_str, card_format)
+    for attempt in range(constants.MAX_RETRIES):
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": CARD_GEN_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7
+            )
+            content = (response.choices[0].message.content or "").strip()
+            if not content:
+                raise ValueError("Empty AI batch response")
+            return (batch_index, content)
+        except Exception as e:
+            if attempt < constants.MAX_RETRIES - 1:
+                time.sleep(2 ** (attempt + 1))
+                continue
+            else:
+                ErrorHandler.handle(
+                    e,
+                    f"Batch {batch_index + 1} failed after {constants.MAX_RETRIES} attempts",
+                    show_user=True
+                )
+                return (batch_index, "")
+
+
 def process_ai_in_batches(
     words_list: List[str],
     progress_callback: Optional[Callable[[int, int], None]] = None,
     card_format: Optional[CardFormat] = None
 ) -> str:
-    """Process words in batches using AI with progress reporting."""
+    """Process words in batches using AI with progress reporting. Batches run concurrently."""
     if not words_list:
         return ""
 
@@ -332,47 +371,42 @@ def process_ai_in_batches(
 
     model_name = get_config()["openai_model"]
     total_words = len(words_list)
-    full_results: List[str] = []
+    batch_size = constants.AI_BATCH_SIZE
+    concurrency = constants.AI_CONCURRENCY
 
-    system_prompt = CARD_GEN_SYSTEM_PROMPT
+    batches: List[Tuple[int, List[str]]] = []
+    for i in range(0, total_words, batch_size):
+        batch = words_list[i:i + batch_size]
+        batches.append((len(batches), batch))
 
-    for i in range(0, total_words, constants.AI_BATCH_SIZE):
-        batch = words_list[i:i + constants.AI_BATCH_SIZE]
-        current_batch_str = ", ".join(batch)
+    results: List[Tuple[int, str]] = []
+    progress_lock = threading.Lock()
+    completed_words = [0]  # mutable so inner fn can update
 
-        user_prompt = build_card_prompt(current_batch_str, card_format)
+    def _on_batch_done(idx: int, content: str) -> None:
+        results.append((idx, content))
+        if progress_callback and content:
+            with progress_lock:
+                completed_words[0] += len(batches[idx][1])
+                progress_callback(min(completed_words[0], total_words), total_words)
 
-        for attempt in range(constants.MAX_RETRIES):
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = {
+            executor.submit(
+                _process_one_batch,
+                idx, batch, client, model_name, card_format
+            ): idx
+            for idx, batch in batches
+        }
+        for future in as_completed(futures):
             try:
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.7
-                )
-                content = (response.choices[0].message.content or "").strip()
-                if not content:
-                    raise ValueError("Empty AI batch response")
-                full_results.append(content)
-
-                if progress_callback:
-                    processed_count = min(i + constants.AI_BATCH_SIZE, total_words)
-                    progress_callback(processed_count, total_words)
-
-                break
-
+                idx, content = future.result()
+                _on_batch_done(idx, content)
             except Exception as e:
-                if attempt < constants.MAX_RETRIES - 1:
-                    # Exponential backoff: 2s, 4s, 8s, ...
-                    time.sleep(2 ** (attempt + 1))
-                    continue
-                else:
-                    ErrorHandler.handle(
-                        e,
-                        f"Batch {i//constants.AI_BATCH_SIZE + 1} failed after {constants.MAX_RETRIES} attempts",
-                        show_user=True
-                    )
+                batch_idx = futures[future] + 1
+                logger.error("Batch %s unexpected error: %s", batch_idx, e)
+                ErrorHandler.handle(e, f"Batch {batch_idx} unexpected error", show_user=True)
+                _on_batch_done(futures[future], "")
 
-    return "\n".join(full_results)
+    results.sort(key=lambda x: x[0])
+    return "\n".join(content for _, content in results if content)

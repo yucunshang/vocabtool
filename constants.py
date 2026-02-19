@@ -20,6 +20,7 @@ MIN_WORD_LENGTH = 2
 MAX_WORD_LENGTH = 25
 
 AI_BATCH_SIZE = 10   # 每批请求词数，越大 API 调用越少、整体越快，但单次响应更慢
+AI_CONCURRENCY = 3   # 内置 AI 制卡并发批次数
 MAX_AUTO_LIMIT = 200  # 内置 AI 一次性制卡上限
 MAX_RETRIES = 3
 
