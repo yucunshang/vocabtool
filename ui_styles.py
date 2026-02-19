@@ -14,11 +14,12 @@ APP_STYLES_HTML = """
         font-size: 19px;
     }
 
-    /* iOS safe-area support */
+    /* iOS safe-area support + 放宽主内容区宽度以更好利用空间 */
     .main .block-container {
         padding-left: max(1rem, env(safe-area-inset-left));
         padding-right: max(1rem, env(safe-area-inset-right));
         padding-bottom: max(1rem, env(safe-area-inset-bottom));
+        max-width: 1400px;
     }
 
     /* ===== Smooth transitions on all interactive elements ===== */

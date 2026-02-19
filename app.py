@@ -489,13 +489,15 @@ def _render_extract_results() -> None:
     )
     st.markdown("")  # 间距
 
-    col_left, col_gap, col_right = st.columns([1, 0.12, 1], vertical_alignment="top")
-
-    with col_left:
-        _render_builtin_ai_section(words_only, enable_audio, voice_code, shared_card_format, use_builtin_ai)
-
-    with col_right:
+    if use_builtin_ai == "thirdparty":
+        # 第三方 AI 选中时：全宽展示，充分利用空间
         _render_thirdparty_prompt_section(words_only, examples_colloquial, use_builtin_ai)
+    else:
+        col_left, col_gap, col_right = st.columns([1, 0.12, 1], vertical_alignment="top")
+        with col_left:
+            _render_builtin_ai_section(words_only, enable_audio, voice_code, shared_card_format, use_builtin_ai)
+        with col_right:
+            _render_thirdparty_prompt_section(words_only, examples_colloquial, use_builtin_ai)
 
 
 def _do_lookup(query_word: str) -> None:
