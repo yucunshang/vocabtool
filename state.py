@@ -28,7 +28,6 @@ def export_session_json() -> str:
         "word_list_editor": st.session_state.get("word_list_editor", ""),
         "anki_cards_cache": st.session_state.get("anki_cards_cache"),
         "anki_pkg_name": st.session_state.get("anki_pkg_name", ""),
-        "studied_words": list(st.session_state.get("studied_words_set", set())),
     }
     return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -44,4 +43,3 @@ def import_session_json(json_str: str) -> None:
     st.session_state["word_list_editor"] = data.get("word_list_editor", "")
     st.session_state["anki_cards_cache"] = data.get("anki_cards_cache")
     st.session_state["anki_pkg_name"] = data.get("anki_pkg_name", "")
-    st.session_state["studied_words_set"] = set(data.get("studied_words", []))

@@ -227,16 +227,6 @@ def _render_word_editor(data: list) -> list:
     else:
         result_words = words_only
 
-    # Fix 10: Studied words duplicate detection
-    studied = st.session_state.get("studied_words_set", set())
-    if studied:
-        overlap = [w for w in result_words if w.lower() in studied]
-        if overlap:
-            preview = ", ".join(overlap[:10]) + ("..." if len(overlap) > 10 else "")
-            st.caption(f"📚 {len(overlap)} 个词已在学习记录中：{preview}")
-            if st.checkbox("过滤已学词", key="chk_filter_studied"):
-                result_words = [w for w in result_words if w.lower() not in studied]
-
     return result_words
 
 
@@ -401,7 +391,7 @@ def _render_builtin_ai_section(
                     try:
                         edited_data = cards
                         st.session_state["_builtin_parsed_cards"] = edited_data
-                        st.session_state["anki_cards_cache"] = edited_data  # Fix 10: for mark-as-studied
+                        st.session_state["anki_cards_cache"] = edited_data
 
                         audio_text2 = st.empty()
                         audio_bar2 = st.progress(0.0)
@@ -451,15 +441,6 @@ def _render_builtin_ai_section(
         button_type="primary",
         use_container_width=True,
     )
-
-    # Fix 10: Mark as studied after downloading
-    if st.session_state.get("anki_pkg_path") and st.session_state.get("anki_cards_cache"):
-        if st.button("📚 标记为已学", key="btn_mark_studied_builtin"):
-            cards_to_mark = st.session_state.get("anki_cards_cache") or []
-            studied = st.session_state.get("studied_words_set", set())
-            studied.update(c.get("w", "").lower() for c in cards_to_mark if c.get("w"))
-            st.session_state["studied_words_set"] = studied
-            st.toast(f"已记录 {len(cards_to_mark)} 个词到学习历史", icon="📚")
 
     # Audio retry: only re-run TTS for files still missing (cache skips successful ones)
     audio_failed = st.session_state.get("_builtin_audio_failed_count", 0)
@@ -886,7 +867,7 @@ with st.expander("使用指南 & 支持格式", expanded=False):
 with st.expander("💾 存档 / 📂 读取进度", expanded=False):
     col_save, col_load = st.columns(2)
     with col_save:
-        st.caption("导出当前单词列表、卡片缓存和学习记录。")
+        st.caption("导出当前单词列表和卡片缓存。")
         json_blob = export_session_json()
         st.download_button(
             "💾 导出当前进度",
@@ -1285,15 +1266,6 @@ with tab_anki:
             f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
             button_type="primary"
         )
-
-        # Fix 10: Mark as studied after downloading
-        if st.session_state.get("anki_pkg_path"):
-            if st.button("📚 标记为已学", key="btn_mark_studied_anki"):
-                cards_to_mark = st.session_state.get("anki_cards_cache") or []
-                studied = st.session_state.get("studied_words_set", set())
-                studied.update(c.get("w", "").lower() for c in cards_to_mark if c.get("w"))
-                st.session_state["studied_words_set"] = studied
-                st.toast(f"已记录 {len(cards_to_mark)} 个词到学习历史", icon="📚")
 
         # Audio retry for manual tab
         manual_audio_failed = st.session_state.get("_manual_audio_failed_count", 0)
