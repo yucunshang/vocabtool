@@ -232,7 +232,7 @@ def _render_word_editor(data: list) -> list:
 def _render_audio_settings(key_prefix: str) -> tuple[bool, str, bool]:
     """Render audio toggle + voice selector + example audio.
     Returns (enable_audio, voice_code, enable_example_audio)."""
-    enable_audio = st.checkbox("启用语音", value=False, key=f"chk_audio_{key_prefix}")
+    enable_audio = st.checkbox("启用语音", value=True, key=f"chk_audio_{key_prefix}")
     enable_example_audio = True
     if enable_audio:
         selected_voice_label = st.radio(
@@ -1001,7 +1001,7 @@ with tab_anki:
     )
     manual_voice_code = constants.VOICE_MAP[manual_voice_label]
 
-    enable_audio = st.checkbox("启用语音", value=False, key="chk_audio_manual")
+    enable_audio = st.checkbox("启用语音", value=True, key="chk_audio_manual")
     manual_enable_example_audio = st.checkbox("例句发音", value=True, key="chk_example_audio_manual", help="为例句生成语音")
 
     col_btn1, col_btn2 = st.columns([1, 4])
