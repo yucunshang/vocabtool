@@ -30,7 +30,7 @@ from rate_limiter import (
 )
 from state import set_generated_words_state
 from ui_styles import APP_STYLES_HTML
-from utils import get_beijing_time_str, render_copy_button, run_gc
+from utils import get_beijing_time_str, render_copy_button, render_prompt_copy_button, run_gc
 from vocab import analyze_logic
 
 logger = logging.getLogger(__name__)
@@ -440,6 +440,7 @@ def _render_thirdparty_prompt_section(
 
         words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[INSERT YOUR WORD LIST HERE]"
         strict_prompt_template = build_card_prompt(words_str_for_prompt, third_party_card_format)
+        render_prompt_copy_button(strict_prompt_template, key="copy_tp_prompt")
         st.code(strict_prompt_template, language="text")
 
 
