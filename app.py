@@ -373,7 +373,7 @@ def _render_thirdparty_prompt_section(
                 "正面",
                 options=["word", "phrase"],
                 format_func=lambda x: "单词" if x == "word" else "短语/词组",
-                index=0,
+                index=1,
                 key="tp_prompt_front",
             )
         with r1b:
@@ -386,7 +386,7 @@ def _render_thirdparty_prompt_section(
                     "en_native": "英文（母语者词典）",
                     "both": "中英双语",
                 }[x],
-                index=0,
+                index=2,
                 key="tp_prompt_def",
             )
         r2a, r2b = st.columns(2)
@@ -395,11 +395,11 @@ def _render_thirdparty_prompt_section(
                 "例句数量",
                 options=[1, 2, 3],
                 format_func=lambda x: f"{x} 条",
-                index=1,
+                index=2,
                 key="tp_prompt_ex",
             )
         with r2b:
-            tp_ety = st.checkbox("词根词源词缀", value=False, key="tp_prompt_ety")
+            tp_ety = st.checkbox("词根词源词缀", value=True, key="tp_prompt_ety")
         st.markdown("**例句样式**")
         r3a, r3b = st.columns(2)
         with r3a:
