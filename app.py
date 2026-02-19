@@ -403,7 +403,7 @@ def _render_thirdparty_prompt_section(
         st.markdown("**例句样式**")
         r3a, r3b = st.columns(2)
         with r3a:
-            tp_ex_cn = st.checkbox("例句带中文翻译", value=True, key="tp_prompt_ex_cn")
+            tp_ex_cn = st.checkbox("例句带中文翻译", value=False, key="tp_prompt_ex_cn")
         with r3b:
             tp_colloquial = st.checkbox("例句用口语", value=examples_colloquial, key="tp_prompt_colloquial", help="例句使用日常口语化表达")
 
