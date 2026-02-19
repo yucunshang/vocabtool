@@ -360,14 +360,18 @@ def process_ai_in_batches(
     words_list: List[str],
     progress_callback: Optional[Callable[[int, int], None]] = None,
     card_format: Optional[CardFormat] = None
-) -> str:
-    """Process words in batches using AI with progress reporting. Batches run concurrently."""
+) -> Tuple[str, List[str]]:
+    """Process words in batches using AI with progress reporting. Batches run concurrently.
+
+    Returns:
+        (content, failed_words): concatenated AI text and list of words whose batch failed.
+    """
     if not words_list:
-        return ""
+        return "", []
 
     client = get_openai_client()
     if not client:
-        return ""
+        return "", []
 
     model_name = get_config()["openai_model"]
     total_words = len(words_list)
@@ -380,15 +384,20 @@ def process_ai_in_batches(
         batches.append((len(batches), batch))
 
     results: List[Tuple[int, str]] = []
+    failed_words: List[str] = []
     progress_lock = threading.Lock()
     completed_words = [0]  # mutable so inner fn can update
 
     def _on_batch_done(idx: int, content: str) -> None:
         results.append((idx, content))
-        if progress_callback and content:
+        if content:
+            if progress_callback:
+                with progress_lock:
+                    completed_words[0] += len(batches[idx][1])
+                    progress_callback(min(completed_words[0], total_words), total_words)
+        else:
             with progress_lock:
-                completed_words[0] += len(batches[idx][1])
-                progress_callback(min(completed_words[0], total_words), total_words)
+                failed_words.extend(batches[idx][1])
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = {
@@ -409,4 +418,4 @@ def process_ai_in_batches(
                 _on_batch_done(futures[future], "")
 
     results.sort(key=lambda x: x[0])
-    return "\n".join(content for _, content in results if content)
+    return "\n".join(content for _, content in results if content), failed_words

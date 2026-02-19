@@ -28,7 +28,7 @@ from rate_limiter import (
     check_batch_limit, check_lookup_limit, check_url_limit,
     record_batch, record_lookup, record_url,
 )
-from state import set_generated_words_state
+from state import export_session_json, import_session_json, set_generated_words_state
 from ui_styles import APP_STYLES_HTML
 from utils import get_beijing_time_str, render_copy_button, render_prompt_copy_button, run_gc
 from vocab import analyze_logic
@@ -222,11 +222,22 @@ def _render_word_editor(data: list) -> list:
     )
 
     if edited_words != words_text:
-        edited_word_list = [w.strip() for w in edited_words.split('\n') if w.strip()]
-        st.info(f"📝 已编辑：当前共 {len(edited_word_list)} 个单词")
-        return edited_word_list
+        result_words = [w.strip() for w in edited_words.split('\n') if w.strip()]
+        st.info(f"📝 已编辑：当前共 {len(result_words)} 个单词")
     else:
-        return words_only
+        result_words = words_only
+
+    # Fix 10: Studied words duplicate detection
+    studied = st.session_state.get("studied_words_set", set())
+    if studied:
+        overlap = [w for w in result_words if w.lower() in studied]
+        if overlap:
+            preview = ", ".join(overlap[:10]) + ("..." if len(overlap) > 10 else "")
+            st.caption(f"📚 {len(overlap)} 个词已在学习记录中：{preview}")
+            if st.checkbox("过滤已学词", key="chk_filter_studied"):
+                result_words = [w for w in result_words if w.lower() not in studied]
+
+    return result_words
 
 
 def _render_audio_settings(key_prefix: str) -> tuple[bool, str, bool]:
@@ -253,23 +264,57 @@ def _render_builtin_ai_section(
     words_only: list, enable_audio: bool, voice_code: str, enable_example_audio: bool,
     card_format, use_builtin_ai: str
 ) -> None:
-    """Builtin AI generation flow: button → progress → parse → package → download."""
+    """Builtin AI generation flow: button → progress → parse → edit → package → download."""
     ai_model_label = get_config()["openai_model"]
 
-    words_for_auto_ai = words_only
-    current_word_count = len(words_for_auto_ai)
-    if current_word_count > constants.MAX_AUTO_LIMIT:
-        st.caption(
-            f"⚠️ 当前 {current_word_count} 词；内置 AI 最多处理前 {constants.MAX_AUTO_LIMIT} 词。"
-            " 可选「第三方 AI」复制 Prompt 分批处理。"
-        )
-        words_for_auto_ai = words_for_auto_ai[:constants.MAX_AUTO_LIMIT]
+    # Fix 1: Deck name input
+    deck_name = st.text_input(
+        "🏷️ 牌组名称",
+        value=f"Vocab_{get_beijing_time_str()}",
+        key="builtin_deck_name",
+        help="生成的 .apkg 文件和 Anki 牌组名称",
+    )
+
+    # Fix 7: Pagination — slice words into pages of MAX_AUTO_LIMIT
+    total_word_count = len(words_only)
+    page_size = constants.MAX_AUTO_LIMIT
+    page = st.session_state.get("_builtin_gen_page", 0)
+    start_idx = page * page_size
+    end_idx = (page + 1) * page_size
+    words_for_auto_ai = words_only[start_idx:min(end_idx, total_word_count)]
+    remaining_words = max(0, total_word_count - end_idx)
+
+    if total_word_count > page_size:
+        if page == 0:
+            st.caption(
+                f"⚠️ 共 {total_word_count} 词，首批处理前 {len(words_for_auto_ai)} 词。"
+                " 生成并确认后可继续处理剩余词汇。"
+            )
+        else:
+            st.caption(
+                f"⚠️ 第 {page + 1} 批，第 {start_idx + 1}–{min(end_idx, total_word_count)} 词"
+                f"（共 {total_word_count} 词）。"
+            )
 
     if use_builtin_ai == "builtin":
+        # Handle auto-generate flag set by "继续下一批" button
+        auto_generate = st.session_state.pop("_builtin_auto_generate", False)
+
         col_btn, _ = st.columns([0.35, 1])
         with col_btn:
             clicked = st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", key="btn_builtin_gen")
+
         if clicked:
+            # Fresh generate: reset page and clear previous cards
+            st.session_state["_builtin_gen_page"] = 0
+            st.session_state.pop("_builtin_parsed_cards", None)
+            st.session_state.pop("_builtin_ai_partial_result", None)
+            st.session_state.pop("card_editor", None)
+            # Re-compute pagination for page 0
+            words_for_auto_ai = words_only[:page_size]
+            remaining_words = max(0, total_word_count - page_size)
+
+        if clicked or auto_generate:
             batch_allowed, batch_msg = check_batch_limit()
             if not batch_allowed:
                 st.warning(batch_msg)
@@ -280,7 +325,6 @@ def _render_builtin_ai_section(
             card_text = st.empty()
             card_bar = st.progress(0.0)
             audio_text = st.empty()
-            audio_bar = st.progress(0.0)
 
             total_words = len(words_for_auto_ai)
             batch_size = constants.AI_BATCH_SIZE
@@ -298,46 +342,45 @@ def _render_builtin_ai_section(
                 end = min(batch_idx * batch_size, total)
                 card_text.markdown(f"**制卡进度**：第 {batch_idx} 组（{start}–{end}/{total}）AI 生成中...")
 
-            ai_result = process_ai_in_batches(
+            # Fix 3: Unpack (content, failed_words) tuple
+            ai_result, failed_words = process_ai_in_batches(
                 words_for_auto_ai,
                 progress_callback=update_ai_progress,
                 card_format=card_format,
             )
+
+            # Fix 3: Report failed words
+            if failed_words:
+                st.warning(
+                    f"⚠️ {len(failed_words)} 个词生成失败，已跳过："
+                    f"{', '.join(failed_words[:20])}"
+                    + ("..." if len(failed_words) > 20 else "")
+                )
 
             if ai_result:
                 card_text.markdown("**制卡进度**：正在解析 AI 结果...")
                 parsed_data = parse_anki_data(ai_result)
 
                 if parsed_data:
-                    try:
-                        card_bar.progress(1.0)
-                        card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
-                        audio_text.markdown("**音频进度**：进行中...")
-                        audio_bar.progress(0.0)
-                        deck_name = f"Vocab_{get_beijing_time_str()}"
+                    card_bar.progress(1.0)
+                    card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
+                    audio_text.markdown("**音频进度**：请在下方确认卡片后开始。")
 
-                        def update_pkg_progress(ratio: float, text: str) -> None:
-                            audio_bar.progress(ratio)
-                            audio_text.markdown(f"**音频进度**：{text}")
+                    # Fix 4: Checkpoint — save raw AI text in case packaging fails
+                    st.session_state["_builtin_ai_partial_result"] = ai_result
 
-                        file_path = generate_anki_package(
-                            parsed_data,
-                            deck_name,
-                            enable_tts=enable_audio,
-                            tts_voice=voice_code,
-                            enable_example_tts=enable_example_audio,
-                            progress_callback=update_pkg_progress
-                        )
+                    # Fix 5: Save cards for editing; append if continuing a batch
+                    if auto_generate:
+                        existing = st.session_state.get("_builtin_parsed_cards") or []
+                        st.session_state["_builtin_parsed_cards"] = existing + parsed_data
+                        st.session_state.pop("card_editor", None)
+                    else:
+                        st.session_state["_builtin_parsed_cards"] = parsed_data
 
-                        set_anki_pkg(file_path, deck_name)
-
-                        audio_bar.progress(1.0)
-                        audio_text.markdown("**音频进度**：✅ 完成")
-                        st.balloons()
-                        run_gc()
-                    except Exception as e:
-                        audio_text.markdown("**音频进度**：❌ 失败")
-                        ErrorHandler.handle(e, "生成出错")
+                    st.info(
+                        f"✅ 解析完成，共 {len(st.session_state['_builtin_parsed_cards'])} 张卡片。"
+                        " 请在下方确认并编辑后生成 .apkg。"
+                    )
                 else:
                     card_text.markdown("**制卡进度**：❌ 解析失败")
                     audio_text.markdown("**音频进度**：未开始")
@@ -346,19 +389,139 @@ def _render_builtin_ai_section(
                 card_text.markdown("**制卡进度**：❌ AI 生成失败")
                 audio_text.markdown("**音频进度**：未开始")
                 st.error("AI 生成失败，请检查 API Key 或网络连接。")
+
+        # Fix 5: Card editor — shown whenever cards are in session state
+        if st.session_state.get("_builtin_parsed_cards"):
+            cards = st.session_state["_builtin_parsed_cards"]
+
+            st.markdown("#### ✏️ 确认并编辑卡片")
+            st.caption(f"共 {len(cards)} 张卡片，可直接在下方编辑后点击「确认并生成」。")
+
+            cards_df = pd.DataFrame(cards)
+            col_config = {
+                "w": st.column_config.TextColumn("单词/短语"),
+                "m": st.column_config.TextColumn("释义"),
+                "e": st.column_config.TextColumn("例句"),
+            }
+            if "r" in cards_df.columns:
+                col_config["r"] = st.column_config.TextColumn("词源")
+
+            edited_df = st.data_editor(
+                cards_df,
+                column_config=col_config,
+                use_container_width=True,
+                num_rows="dynamic",
+                key="card_editor",
+            )
+
+            # Fix 6: Individual card regeneration
+            word_list_for_regen = [c.get("w", "") for c in cards if c.get("w")]
+            if word_list_for_regen:
+                col_sel, col_regen_btn = st.columns([3, 1])
+                with col_sel:
+                    regen_word = st.selectbox(
+                        "选择要重新生成的词",
+                        options=word_list_for_regen,
+                        key="regen_word_select",
+                    )
+                with col_regen_btn:
+                    if st.button("🔄 重新生成", key="btn_regen_single"):
+                        with st.spinner(f"正在重新生成「{regen_word}」..."):
+                            new_result, _ = process_ai_in_batches([regen_word], card_format=card_format)
+                            if new_result:
+                                new_cards = parse_anki_data(new_result)
+                                if new_cards:
+                                    current_cards = list(st.session_state["_builtin_parsed_cards"])
+                                    idx = next(
+                                        (i for i, c in enumerate(current_cards) if c.get("w") == regen_word),
+                                        None,
+                                    )
+                                    if idx is not None:
+                                        current_cards[idx] = new_cards[0]
+                                        st.session_state["_builtin_parsed_cards"] = current_cards
+                                        st.session_state.pop("card_editor", None)
+                                        st.toast(f"「{regen_word}」已重新生成", icon="✅")
+                                        st.rerun()
+                                    else:
+                                        st.warning(f"未找到词条「{regen_word}」")
+                                else:
+                                    st.warning("重新生成失败，AI 返回格式错误。")
+                            else:
+                                st.warning("重新生成失败，请检查网络连接。")
+
+            # Confirm button + next-batch button
+            col_confirm, col_continue = st.columns([2, 1])
+            with col_confirm:
+                if st.button(
+                    "✅ 确认并生成 .apkg", key="btn_confirm_gen",
+                    type="primary", use_container_width=True
+                ):
+                    try:
+                        edited_data = edited_df.to_dict("records")
+                        st.session_state["_builtin_parsed_cards"] = edited_data
+                        st.session_state["anki_cards_cache"] = edited_data  # Fix 10: for mark-as-studied
+
+                        audio_text2 = st.empty()
+                        audio_bar2 = st.progress(0.0)
+                        audio_text2.markdown("**音频进度**：进行中...")
+
+                        def update_pkg_progress(ratio: float, text: str) -> None:
+                            audio_bar2.progress(ratio)
+                            audio_text2.markdown(f"**音频进度**：{text}")
+
+                        current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
+                        file_path = generate_anki_package(
+                            edited_data,
+                            current_deck_name,
+                            enable_tts=enable_audio,
+                            tts_voice=voice_code,
+                            enable_example_tts=enable_example_audio,
+                            progress_callback=update_pkg_progress,
+                        )
+                        set_anki_pkg(file_path, current_deck_name)
+                        audio_bar2.progress(1.0)
+                        audio_text2.markdown("**音频进度**：✅ 完成")
+                        st.balloons()
+                        run_gc()
+                    except Exception as e:
+                        ErrorHandler.handle(e, "生成出错")
+
+            # Fix 7: Continue with next batch
+            with col_continue:
+                if remaining_words > 0:
+                    if st.button(
+                        f"▶ 下一批（剩余 {remaining_words} 词）",
+                        key="btn_gen_next_page",
+                        use_container_width=True,
+                    ):
+                        st.session_state["_builtin_gen_page"] = page + 1
+                        st.session_state["_builtin_auto_generate"] = True
+                        st.rerun()
+
     else:
         st.info("请使用右侧「复制 Prompt」到第三方 AI，格式与上方通用设置一致。")
 
     render_anki_download_button(
         f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
         button_type="primary",
-        use_container_width=True
+        use_container_width=True,
     )
+
+    # Fix 10: Mark as studied after downloading
+    if st.session_state.get("anki_pkg_path") and st.session_state.get("anki_cards_cache"):
+        if st.button("📚 标记为已学", key="btn_mark_studied_builtin"):
+            cards_to_mark = st.session_state.get("anki_cards_cache") or []
+            studied = st.session_state.get("studied_words_set", set())
+            studied.update(c.get("w", "").lower() for c in cards_to_mark if c.get("w"))
+            st.session_state["studied_words_set"] = studied
+            st.toast(f"已记录 {len(cards_to_mark)} 个词到学习历史", icon="📚")
+
     st.caption("⚠️ AI 结果请人工复核后再学习。")
 
 
 def _render_thirdparty_prompt_section(
-    words_only: list, examples_colloquial: bool, use_builtin_ai: str
+    words_only: list, examples_colloquial: bool, use_builtin_ai: str,
+    enable_audio: bool = True, voice_code: str = "", enable_example_audio: bool = True
 ) -> None:
     """Render card-format options and a copyable prompt block for third-party AI services."""
     if use_builtin_ai == "thirdparty":
@@ -453,6 +616,54 @@ def _render_thirdparty_prompt_section(
         render_prompt_copy_button(strict_prompt_template, key="copy_tp_prompt")
         st.code(strict_prompt_template, language="text")
 
+    # Fix 8: Inline paste area — users can paste the AI response without switching tabs
+    st.markdown("---")
+    st.markdown("#### ② 粘贴 AI 返回结果（可选，无需切换到「anki制卡」页）")
+    st.info("💡 将第三方 AI 的返回结果粘贴到下方，直接生成 .apkg，无需切换标签页。")
+    tp_deck_name = st.text_input(
+        "牌组名称",
+        value=f"Vocab_{get_beijing_time_str()}",
+        key="tp_inline_deck_name",
+    )
+    inline_ai_response = st.text_area(
+        "粘贴第三方 AI 返回内容",
+        height=200,
+        key="inline_thirdparty_response",
+        placeholder="hectic ||| 忙乱的 ||| She has a hectic schedule today. |||…",
+    )
+    if st.button("📦 解析并生成 .apkg", key="btn_inline_thirdparty_gen"):
+        if inline_ai_response.strip():
+            with st.spinner("⏳ 正在解析并生成..."):
+                parsed = parse_anki_data(inline_ai_response)
+                if parsed:
+                    try:
+                        _tp_voice = voice_code if voice_code else list(constants.VOICE_MAP.values())[0]
+                        file_path = generate_anki_package(
+                            parsed,
+                            tp_deck_name,
+                            enable_tts=enable_audio,
+                            tts_voice=_tp_voice,
+                            enable_example_tts=enable_example_audio,
+                        )
+                        set_anki_pkg(file_path, tp_deck_name)
+                        st.session_state["anki_cards_cache"] = parsed
+                        st.success(f"✅ 已生成 {len(parsed)} 张卡片")
+                        st.balloons()
+                        run_gc()
+                    except Exception as e:
+                        ErrorHandler.handle(e, "生成文件出错")
+                else:
+                    st.error("❌ 解析失败，请检查输入格式。")
+        else:
+            st.warning("⚠️ 请先粘贴 AI 返回内容。")
+
+    render_anki_download_button(
+        f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
+        button_type="primary",
+        use_container_width=True,
+    )
+    st.caption("⚠️ AI 结果请人工复核后再学习。")
+
 
 def _render_extract_results() -> None:
     """Render the extracted words results, AI card generation, and third-party prompt."""
@@ -480,13 +691,47 @@ def _render_extract_results() -> None:
         help="例句使用日常口语化表达，而非书面语",
     )
 
-    # 固定模板：正面单词，反面中英释义（学习型词典）+ 3 条例句带中文翻译 + 词源
+    # Fix 2: Configurable card format for built-in AI
+    with st.expander("⚙️ 卡片格式（内置 AI）", expanded=False):
+        st.caption("仅影响「内置 AI 一键生成」；第三方 AI Prompt 在下方单独设置。")
+        _cf_col_a, _cf_col_b = st.columns(2)
+        with _cf_col_a:
+            builtin_front = st.selectbox(
+                "正面",
+                options=["word", "phrase"],
+                format_func=lambda x: "单词" if x == "word" else "短语/词组",
+                index=0,
+                key="builtin_front",
+            )
+            builtin_def = st.selectbox(
+                "释义",
+                options=["cn", "en", "en_native", "both"],
+                format_func=lambda x: {
+                    "cn": "中文",
+                    "en": "英文（学习型词典）",
+                    "en_native": "英文（母语者词典）",
+                    "both": "中英双语",
+                }[x],
+                index=3,
+                key="builtin_def",
+            )
+        with _cf_col_b:
+            builtin_ex = st.selectbox(
+                "例句数量",
+                options=[1, 2, 3],
+                format_func=lambda x: f"{x} 条",
+                index=2,
+                key="builtin_ex",
+            )
+            builtin_ety = st.checkbox("词根词源", value=True, key="builtin_ety")
+        builtin_ex_cn = st.checkbox("例句带中文翻译", value=True, key="builtin_ex_cn")
+
     shared_card_format: CardFormat = {
-        "front": "word",
-        "definition": "both",
-        "examples": 3,
-        "examples_with_cn": True,
-        "etymology": True,
+        "front": builtin_front,
+        "definition": builtin_def,
+        "examples": builtin_ex,
+        "examples_with_cn": builtin_ex_cn,
+        "etymology": builtin_ety,
         "examples_colloquial": examples_colloquial,
     }
 
@@ -505,7 +750,7 @@ def _render_extract_results() -> None:
 
     if use_builtin_ai == "thirdparty":
         # 第三方 AI 选中时：全宽展示，充分利用空间
-        _render_thirdparty_prompt_section(words_only, examples_colloquial, use_builtin_ai)
+        _render_thirdparty_prompt_section(words_only, examples_colloquial, use_builtin_ai, enable_audio, voice_code, enable_example_audio)
     else:
         # 内置 AI 时：不显示折叠栏，仅展示一键生成区
         _render_builtin_ai_section(words_only, enable_audio, voice_code, enable_example_audio, shared_card_format, use_builtin_ai)
@@ -693,6 +938,32 @@ with st.expander("使用指南 & 支持格式", expanded=False):
     **支持的文件格式**
     TXT · PDF · DOCX · EPUB · CSV · XLSX · XLS · DB · SQLite · Anki 导出 (.txt)
     """)
+
+# Fix 9: Session save/restore
+with st.expander("💾 存档 / 📂 读取进度", expanded=False):
+    col_save, col_load = st.columns(2)
+    with col_save:
+        st.caption("导出当前单词列表、卡片缓存和学习记录。")
+        json_blob = export_session_json()
+        st.download_button(
+            "💾 导出当前进度",
+            data=json_blob,
+            file_name=f"vocabflow_{get_beijing_time_str()}.json",
+            mime="application/json",
+            key="btn_export_session",
+        )
+    with col_load:
+        st.caption("导入之前导出的 .json 存档文件。")
+        uploaded_session = st.file_uploader(
+            "📂 导入存档文件", type=["json"], key="session_import"
+        )
+        if uploaded_session is not None:
+            try:
+                import_session_json(uploaded_session.read().decode())
+                st.success("✅ 已恢复进度")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ 存档文件格式错误：{e}")
 
 tab_lookup, tab_extract, tab_anki = st.tabs([
     "AI查词",
@@ -1066,6 +1337,15 @@ with tab_anki:
             f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
             button_type="primary"
         )
+
+        # Fix 10: Mark as studied after downloading
+        if st.session_state.get("anki_pkg_path"):
+            if st.button("📚 标记为已学", key="btn_mark_studied_anki"):
+                cards_to_mark = st.session_state.get("anki_cards_cache") or []
+                studied = st.session_state.get("studied_words_set", set())
+                studied.update(c.get("w", "").lower() for c in cards_to_mark if c.get("w"))
+                st.session_state["studied_words_set"] = studied
+                st.toast(f"已记录 {len(cards_to_mark)} 个词到学习历史", icon="📚")
 
 st.markdown(
     '<div class="app-footer">Vocab Flow Ultra &nbsp;·&nbsp; Built for learners</div>',

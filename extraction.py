@@ -129,7 +129,24 @@ def extract_text_from_url(url: str) -> str:
         for element in soup(["script", "style", "nav", "footer", "iframe", "noscript"]):
             element.decompose()
 
-        return soup.get_text(separator=' ', strip=True)
+        text = soup.get_text(separator=' ', strip=True)
+
+        # If extracted text is very short, try Jina Reader as fallback (handles JS-rendered pages)
+        if len(text.split()) < 100:
+            try:
+                jina_url = f"https://r.jina.ai/{url}"
+                jina_resp = requests.get(
+                    jina_url,
+                    headers={"Accept": "text/plain"},
+                    timeout=constants.REQUEST_TIMEOUT_SECONDS,
+                )
+                jina_resp.raise_for_status()
+                if len(jina_resp.text.split()) > len(text.split()):
+                    return jina_resp.text
+            except Exception:
+                pass  # Fall through to original text
+
+        return text
     except requests.RequestException as e:
         return ErrorHandler.handle_file_error(e, "URL")
     except Exception as e:
