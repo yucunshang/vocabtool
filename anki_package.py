@@ -92,20 +92,12 @@ def _extract_answer_word_from_meaning(meaning: str) -> str:
     return first_line
 
 
-def _normalize_cloze_phrase(phrase: str, meaning: str) -> str:
-    """Ensure Phrase uses {{c1::word}} so Anki generates cards.
-
-    Anki Cloze model only creates cards when the cloze field contains {{c1::...}}.
-    If AI returns ________ (underscores), convert to {{c1::word}} using word from Meaning.
-    """
-    if not phrase or "{{c1::" in phrase:
+def _phrase_for_reading_card(phrase: str) -> str:
+    """Convert {{c1::word}} to ________ for display on FRONT_BACK (question) card."""
+    if not phrase:
         return phrase
-    if "________" not in phrase:
-        return phrase
-    word = _extract_answer_word_from_meaning(meaning)
-    if not word:
-        return phrase
-    return phrase.replace("________", f"{{{{c1::{word}}}}}", 1)
+    # Replace {{c1::...}} with ________ so front shows a clean blank
+    return re.sub(r'\{\{c1::([^}]+)\}\}', '________', phrase)
 
 
 def generate_anki_package(
@@ -206,10 +198,10 @@ def generate_anki_package(
     model_id = model_id_map.get(card_type, constants.ANKI_MODEL_ID)
 
     # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
-    # Cloze model MUST use "Text" as first field name (Anki/genanki convention)
+    # Reading card (cloze) uses FRONT_BACK: front = sentence with ________, back = answer + meaning + example
     if card_type == "cloze":
-        qfmt = '{{cloze:Text}}'
-        afmt = '{{cloze:Text}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+        qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div>'
+        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
     elif card_type == "production":
         qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
@@ -220,19 +212,17 @@ def generate_anki_package(
         qfmt = '<div class="phrase">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}'
 
-    # Cloze model requires first field named "Text" (Anki convention)
-    field_names = (
-        ['Text', 'Meaning', 'Example', 'Etymology', 'Audio_Phrase', 'Audio_Example']
-        if card_type == "cloze"
-        else ['Phrase', 'Meaning', 'Example', 'Etymology', 'Audio_Phrase', 'Audio_Example']
-    )
     model = genanki.Model(
         model_id,
         f'VocabFlow {card_type.capitalize()}',
-        fields=[{'name': n} for n in field_names],
+        fields=[
+            {'name': 'Phrase'}, {'name': 'Meaning'},
+            {'name': 'Example'}, {'name': 'Etymology'},
+            {'name': 'Audio_Phrase'}, {'name': 'Audio_Example'}
+        ],
         templates=[{'name': 'Card', 'qfmt': qfmt, 'afmt': afmt}],
         css=CSS,
-        model_type=genanki.Model.CLOZE if card_type == "cloze" else genanki.Model.FRONT_BACK
+        model_type=genanki.Model.FRONT_BACK
     )
 
     deck = genanki.Deck(DECK_ID, deck_name)
@@ -255,7 +245,7 @@ def generate_anki_package(
         etymology = safe_str_clean(card.get('r', ''))
         note_id = card.get('id')
         if card_type == "cloze":
-            phrase = _normalize_cloze_phrase(phrase, meaning)
+            phrase = _phrase_for_reading_card(phrase)
 
         example_sentences = _split_examples(raw_example)
         example_display = "<br>".join(
