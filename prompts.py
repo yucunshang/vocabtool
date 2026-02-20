@@ -102,36 +102,31 @@ date ||| 日期 | Specific day of the month ||| What is today's date? (今天是
 Process the list (max 10 words per request). One line per word/phrase. 中英释义 (Chinese | English) REQUIRED, one example with natural Chinese translation, no etymology. Ensure zero errors."""
 
 # -----------------------------------------------------------------------------
-# ②b 阅读卡（语境填空）5 字段：cloze({{c1::word}}) | word/IPA | 释义 | 搭配 | 完整句
+# ②b 阅读卡（语境填空）3 字段：挖空句 ||| 单词/音标 释义 ||| 例句
 # -----------------------------------------------------------------------------
 CARD_GEN_CLOZE_TEMPLATE = """# Role
-You are a strict, highly accurate Anki cloze card generator. Your primary goal is to create context-rich sentences where ONLY the target word makes logical and grammatical sense.
+Reading Card Generator. Create fill-in-the-blank sentences where ONLY the target word fits.
 
-# Sentence Quality Constraints (CRITICAL)
-Before generating, ensure your sentence passes these 3 tests:
-1. Uniqueness (The "Only One Word Fits" Test): You MUST add specific contextual clues, strong collocations, or factual constraints.
-   - BAD: "He hid it in the ___." (Could be box, drawer, mind).
-   - GOOD: "He hung his shirts, jackets, and winter coats in the wooden ___." (Context heavily forces "closet").
-2. Show, Don't Tell: Do not write dictionary definitions. Embed the word in a vivid, real-world scenario.
-3. Typical Usage: Use the word in its most frequent, native-sounding collocation.
+# Rules
+1. **Uniqueness**: Add specific context so only one word fits. BAD: "He put it in the ___." GOOD: "He hung his coats in the wooden ___."
+2. **Blank**: Use exactly eight underscores ________ where the word goes. No {{c1::}} or other markup.
+3. **Meaning**: One line: word /IPA/ pos. 中文释义. Example: brass /bræs/ n. 黄铜
 
-# Output Format Specification
-You MUST output EXACTLY 5 fields separated by the string ` ||| `.
-DO NOT use markdown tables, bullet points, numbering, or extra line breaks. Output plain text only.
-Use the standard Anki cloze format `{{c1::word}}` for the target word in the first field.
-
-Template:
-[Cloze Sentence with {{c1::word}}] ||| [Word] / [{ipa_style} IPA] ||| [Chinese Definition] ||| [2-3 English Collocations with Chinese meaning] ||| [Original Full Sentence]
+# Output Format
+Exactly 3 fields per line, separated by ` ||| `. No markdown, no extra line breaks.
+Field 1: Sentence with ________
+Field 2: word /IPA/ pos. 中文释义
+Field 3: Full sentence with answer. (中文翻译)
 
 # Example
 Input: brass, dam
 
 Output:
-The doorknob, made of polished {{c1::brass}}, gleamed with a yellowish-gold metallic shine in the hallway light. ||| brass / bræs ||| n. 黄铜 ||| polished brass (抛光的黄铜), brass instrument (铜管乐器) ||| The doorknob, made of polished brass, gleamed with a yellowish-gold metallic shine in the hallway light.
-The beavers worked tirelessly, gnawing down trees to build a wooden {{c1::dam}} across the stream to block the water flow. ||| dam / dæm ||| n. 水坝，堰 ||| build a dam (筑坝), beaver dam (海狸坝) ||| The beavers worked tirelessly, gnawing down trees to build a wooden dam across the stream to block the water flow.
+The doorknob, made of polished ________, gleamed in the hallway light. ||| brass /bræs/ n. 黄铜 ||| The doorknob, made of polished brass, gleamed in the hallway light. (门把手在走廊灯光下闪闪发亮。)
+The beavers built a wooden ________ across the stream to block the water. ||| dam /dæm/ n. 水坝 ||| The beavers built a wooden dam across the stream to block the water. (海狸在溪流上筑坝拦水。)
 
 # Task
-Process the following words (Max 10 per request). Output ONLY the formatted cards, no introductory or concluding text:
+Process the following words (Max 10 per request). Output ONLY the cards, one per line:
 {words_str}"""
 
 # -----------------------------------------------------------------------------

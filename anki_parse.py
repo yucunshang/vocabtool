@@ -8,8 +8,8 @@ def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
     """Parse AI-generated text into structured Anki card data.
 
     Supports variable field counts:
+      - 3 fields reading: phrase(________) ||| meaning ||| example
       - 4 fields: phrase ||| meaning ||| example ||| etymology (standard/production/translation)
-      - 5 fields cloze: cloze ||| word/IPA ||| 释义 ||| 搭配 ||| example (reading card)
     """
     parsed_cards: List[Dict[str, str]] = []
     text = raw_text.strip()
@@ -27,15 +27,11 @@ def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
         return "________" in (s or "") or "{{c1::" in (s or "")
 
     def _parse_parts(parts: list) -> Optional[Dict[str, str]]:
-        if len(parts) >= 5 and _is_cloze_phrase(parts[0]):
+        # Reading card: 3 fields (phrase with ________ ||| meaning ||| example) or legacy 4–5 fields
+        if len(parts) >= 3 and _is_cloze_phrase(parts[0]):
             phrase = parts[0].strip()
-            meaning = "\n".join(p.strip() for p in parts[1:4] if p.strip())
-            example = parts[4].strip() if len(parts) > 4 else ""
-            return {'w': phrase, 'm': meaning, 'e': example, 'r': ""}
-        if len(parts) >= 4 and _is_cloze_phrase(parts[0]):
-            phrase = parts[0].strip()
-            meaning = "\n".join(p.strip() for p in parts[1:3] if p.strip())
-            example = parts[3].strip() if len(parts) > 3 else ""
+            meaning = parts[1].strip()
+            example = parts[2].strip() if len(parts) > 2 else ""
             return {'w': phrase, 'm': meaning, 'e': example, 'r': ""}
         if len(parts) >= 2:
             phrase = parts[0].strip()

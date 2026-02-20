@@ -510,12 +510,10 @@ def _render_extract_results() -> None:
         st.markdown("#### 内置 AI 一键制卡")
         card_type = st.radio(
             "卡片类型",
-            options=getattr(constants, "CARD_TYPES", ["standard", "cloze", "production", "translation"]),
+            options=constants.CARD_TYPES,
             format_func=lambda x: {
                 "standard": "📖 标准卡（正面单词，反面中英释义+例句）",
-                "cloze": "📖 阅读卡（正面挖空句，反面：单词+音标/释义/搭配/例句）",
-                "production": "🗣️ 口语卡（正面中文场景，反面英文词块+例句）",
-                "translation": "📋 应试卡（正面中文释义，反面英文+音标+例句）",
+                "cloze": "📖 阅读卡（正面挖空句，反面单词+释义+例句）",
             }.get(x, x),
             index=1,
             horizontal=True,
@@ -540,6 +538,14 @@ def _render_thirdparty_section(
     st.caption("无上限，可分组制卡，每批最多 500 词。复制下方 Prompt 到 ChatGPT / Claude 等，再到第三栏「手动制卡」粘贴结果解析制卡。")
 
     with st.expander("⚙️ 自定义卡片格式", expanded=True):
+        tp_card_type = st.radio(
+            "卡片类型",
+            options=["standard", "cloze"],
+            format_func=lambda x: "📖 标准卡" if x == "standard" else "📖 阅读卡（挖空填空）",
+            index=0,
+            key="thirdparty_card_type",
+            horizontal=True,
+        )
         tp_front = st.radio(
             "正面",
             options=["word", "phrase"],
@@ -561,6 +567,8 @@ def _render_thirdparty_section(
         tp_ety = st.checkbox("词根词源词缀", value=True, key="thirdparty_ety")
 
     thirdparty_fmt: CardFormat = {
+        "card_type": tp_card_type,
+        "voice_code": voice_code,
         "front": tp_front,
         "definition": tp_def,
         "examples": tp_ex,
@@ -618,8 +626,6 @@ def _render_manual_card_section() -> None:
         format_func=lambda x: {
             "standard": "📖 标准卡",
             "cloze": "📖 阅读卡",
-            "production": "🗣️ 口语卡",
-            "translation": "📋 应试卡",
         }.get(x, x),
         index=1,
         horizontal=True,

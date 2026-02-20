@@ -81,15 +81,16 @@ def _example_text_for_tts(display_text: str) -> str:
 
 
 def _extract_answer_word_from_meaning(meaning: str) -> str:
-    """Extract the target word from cloze Meaning field (first line = word, second line = definition)."""
+    """Extract target word from reading card Meaning. Formats: 'word /ipa/' or 'word | def'."""
     if not meaning:
         return ""
     first_line = meaning.split("\n")[0].strip()
-    for sep in (" / ", " | "):
+    for sep in (" / ", " /", " | "):
         idx = first_line.find(sep)
-        if idx != -1:
+        if idx > 0:
             return first_line[:idx].strip()
-    return first_line
+    parts = first_line.split()
+    return parts[0] if parts else first_line
 
 
 def _phrase_for_reading_card(phrase: str) -> str:
@@ -192,22 +193,14 @@ def generate_anki_package(
     model_id_map = {
         "standard": constants.ANKI_MODEL_ID,
         "cloze": constants.ANKI_MODEL_CLOZE_ID,
-        "production": constants.ANKI_MODEL_PRODUCTION_ID,
-        "translation": constants.ANKI_MODEL_TRANSLATION_ID,
     }
     model_id = model_id_map.get(card_type, constants.ANKI_MODEL_ID)
 
     # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
-    # Reading card (cloze) uses FRONT_BACK: front = sentence with ________, back = answer + meaning + example
+    # Reading card: front = fill-in sentence, back = word + meaning + example (clean single-line layout)
     if card_type == "cloze":
-        qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div>'
-        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
-    elif card_type == "production":
-        qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
-        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
-    elif card_type == "translation":
-        qfmt = '<div class="phrase" style="font-size:24px;">{{Phrase}}</div>'
-        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+        qfmt = '<div class="phrase" style="font-size:22px;color:#333;line-height:1.5;">{{Phrase}}</div>'
+        afmt = '{{FrontSide}}<hr id=answer><div class="meaning" style="font-size:24px;font-weight:bold;margin-bottom:8px;">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
     else:
         qfmt = '<div class="phrase">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}'

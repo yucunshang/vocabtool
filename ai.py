@@ -13,9 +13,7 @@ from config import get_config
 from errors import ErrorHandler
 from prompts import (
     CARD_GEN_CLOZE_TEMPLATE,
-    CARD_GEN_PRODUCTION_TEMPLATE,
     CARD_GEN_SYSTEM_PROMPT,
-    CARD_GEN_TRANSLATION_TEMPLATE,
     CARD_GEN_USER_TEMPLATE,
     LOOKUP_SYSTEM_PROMPT,
     THIRD_PARTY_CARD_TEMPLATE,
@@ -66,8 +64,6 @@ def build_card_prompt(
     templates = {
         "standard": CARD_GEN_USER_TEMPLATE,
         "cloze": CARD_GEN_CLOZE_TEMPLATE,
-        "production": CARD_GEN_PRODUCTION_TEMPLATE,
-        "translation": CARD_GEN_TRANSLATION_TEMPLATE,
     }
     tpl = templates.get(ct, CARD_GEN_USER_TEMPLATE)
     voice = (fmt or {}).get("voice_code", "")
@@ -79,12 +75,19 @@ def build_thirdparty_prompt(words_str: str, fmt: Optional[CardFormat] = None) ->
     """Build third-party AI prompt from card format (up to 500 words per batch)."""
     if fmt is None:
         fmt = {
+            "card_type": "standard",
             "front": "phrase",
             "definition": "en_native",
             "examples": 2,
             "examples_with_cn": False,
             "etymology": True,
         }
+
+    card_type = fmt.get("card_type", "standard")
+    if card_type == "cloze":
+        voice = fmt.get("voice_code", "")
+        ipa_style = "British IPA" if voice.startswith("en-GB") else "American IPA"
+        return CARD_GEN_CLOZE_TEMPLATE.format(words_str=words_str, ipa_style=ipa_style)
 
     front = fmt.get("front", "phrase")
     def_lang = fmt.get("definition", "en_native")
