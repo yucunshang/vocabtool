@@ -206,10 +206,10 @@ def generate_anki_package(
     model_id = model_id_map.get(card_type, constants.ANKI_MODEL_ID)
 
     # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
+    # Cloze model MUST use "Text" as first field name (Anki/genanki convention)
     if card_type == "cloze":
-        # 使用 Anki 原生 cloze 格式 {{c1::word}}，qfmt 用 {{cloze:Phrase}}
-        qfmt = '{{cloze:Phrase}}'
-        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+        qfmt = '{{cloze:Text}}'
+        afmt = '{{cloze:Text}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
     elif card_type == "production":
         qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
@@ -220,14 +220,16 @@ def generate_anki_package(
         qfmt = '<div class="phrase">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}'
 
+    # Cloze model requires first field named "Text" (Anki convention)
+    field_names = (
+        ['Text', 'Meaning', 'Example', 'Etymology', 'Audio_Phrase', 'Audio_Example']
+        if card_type == "cloze"
+        else ['Phrase', 'Meaning', 'Example', 'Etymology', 'Audio_Phrase', 'Audio_Example']
+    )
     model = genanki.Model(
         model_id,
         f'VocabFlow {card_type.capitalize()}',
-        fields=[
-            {'name': 'Phrase'}, {'name': 'Meaning'},
-            {'name': 'Example'}, {'name': 'Etymology'},
-            {'name': 'Audio_Phrase'}, {'name': 'Audio_Example'}
-        ],
+        fields=[{'name': n} for n in field_names],
         templates=[{'name': 'Card', 'qfmt': qfmt, 'afmt': afmt}],
         css=CSS,
         model_type=genanki.Model.CLOZE if card_type == "cloze" else genanki.Model.FRONT_BACK
