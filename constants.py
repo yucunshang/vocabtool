@@ -35,6 +35,9 @@ ANKI_MODEL_CLOZE_ID = 1842957302
 # 卡片类型：standard=标准卡, cloze=阅读卡
 CARD_TYPES = ["standard", "cloze"]
 
+# 界面显示的 AI 模型名称
+AI_MODEL_DISPLAY = "DeepSeek"
+
 ENCODING_PRIORITY = ['utf-8', 'gb18030', 'latin-1']
 
 DEFAULT_SESSION_STATE = {

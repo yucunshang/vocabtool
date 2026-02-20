@@ -32,13 +32,13 @@ def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
             phrase = parts[0].strip()
             meaning = parts[1].strip()
             example = parts[2].strip() if len(parts) > 2 else ""
-            return {'w': phrase, 'm': meaning, 'e': example, 'r': ""}
+            return {'w': phrase, 'm': meaning, 'e': example, 'r': "", 'ct': 'cloze'}
         if len(parts) >= 2:
             phrase = parts[0].strip()
             meaning = parts[1].strip()
             example = parts[2].strip() if len(parts) > 2 else ""
             etymology = parts[3].strip() if len(parts) > 3 else ""
-            return {'w': phrase, 'm': meaning, 'e': example, 'r': etymology}
+            return {'w': phrase, 'm': meaning, 'e': example, 'r': etymology, 'ct': 'standard'}
         return None
 
     # Block format: blank lines separate blocks; each block can have multiple cards (one per line)

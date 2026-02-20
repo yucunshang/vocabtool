@@ -189,34 +189,37 @@ def generate_anki_package(
     # Anki expects positive deck IDs; adler32 can be negative on some platforms
     DECK_ID = zlib.adler32(deck_name.encode('utf-8')) & 0x7FFFFFFF
 
-    # Select model by card type; all use same 6 fields for compatibility
-    model_id_map = {
-        "standard": constants.ANKI_MODEL_ID,
-        "cloze": constants.ANKI_MODEL_CLOZE_ID,
-    }
-    model_id = model_id_map.get(card_type, constants.ANKI_MODEL_ID)
+    use_auto = card_type == "auto"
 
-    # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
-    # Reading card: front = fill-in sentence, back = word + meaning + example (clean single-line layout)
-    if card_type == "cloze":
-        qfmt = '<div class="phrase" style="font-size:22px;color:#333;line-height:1.5;">{{Phrase}}</div>'
-        afmt = '{{FrontSide}}<hr id=answer><div class="meaning" style="font-size:24px;font-weight:bold;margin-bottom:8px;">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+    def _make_model(ct: str) -> "genanki.Model":
+        model_id_map = {
+            "standard": constants.ANKI_MODEL_ID,
+            "cloze": constants.ANKI_MODEL_CLOZE_ID,
+        }
+        mid = model_id_map.get(ct, constants.ANKI_MODEL_ID)
+        if ct == "cloze":
+            qfmt = '<div class="phrase" style="font-size:22px;color:#333;line-height:1.5;">{{Phrase}}</div>'
+            afmt = '{{FrontSide}}<hr id=answer><div class="meaning" style="font-size:24px;font-weight:bold;margin-bottom:8px;">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+        else:
+            qfmt = '<div class="phrase">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
+            afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}'
+        return genanki.Model(
+            mid,
+            f'VocabFlow {ct.capitalize()}',
+            fields=[
+                {'name': 'Phrase'}, {'name': 'Meaning'},
+                {'name': 'Example'}, {'name': 'Etymology'},
+                {'name': 'Audio_Phrase'}, {'name': 'Audio_Example'}
+            ],
+            templates=[{'name': 'Card', 'qfmt': qfmt, 'afmt': afmt}],
+            css=CSS,
+            model_type=genanki.Model.FRONT_BACK
+        )
+
+    if use_auto:
+        models = {"standard": _make_model("standard"), "cloze": _make_model("cloze")}
     else:
-        qfmt = '<div class="phrase">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
-        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}'
-
-    model = genanki.Model(
-        model_id,
-        f'VocabFlow {card_type.capitalize()}',
-        fields=[
-            {'name': 'Phrase'}, {'name': 'Meaning'},
-            {'name': 'Example'}, {'name': 'Etymology'},
-            {'name': 'Audio_Phrase'}, {'name': 'Audio_Example'}
-        ],
-        templates=[{'name': 'Card', 'qfmt': qfmt, 'afmt': afmt}],
-        css=CSS,
-        model_type=genanki.Model.FRONT_BACK
-    )
+        models = {card_type: _make_model(card_type)}
 
     deck = genanki.Deck(DECK_ID, deck_name)
 
@@ -232,12 +235,13 @@ def generate_anki_package(
     card_plans = []
 
     for card in cards_data:
+        ct = card.get('ct', card_type) if use_auto else card_type
         phrase = safe_str_clean(card.get('w', ''))
         meaning = safe_str_clean(card.get('m', ''))
         raw_example = safe_str_clean(card.get('e', ''))
         etymology = safe_str_clean(card.get('r', ''))
         note_id = card.get('id')
-        if card_type == "cloze":
+        if ct == "cloze":
             phrase = _phrase_for_reading_card(phrase)
 
         example_sentences = _split_examples(raw_example)
@@ -249,7 +253,7 @@ def generate_anki_package(
         example_plans = []      # [(path, filename), ...]
 
         if enable_tts:
-            if card_type == "cloze":
+            if ct == "cloze":
                 # 挖空句不要语音；反面：单词发音 + 例句(完整句)发音
                 answer_word = _extract_answer_word_from_meaning(meaning)
                 if answer_word and len(answer_word) > 1:
@@ -292,6 +296,7 @@ def generate_anki_package(
                         example_plans.append((ex_path, ex_filename))
 
         card_plans.append({
+            'ct': ct,
             'phrase': phrase,
             'meaning': meaning,
             'example_display': example_display,
@@ -340,7 +345,7 @@ def generate_anki_package(
                 failed_audio_count += 1
                 plan_has_failure = True
         if plan_has_failure:
-            if card_type == "cloze":
+            if plan['ct'] == "cloze":
                 w = _extract_answer_word_from_meaning(plan['meaning'])
                 if w:
                     failed_phrases.append(w)
@@ -349,7 +354,7 @@ def generate_anki_package(
         audio_example_field = "".join(audio_example_parts)
 
         # 挖空卡：单词音频内联到 Meaning 第一行（单词旁）
-        if card_type == "cloze" and audio_phrase_field:
+        if plan['ct'] == "cloze" and audio_phrase_field:
             first_nl = plan['meaning'].find("\n")
             if first_nl >= 0:
                 meaning_display = plan['meaning'][:first_nl] + " " + audio_phrase_field + plan['meaning'][first_nl:]
@@ -365,6 +370,7 @@ def generate_anki_package(
         ]
 
         note_id = plan['note_id']
+        model = models[plan['ct']]
         if note_id:
             note = genanki.Note(model=model, fields=fields, guid=note_id)
         else:

@@ -258,7 +258,7 @@ def _render_builtin_ai_section(
     card_format: Optional[CardFormat] = None,
 ) -> None:
     """Builtin AI generation flow: button → progress → parse → edit → package → download."""
-    ai_model_label = get_config()["openai_model"]
+    ai_model_label = constants.AI_MODEL_DISPLAY
 
     # Fix 1: Deck name input
     deck_name = st.text_input(
@@ -618,25 +618,13 @@ def _render_thirdparty_section(
 def _render_manual_card_section() -> None:
     """第三栏：仅粘贴 AI 生成的内容，解析并制卡。"""
     st.markdown("#### 手动制卡")
-    st.caption("将任意来源的 AI 制卡结果（如 ChatGPT、Claude 复制的内容）粘贴到下方，解析后生成 .apkg。")
-
-    manual_card_type = st.radio(
-        "卡片类型",
-        options=constants.CARD_TYPES,
-        format_func=lambda x: {
-            "standard": "📖 标准卡",
-            "cloze": "📖 阅读卡",
-        }.get(x, x),
-        index=1,
-        horizontal=True,
-        key="manual_card_type",
-    )
+    st.caption("将 AI 制卡结果粘贴到下方，支持标准卡与阅读卡混合，按行自动识别格式后生成 .apkg。")
 
     pasted = st.text_area(
         "粘贴 AI 生成的制卡结果",
         height=280,
         key="manual_pasted_output",
-        placeholder="word1 ||| 释义 ||| 例句\nword2 ||| 释义 ||| 例句\n...",
+        placeholder="标准卡：word ||| 释义 ||| 例句\n阅读卡：挖空句（含________）||| 释义 ||| 例句\n可混合粘贴，自动识别",
         label_visibility="collapsed",
     )
 
@@ -649,18 +637,21 @@ def _render_manual_card_section() -> None:
             return
         parsed = parse_anki_data(pasted.strip())
         if not parsed:
-            st.error("解析失败，格式不符。请确保每行格式为：`Word ||| 释义 ||| 例句`（可选 `||| 词源`）。")
+            st.error("解析失败，格式不符。标准卡：`word ||| 释义 ||| 例句`（可选 `||| 词源`）；阅读卡：`挖空句(含________) ||| 释义 ||| 例句`。")
             return
         try:
-            file_path, _, _ = generate_anki_package(
-                parsed,
-                deck_name,
-                card_type=manual_card_type,
-                enable_tts=enable_audio,
-                tts_voice=voice_code,
-                enable_example_tts=enable_example_audio,
-            )
+            with st.spinner("⏳ 正在生成牌组" + ("（含音频，请稍候…）" if enable_audio else "…")):
+                file_path, _, _ = generate_anki_package(
+                    parsed,
+                    deck_name,
+                    card_type="auto",
+                    enable_tts=enable_audio,
+                    tts_voice=voice_code,
+                    enable_example_tts=enable_example_audio,
+                )
             set_anki_pkg(file_path, deck_name)
+            st.session_state["manual_anki_pkg_path"] = file_path
+            st.session_state["manual_anki_pkg_name"] = f"{deck_name}.apkg"
             st.session_state["anki_cards_cache"] = parsed
             st.success(f"✅ 解析完成，共 {len(parsed)} 张卡片。")
             st.balloons()
@@ -668,7 +659,25 @@ def _render_manual_card_section() -> None:
         except Exception as e:
             ErrorHandler.handle(e, "生成 .apkg 出错")
 
-    render_anki_download_button("📥 下载牌组", use_container_width=True, key="manual_download_btn")
+    # 仅在本流程生成成功后才显示下载按钮
+    manual_path = st.session_state.get("manual_anki_pkg_path")
+    if manual_path:
+        if not os.path.exists(manual_path):
+            st.session_state.pop("manual_anki_pkg_path", None)
+            st.session_state.pop("manual_anki_pkg_name", None)
+        else:
+            try:
+                with open(manual_path, "rb") as f:
+                    st.download_button(
+                        "📥 下载牌组",
+                        data=f.read(),
+                        file_name=st.session_state.get("manual_anki_pkg_name", "deck.apkg"),
+                        mime="application/octet-stream",
+                        use_container_width=True,
+                        key="manual_download_btn",
+                    )
+            except OSError:
+                pass
 
 
 def _do_lookup(query_word: str) -> None:
@@ -751,7 +760,7 @@ def render_quick_lookup() -> None:
     if auto_word and not in_cooldown:
         _do_lookup(auto_word)
 
-    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else f"🔍 {get_config()['openai_model']}"
+    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else f"🔍 {constants.AI_MODEL_DISPLAY}"
     _has_content = bool(st.session_state.get("quick_lookup_word") or st.session_state.get("quick_lookup_last_result"))
 
     with st.form("quick_lookup_form", clear_on_submit=False, border=False):
