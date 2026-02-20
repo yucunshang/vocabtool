@@ -179,6 +179,107 @@ a hectic schedule ||| a timeline full of frantic activity and very busy ||| She 
     )
 
 
+def build_thirdparty_format_definition(fmt: Optional[CardFormat] = None) -> str:
+    """Build a concise format-definition spec for third-party AI (all card types)."""
+    if fmt is None:
+        fmt = {
+            "card_type": "standard",
+            "front": "phrase",
+            "definition": "en_native",
+            "examples": 2,
+            "examples_with_cn": False,
+            "etymology": True,
+        }
+
+    card_type = fmt.get("card_type", "standard")
+    lines: List[str] = [
+        "【第三方 AI 卡片格式定义】",
+        "总量不限；系统会自动按每批最多 500 词分组。",
+        "每行一张卡，字段分隔符固定为：|||",
+        "字段内禁止再次出现分隔符 |||",
+    ]
+
+    if card_type == "cloze":
+        lines.extend([
+            "卡片类型：阅读卡（cloze）",
+            "字段格式：挖空句 ||| 单词/音标词性释义 ||| 完整句(含中文翻译)",
+            "约束：挖空位固定为 ________（8个下划线）；3字段固定。",
+            "示例：The door was made of ________. ||| brass /bræs/ n. 黄铜 ||| The door was made of brass. (门是黄铜做的。)",
+        ])
+        return "\n".join(lines)
+
+    if card_type == "translation":
+        lines.extend([
+            "卡片类型：互译卡（translation）",
+            "字段格式：中文释义 ||| English word / IPA ||| 例句(含中文翻译)",
+            "约束：3字段固定；第2字段必须包含英文词头与音标。",
+            "示例：模糊的，含混不清的 ||| ambiguous / æmˈbɪɡjuəs ||| The instructions were ambiguous. (说明含糊不清。)",
+        ])
+        return "\n".join(lines)
+
+    if card_type == "production":
+        lines.extend([
+            "卡片类型：表达卡（production）",
+            "字段格式：中文场景描述 ||| English chunk / collocation ||| 例句(含中文翻译)",
+            "约束：3字段固定；第2字段建议为高可复用词块/搭配。",
+            "示例：你想说：这份声明措辞模糊。 ||| ambiguous statement ||| The government's ambiguous statement caused confusion. (政府含糊其辞的声明引发困惑。)",
+        ])
+        return "\n".join(lines)
+
+    if card_type == "audio":
+        lines.extend([
+            "卡片类型：听音卡（audio）",
+            "字段格式：English word/phrase ||| 中英释义 ||| 例句(含中文翻译)",
+            "约束：3字段固定；第1字段仅保留词/短语本体。",
+            "示例：heavy rain ||| 大雨 | intense rainfall ||| We got caught in heavy rain. (我们遇上了大雨。)",
+        ])
+        return "\n".join(lines)
+
+    front = fmt.get("front", "phrase")
+    def_lang = fmt.get("definition", "en_native")
+    num_ex = int(fmt.get("examples", 2))
+    with_cn = bool(fmt.get("examples_with_cn", False))
+    include_ety = bool(fmt.get("etymology", True))
+
+    if front == "phrase":
+        f1 = "Field1=短语/搭配（必须包含目标词，不可只输出单词）"
+    else:
+        f1 = "Field1=目标单词（小写，纯词头）"
+
+    if def_lang == "cn":
+        f2 = "Field2=中文释义（仅中文）"
+    elif def_lang == "en":
+        f2 = "Field2=英文释义（学习型）"
+    elif def_lang == "en_native":
+        f2 = "Field2=英文释义（母语词典风格）"
+    else:
+        f2 = "Field2=中英双语释义（中文 / English）"
+
+    ex_label = f"{num_ex} 条例句"
+    if with_cn:
+        f3 = f"Field3={ex_label}（每条需中文翻译，用 // 分隔）"
+    else:
+        f3 = f"Field3={ex_label}（英文，仅 // 分隔）"
+
+    if include_ety:
+        structure = "Field1 ||| Field2 ||| Field3 ||| Field4"
+        f4 = "Field4=词根词源/构词说明（中文）"
+    else:
+        structure = "Field1 ||| Field2 ||| Field3"
+        f4 = "Field4=无"
+
+    lines.extend([
+        "卡片类型：标准卡（standard，可自定义）",
+        f"目标结构：{structure}",
+        f1,
+        f2,
+        f3,
+        f4,
+        "示例：a hectic schedule ||| very busy and full of activity ||| She has a hectic schedule with meetings all day. ||| hect- + -ic",
+    ])
+    return "\n".join(lines)
+
+
 def get_openai_client() -> Optional[Any]:
     """Get configured OpenAI client with proper error handling."""
     global _OPENAI_CLIENT

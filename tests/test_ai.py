@@ -3,7 +3,12 @@
 
 import pytest
 
-from ai import DEFAULT_CARD_FORMAT, build_card_prompt, build_thirdparty_prompt
+from ai import (
+    DEFAULT_CARD_FORMAT,
+    build_card_prompt,
+    build_thirdparty_format_definition,
+    build_thirdparty_prompt,
+)
 
 
 def test_build_card_prompt_contains_separator():
@@ -63,4 +68,11 @@ def test_build_thirdparty_prompt_cloze_not_limited_to_10():
     out = build_thirdparty_prompt("brass, dam", {"card_type": "cloze", "voice_code": "en-US-JennyNeural"})
     assert "This is one batch from a larger list" in out
     assert "Max 10" not in out and "max 10" not in out
+    assert "|||" in out
+
+
+def test_build_thirdparty_format_definition_for_new_card_types():
+    out = build_thirdparty_format_definition({"card_type": "translation"})
+    assert "总量不限" in out
+    assert "互译卡" in out
     assert "|||" in out

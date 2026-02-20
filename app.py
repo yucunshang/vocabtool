@@ -15,7 +15,14 @@ import streamlit as st
 
 import constants
 import resources
-from ai import CardFormat, build_card_prompt, build_thirdparty_prompt, get_word_quick_definition, process_ai_in_batches
+from ai import (
+    CardFormat,
+    build_card_prompt,
+    build_thirdparty_format_definition,
+    build_thirdparty_prompt,
+    get_word_quick_definition,
+    process_ai_in_batches,
+)
 from anki_package import cleanup_old_apkg_files, generate_anki_package
 from anki_parse import parse_anki_data
 from config import get_config
@@ -678,6 +685,20 @@ def _render_thirdparty_section(
         "etymology": tp_ety,
     }
 
+    with st.expander("🧩 第三方 AI 卡片格式定义", expanded=False):
+        fmt_def = build_thirdparty_format_definition(thirdparty_fmt)
+        col_f, col_fc = st.columns([5, 1])
+        with col_f:
+            st.text_area(
+                "格式定义",
+                value=fmt_def,
+                height=180,
+                key="thirdparty_format_definition",
+                label_visibility="collapsed",
+            )
+        with col_fc:
+            render_copy_button(fmt_def, key="copy_thirdparty_format_definition")
+
     # 分组：总量无限，固定每批 500 词
     batch_size = constants.THIRD_PARTY_PROMPT_BATCH_SIZE
     total = len(words_only)
@@ -760,6 +781,22 @@ def _render_manual_card_section() -> None:
             for c in parsed:
                 c["ct"] = manual_parse_type
         try:
+            progress_text = st.empty()
+            progress_bar = st.progress(0.0) if enable_audio else None
+            if enable_audio:
+                progress_text.markdown("**音频进度**：0/0")
+
+            def _update_manual_pkg_progress(ratio: float, text: str) -> None:
+                if not enable_audio:
+                    return
+                if progress_bar is not None:
+                    progress_bar.progress(max(0.0, min(1.0, ratio)))
+                m = re.search(r"\((\d+)\s*/\s*(\d+)\)", text or "")
+                if m:
+                    progress_text.markdown(f"**音频进度**：{m.group(1)}/{m.group(2)}")
+                else:
+                    progress_text.markdown(f"**音频进度**：{text}")
+
             with st.spinner("⏳ 正在生成牌组" + ("（含音频，请稍候…）" if enable_audio else "…")):
                 file_path, _, _ = generate_anki_package(
                     parsed,
@@ -768,7 +805,12 @@ def _render_manual_card_section() -> None:
                     enable_tts=enable_audio,
                     tts_voice=voice_code,
                     enable_example_tts=enable_example_audio,
+                    progress_callback=_update_manual_pkg_progress,
                 )
+            if enable_audio:
+                if progress_bar is not None:
+                    progress_bar.progress(1.0)
+                progress_text.markdown("**音频进度**：✅ 完成")
             set_anki_pkg(file_path, deck_name)
             st.session_state["manual_anki_pkg_path"] = file_path
             st.session_state["manual_anki_pkg_name"] = f"{deck_name}.apkg"
