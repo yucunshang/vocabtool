@@ -147,6 +147,7 @@ def generate_anki_package(
     .meaning {
         font-size: 23px; font-weight: bold; color: #222;
         margin: 0 0 8px 0; text-align: left; line-height: 1.45;
+        white-space: pre-wrap;
     }
     .nightMode .meaning { color: #f0f0f0; }
 
@@ -189,9 +190,9 @@ def generate_anki_package(
 
     # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
     if card_type == "cloze":
-        # 挖空句不要语音；反面单词需要语音（放 Audio_Example）
+        # 反面：一行单词+音标，一行中文+英文释义，一行搭配，一个例句；不要词源
         qfmt = '<div class="phrase" style="font-size:20px;">{{Phrase}}</div>'
-        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}<span class="audio-ex">{{Audio_Example}}</span>'
+        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
     elif card_type == "production":
         qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'

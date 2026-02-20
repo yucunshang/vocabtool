@@ -103,31 +103,36 @@ Process the list (max 20 words per request). One line per word/phrase. 中英释
 
 # -----------------------------------------------------------------------------
 # ②b 语境填空卡（输入方向：阅读理解、完形填空）
-# 正面=挖空句子 反面=目标词+音标/释义/搭配/词根
+# 反面：一行单词+音标 | 一行中文释义+英文释义 | 一行搭配 | 一个例句；不要词源词根
 # -----------------------------------------------------------------------------
 CARD_GEN_CLOZE_TEMPLATE = """# Role
 Anki Card Designer for **Cloze/Context Cards** (input direction: reading comprehension, cloze tests).
 
 # Goal
-For each target word, output ONE cloze sentence (blank for the word) and the answer line. Max 20 words per request.
+For each target word, output ONE cloze sentence and the back content. Max 20 words per request. Do NOT include etymology, word roots, or affixes.
 
 # Output Format
-Strictly inside a single `text` code block. One entry per line. Separator: `|||` (4 fields: cloze ||| answer_line ||| empty ||| etymology)
-`Cloze sentence with ________ for the target word` ||| `Target word / phonetic / English def / collocation` ||| ||| `Etymology (Simplified Chinese)`
+Strictly inside a single `text` code block. One entry per line. Separator: `|||` (4 fields)
+`Cloze sentence` ||| `Meaning (3 lines)` ||| `Example sentence` |||
 
-# Field Rules
-1. **Field 1 (Front)**: A natural, authentic English sentence with ________ where the target word goes. The context must make the answer inferable.
-2. **Field 2 (Back)**: Target word / IPA or phonetic / Concise English definition / Common collocation. Use | or / to separate.
-3. **Field 3 (Back)**: Brief etymology or roots in Chinese. Use "词源不可考" only if genuinely unknown.
+- **Field 1**: Cloze sentence with ________ where the target word goes.
+- **Field 2**: Three lines (use line break between lines):
+  Line 1: word / IPA phonetic
+  Line 2: 中文释义；English definition
+  Line 3: Common collocations (e.g. ambiguous statement, ambiguous about)
+- **Field 3**: One example sentence in English. Optional: (中文翻译) in parentheses.
+- **Field 4**: Leave empty. No etymology.
 
 # Example
-The contract terms were so ________ that both sides interpreted them differently. ||| ambiguous / æmˈbɪɡjuəs / unclear, having multiple meanings / ambiguous statement ||| ||| ambi- (两边) + -ag (驱动) + -uous → 两边都可解释
+The contract terms were so ________ that both sides interpreted them differently. ||| ambiguous / æmˈbɪɡjuəs
+模糊的；不清楚的，有歧义的；unclear, having multiple meanings
+ambiguous statement, ambiguous about ||| The government's ambiguous statement left room for speculation. (政府含糊其辞的声明让人浮想联翩。) |||
 
 # Input Data
 {words_str}
 
 # Task
-Process the list (max 20 words). One cloze sentence per word. Output inside ```text block."""
+Process the list (max 20 words). One cloze per word. Output inside ```text block."""
 
 # -----------------------------------------------------------------------------
 # ②c 输出卡（表达方向：写作、口语）
