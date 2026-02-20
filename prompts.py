@@ -133,7 +133,7 @@ Another word. ||| word2 / w2 ||| 释义；definition ||| collocation1, collocati
 {words_str}
 
 # Task
-Process the list (max 20 words). One cloze per word. Output inside ```text block."""
+Process the list (max 20 words). One cloze per word. Output inside block."""
 
 # -----------------------------------------------------------------------------
 # ②c 输出卡（表达方向：写作、口语）
