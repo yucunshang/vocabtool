@@ -52,7 +52,7 @@ DEFAULT_SESSION_STATE = {
     'quick_lookup_is_loading': False,
     'quick_lookup_block_until': 0.0,
     'quick_lookup_cache_keys': [],
-    'extract_rank_preset': '中级 (6001–10000)',
+    'extract_rank_preset': '常用 (6001–10000)',
     'extract_min_rank': 6001,
     'extract_max_rank': 10000,
 }
@@ -83,11 +83,11 @@ PDF_MAX_PAGES = 50              # only extract first N pages from PDF
 
 # 词汇量区间预设（筛选单词通用，词表模式不适用）
 RANK_PRESETS = [
-    ("初学者", 1, 3000),
-    ("初级", 3001, 6000),
-    ("中级", 6001, 10000),
-    ("高级", 10001, 15000),
-    ("专业", 15001, 21000),
+    ("核心", 1, 2809),
+    ("基础", 2810, 6000),
+    ("常用", 6001, 10000),
+    ("进阶", 10001, 15000),
+    ("高级", 15001, 21000),
 ]
 
 VOICE_MAP = {

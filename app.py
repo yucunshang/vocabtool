@@ -137,10 +137,12 @@ def render_anki_download_button(
 
 def _rank_badge_style(rank: int) -> tuple[str, str]:
     """Map numeric rank to badge color and label."""
-    if rank <= 5000:
-        return "#10b981", "高频词"
+    if rank <= 2809:
+        return "#10b981", "核心"
+    if rank <= 6000:
+        return "#22c55e", "基础"
     if rank <= 10000:
-        return "#3b82f6", "常用词"
+        return "#3b82f6", "常用"
     if rank <= 15000:
         return "#f59e0b", "进阶词"
     if rank <= 20000:
