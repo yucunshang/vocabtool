@@ -71,37 +71,35 @@ compromise (n. 名词)
 CARD_GEN_SYSTEM_PROMPT = "You are a helpful assistant for vocabulary learning."
 
 CARD_GEN_USER_TEMPLATE = """# Role
-You are an expert English Teacher, Translator, and Anki Card Designer for general language learners. Your goal is to create minimalist, high-efficiency flashcards that are extremely easy to memorize.
+Atomic Flash Dictionary (Bilingual Edition) — Anki Card Batch Mode
 
-# CRITICAL CONSTRAINTS (Strictly Enforced)
-1. **BATCH LIMIT (30 Words Max):** Strictly process a maximum of 30 words per request.
-2. **ABSOLUTE SINGLE CORE MEANING (Contextually Natural & Accurate):** Provide EXACTLY ONE primary, highest-frequency Chinese definition.
-   - The definition MUST be the most natural and authentic core meaning used in real life. (e.g., for "alleged", output "涉嫌的" instead of the rigid "声称的").
-   - Absolutely NO slashes (/), NO commas, and NO secondary/obscure meanings.
-   - Keep it extremely concise. Do NOT include English definitions.
-3. **ONE SHORT EXAMPLE & NATIVE-LEVEL TRANSLATION:** Provide exactly ONE short, practical, and highly authentic English example sentence (ideally under 12 words).
-   - The example must perfectly demonstrate the single core meaning chosen.
-   - **CRITICAL:** The Chinese translation MUST be highly fluent, natural, and conform to native Chinese speaking habits (符合中文母语者的地道表达).
-   - ABSOLUTELY NO stiff, word-for-word "machine translations" or Chinglish. (e.g., "The alleged thief was arrested." MUST be translated naturally as "这名涉嫌的盗贼被捕了。", absolutely NOT the awkward "声称的小偷被逮捕了。"). Ensure ZERO errors in context.
-4. **NO ETYMOLOGY/ROOTS:** Do NOT output any etymology, roots, or affixes. Keep the output strictly to the word, meaning, and example.
+# Goal
+Convert a list of **words or phrases** into minimalist Anki cards. For each item, provide the **#1 most common meaning** in a strict 3-field format (one line per entry).
+**Target Audience**: Chinese learners who need to grasp the meaning instantly.
 
-# Output Format Guidelines
-1. **Output Container**: Strictly inside a single `text` code block.
-2. **Layout**: One entry per line. No conversational filler before or after the code block.
-3. **Separator**: Use `|||` as the delimiter.
-4. **Target Structure** (Exactly 3 fields):
-   `Target Word` ||| `中文绝对核心地道释义` ||| `English sentence. (地道且自然的人工中文翻译。)`
+# CORE RULES
+1. **Single Sense Lock**: Select ONLY the primary meaning. Casing: china = porcelain (瓷器); China = country (中国).
+2. **Bilingual Definition**: [Chinese] | [Short English]. One core meaning only; both must be concise and natural.
+3. **ONE Example**: Exactly one short English example sentence with a natural Chinese translation in parentheses. The example MUST match the definition strictly.
+4. **NO Etymology**: Do NOT output any etymology, roots, or affixes. Output only: word, definition, example.
+5. **Phrase Support**: For phrases (e.g., "give up"), define the phrase as a unit.
+6. **Format**: Pure text only. No Markdown. Output strictly inside a single `text` code block, one entry per line.
+7. **Fixes**: Auto-capitalize proper nouns (e.g., english → English).
+
+# Output Structure (Exactly 3 fields per line)
+Separator: `|||`
+`Target Word` ||| `中文释义 | Short English definition` ||| `English example. (中文翻译。)`
 
 # Valid Examples
-unbelievable ||| 难以置信的 ||| The news was completely unbelievable. (这消息完全令人难以置信。)
-silo ||| 筒仓 ||| The farm built a new silo for the corn. (农场建了一个新的玉米筒仓。)
-alleged ||| 涉嫌的 ||| The alleged thief was arrested yesterday. (那名涉嫌盗窃的人昨天被捕了。)
+spring ||| 春天 | The season after winter ||| Flowers bloom in spring. (花朵在春天绽放。)
+give up ||| 放弃；戒除 | To stop doing something ||| I will never give up on my dreams. (我永远不会放弃我的梦想。)
+date ||| 日期 | Specific day of the month ||| What is today's date? (今天是几号？)
 
 # Input Data
 {words_str}
 
 # Task
-Process the input list strictly adhering to the 30-word limit, minimalist design, natural core meaning constraint, and formatting above. Ensure zero machine-translation errors."""
+Process the list (max 20 words per request). One line per word/phrase. Bilingual definition (中文 | English), one example with natural Chinese translation, no etymology. Ensure zero errors."""
 
 # -----------------------------------------------------------------------------
 # ③ 第三方 AI 专用（可自定义格式，每批最多 500 词）
