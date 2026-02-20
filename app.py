@@ -141,10 +141,12 @@ def _rank_badge_style(rank: int) -> tuple[str, str]:
         return "#10b981", "高频词"
     if rank <= 10000:
         return "#3b82f6", "常用词"
-    if rank <= 20000:
+    if rank <= 15000:
         return "#f59e0b", "进阶词"
+    if rank <= 20000:
+        return "#f97316", "高级词"
     if rank < 99999:
-        return "#ef4444", "专业词"
+        return "#ef4444", "低频词"
     return "#6b7280", "未收录"
 
 
