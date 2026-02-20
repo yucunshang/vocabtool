@@ -80,6 +80,18 @@ def _example_text_for_tts(display_text: str) -> str:
     return display_text.strip()
 
 
+def _extract_answer_word_from_meaning(meaning: str) -> str:
+    """Extract the target word from cloze Meaning field (format: word / phonetic / def / collocation)."""
+    if not meaning:
+        return ""
+    # First segment before " / " or " | " is the word
+    for sep in (" / ", " | "):
+        idx = meaning.find(sep)
+        if idx != -1:
+            return meaning[:idx].strip()
+    return meaning.strip()
+
+
 def generate_anki_package(
     cards_data: List[Dict[str, str]],
     deck_name: str,
@@ -177,7 +189,8 @@ def generate_anki_package(
 
     # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
     if card_type == "cloze":
-        qfmt = '<div class="phrase" style="font-size:20px;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
+        # 挖空句不要语音；反面单词需要语音（放 Audio_Example）
+        qfmt = '<div class="phrase" style="font-size:20px;">{{Phrase}}</div>'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}<span class="audio-ex">{{Audio_Example}}</span>'
     elif card_type == "production":
         qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
@@ -229,27 +242,38 @@ def generate_anki_package(
         phrase_plan = None      # (path, filename) or None
         example_plans = []      # [(path, filename), ...]
 
-        if enable_tts and phrase:
-            phrase_path = _audio_cache_path(phrase, tts_voice)
-            phrase_filename = os.path.basename(phrase_path)
-            if phrase_path not in seen_audio_paths:
-                seen_audio_paths.add(phrase_path)
-                audio_tasks.append({'text': phrase, 'path': phrase_path, 'voice': tts_voice})
-            phrase_plan = (phrase_path, phrase_filename)
-
-            if enable_example_tts:
-                for sent in example_sentences:
-                    tts_text = _example_text_for_tts(sent) if sent else ""
-                    # Skip if too short — very short strings produce sub-threshold files
-                    actual_text = tts_text if tts_text else sent
-                    if not actual_text or len(actual_text) <= 3:
-                        continue
-                    ex_path = _audio_cache_path(actual_text, tts_voice)
+        if enable_tts:
+            if card_type == "cloze":
+                # 挖空句不要语音；反面单词需要语音
+                answer_word = _extract_answer_word_from_meaning(meaning)
+                if answer_word and len(answer_word) > 1:
+                    ex_path = _audio_cache_path(answer_word, tts_voice)
                     ex_filename = os.path.basename(ex_path)
                     if ex_path not in seen_audio_paths:
                         seen_audio_paths.add(ex_path)
-                        audio_tasks.append({'text': actual_text, 'path': ex_path, 'voice': tts_voice})
+                        audio_tasks.append({'text': answer_word, 'path': ex_path, 'voice': tts_voice})
                     example_plans.append((ex_path, ex_filename))
+            else:
+                if phrase:
+                    phrase_path = _audio_cache_path(phrase, tts_voice)
+                    phrase_filename = os.path.basename(phrase_path)
+                    if phrase_path not in seen_audio_paths:
+                        seen_audio_paths.add(phrase_path)
+                        audio_tasks.append({'text': phrase, 'path': phrase_path, 'voice': tts_voice})
+                    phrase_plan = (phrase_path, phrase_filename)
+
+                if enable_example_tts:
+                    for sent in example_sentences:
+                        tts_text = _example_text_for_tts(sent) if sent else ""
+                        actual_text = tts_text if tts_text else sent
+                        if not actual_text or len(actual_text) <= 3:
+                            continue
+                        ex_path = _audio_cache_path(actual_text, tts_voice)
+                        ex_filename = os.path.basename(ex_path)
+                        if ex_path not in seen_audio_paths:
+                            seen_audio_paths.add(ex_path)
+                            audio_tasks.append({'text': actual_text, 'path': ex_path, 'voice': tts_voice})
+                        example_plans.append((ex_path, ex_filename))
 
         card_plans.append({
             'phrase': phrase,
@@ -299,8 +323,13 @@ def generate_anki_package(
             else:
                 failed_audio_count += 1
                 plan_has_failure = True
-        if plan_has_failure and plan['phrase']:
-            failed_phrases.append(plan['phrase'])
+        if plan_has_failure:
+            if card_type == "cloze":
+                w = _extract_answer_word_from_meaning(plan['meaning'])
+                if w:
+                    failed_phrases.append(w)
+            elif plan['phrase']:
+                failed_phrases.append(plan['phrase'])
         audio_example_field = "".join(audio_example_parts)
 
         fields = [

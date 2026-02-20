@@ -35,7 +35,7 @@ ANKI_MODEL_CLOZE_ID = 1842957302
 ANKI_MODEL_PRODUCTION_ID = 1842957303
 ANKI_MODEL_TRANSLATION_ID = 1842957304
 
-# 卡片类型：standard=标准卡, cloze=语境填空, production=输出卡, translation=中英互译
+# 卡片类型：standard=标准卡, cloze=阅读卡, production=口语卡, translation=应试卡
 CARD_TYPES = ["standard", "cloze", "production", "translation"]
 
 ENCODING_PRIORITY = ['utf-8', 'gb18030', 'latin-1']
