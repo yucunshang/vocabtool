@@ -196,6 +196,7 @@ def generate_anki_package(
             "standard":    constants.ANKI_MODEL_ID,
             "cloze":       constants.ANKI_MODEL_CLOZE_ID,
             "translation": constants.ANKI_MODEL_TRANSLATION_ID,
+            "production":  constants.ANKI_MODEL_PRODUCTION_ID,
             "audio":       constants.ANKI_MODEL_AUDIO_ID,
         }
         mid = model_id_map.get(ct, constants.ANKI_MODEL_ID)
@@ -203,6 +204,9 @@ def generate_anki_package(
             qfmt = '<div class="phrase" style="font-size:22px;color:#333;line-height:1.5;">{{Phrase}}</div>'
             afmt = '{{FrontSide}}<hr id=answer><div class="meaning" style="font-size:24px;font-weight:bold;margin-bottom:8px;">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
         elif ct == "translation":
+            qfmt = '<div class="phrase">{{Phrase}}</div>'
+            afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+        elif ct == "production":
             qfmt = '<div class="phrase">{{Phrase}}</div>'
             afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
         elif ct == "audio":
@@ -225,7 +229,13 @@ def generate_anki_package(
         )
 
     if use_auto:
-        models = {"standard": _make_model("standard"), "cloze": _make_model("cloze")}
+        models = {
+            "standard": _make_model("standard"),
+            "cloze": _make_model("cloze"),
+            "translation": _make_model("translation"),
+            "production": _make_model("production"),
+            "audio": _make_model("audio"),
+        }
     else:
         models = {card_type: _make_model(card_type)}
 
@@ -290,6 +300,49 @@ def generate_anki_package(
                     if phrase_path not in seen_audio_paths:
                         seen_audio_paths.add(phrase_path)
                         audio_tasks.append({'text': answer_word, 'path': phrase_path, 'voice': tts_voice})
+                    phrase_plan = (phrase_path, phrase_filename)
+                if raw_example and enable_example_tts:
+                    for sent in example_sentences:
+                        tts_text = _example_text_for_tts(sent) if sent else ""
+                        actual_text = tts_text if tts_text else sent
+                        if not actual_text or len(actual_text) <= 3:
+                            continue
+                        ex_path = _audio_cache_path(actual_text, tts_voice)
+                        ex_filename = os.path.basename(ex_path)
+                        if ex_path not in seen_audio_paths:
+                            seen_audio_paths.add(ex_path)
+                            audio_tasks.append({'text': actual_text, 'path': ex_path, 'voice': tts_voice})
+                        example_plans.append((ex_path, ex_filename))
+            elif ct == "production":
+                # 正面=中文场景(phrase)，无需语音；反面：英文词块发音 + 例句发音
+                tts_text = meaning.strip() if meaning else ""
+                if tts_text and len(tts_text) > 1:
+                    phrase_path = _audio_cache_path(tts_text, tts_voice)
+                    phrase_filename = os.path.basename(phrase_path)
+                    if phrase_path not in seen_audio_paths:
+                        seen_audio_paths.add(phrase_path)
+                        audio_tasks.append({'text': answer_word, 'path': phrase_path, 'voice': tts_voice})
+                    phrase_plan = (phrase_path, phrase_filename)
+                if raw_example and enable_example_tts:
+                    for sent in example_sentences:
+                        tts_text = _example_text_for_tts(sent) if sent else ""
+                        actual_text = tts_text if tts_text else sent
+                        if not actual_text or len(actual_text) <= 3:
+                            continue
+                        ex_path = _audio_cache_path(actual_text, tts_voice)
+                        ex_filename = os.path.basename(ex_path)
+                        if ex_path not in seen_audio_paths:
+                            seen_audio_paths.add(ex_path)
+                            audio_tasks.append({'text': actual_text, 'path': ex_path, 'voice': tts_voice})
+                        example_plans.append((ex_path, ex_filename))
+            elif ct == "audio":
+                # 听音卡：正面只有音频，TTS 单词/短语
+                if phrase:
+                    phrase_path = _audio_cache_path(phrase, tts_voice)
+                    phrase_filename = os.path.basename(phrase_path)
+                    if phrase_path not in seen_audio_paths:
+                        seen_audio_paths.add(phrase_path)
+                        audio_tasks.append({'text': phrase, 'path': phrase_path, 'voice': tts_voice})
                     phrase_plan = (phrase_path, phrase_filename)
                 if raw_example and enable_example_tts:
                     for sent in example_sentences:
@@ -379,6 +432,8 @@ def generate_anki_package(
                 w = _extract_answer_word_from_meaning(plan['meaning'])
                 if w:
                     failed_phrases.append(w)
+            elif plan['ct'] == "production" and plan['meaning']:
+                failed_phrases.append(plan['meaning'])
             elif plan['phrase']:
                 failed_phrases.append(plan['phrase'])
         audio_example_field = "".join(audio_example_parts)

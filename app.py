@@ -542,12 +542,13 @@ def _render_thirdparty_section(
     with st.expander("⚙️ 自定义卡片格式", expanded=True):
         tp_card_type = st.radio(
             "卡片类型",
-            options=["standard", "cloze", "translation", "production"],
+            options=["standard", "cloze", "translation", "production", "audio"],
             format_func=lambda x: {
                 "standard":    "📖 标准卡（可自定义格式）",
                 "cloze":       "📖 阅读卡（挖空填空）",
                 "translation": "📝 互译卡（中文释义→英文+音标）",
                 "production":  "✍️ 表达卡（中文场景→英文词块）",
+                "audio":       "🔊 听音卡（先听发音再回忆）",
             }.get(x, x),
             index=0,
             key="thirdparty_card_type",
@@ -629,7 +630,22 @@ def _render_thirdparty_section(
 def _render_manual_card_section() -> None:
     """第三栏：仅粘贴 AI 生成的内容，解析并制卡。"""
     st.markdown("#### 手动制卡")
-    st.caption("将 AI 制卡结果粘贴到下方，支持标准卡与阅读卡混合，按行自动识别格式后生成 .apkg。")
+    st.caption("将 AI 制卡结果粘贴到下方。自动识别时可混合标准卡与阅读卡；若整批为互译/表达/听音卡，请在下拉框指定。")
+
+    manual_parse_type = st.selectbox(
+        "解析类型",
+        options=["auto", "standard", "cloze", "translation", "production", "audio"],
+        format_func=lambda x: {
+            "auto": "🔄 自动识别（标准卡+阅读卡混合）",
+            "standard": "📖 标准卡",
+            "cloze": "📖 阅读卡",
+            "translation": "📝 互译卡",
+            "production": "✍️ 表达卡",
+            "audio": "🔊 听音卡",
+        }.get(x, x),
+        index=0,
+        key="manual_parse_type",
+    )
 
     pasted = st.text_area(
         "粘贴 AI 生成的制卡结果",
@@ -648,14 +664,17 @@ def _render_manual_card_section() -> None:
             return
         parsed = parse_anki_data(pasted.strip())
         if not parsed:
-            st.error("解析失败，格式不符。标准卡：`word ||| 释义 ||| 例句`（可选 `||| 词源`）；阅读卡：`挖空句(含________) ||| 释义 ||| 例句`。")
+            st.error("解析失败，格式不符。标准卡：`word ||| 释义 ||| 例句`；阅读卡：`挖空句(含________) ||| 释义 ||| 例句`。")
             return
+        if manual_parse_type != "auto":
+            for c in parsed:
+                c["ct"] = manual_parse_type
         try:
             with st.spinner("⏳ 正在生成牌组" + ("（含音频，请稍候…）" if enable_audio else "…")):
                 file_path, _, _ = generate_anki_package(
                     parsed,
                     deck_name,
-                    card_type="auto",
+                    card_type=manual_parse_type if manual_parse_type != "auto" else "auto",
                     enable_tts=enable_audio,
                     tts_voice=voice_code,
                     enable_example_tts=enable_example_audio,

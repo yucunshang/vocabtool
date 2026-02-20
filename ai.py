@@ -12,6 +12,7 @@ import constants
 from config import get_config
 from errors import ErrorHandler
 from prompts import (
+    CARD_GEN_AUDIO_TEMPLATE,
     CARD_GEN_CLOZE_TEMPLATE,
     CARD_GEN_PRODUCTION_TEMPLATE,
     CARD_GEN_SYSTEM_PROMPT,
@@ -98,6 +99,9 @@ def build_thirdparty_prompt(words_str: str, fmt: Optional[CardFormat] = None) ->
 
     if card_type == "production":
         return CARD_GEN_PRODUCTION_TEMPLATE.format(words_str=words_str)
+
+    if card_type == "audio":
+        return CARD_GEN_AUDIO_TEMPLATE.format(words_str=words_str)
 
     front = fmt.get("front", "phrase")
     def_lang = fmt.get("definition", "en_native")

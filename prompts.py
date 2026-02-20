@@ -186,6 +186,29 @@ Strictly inside a single `text` code block. One entry per line. Separator: `|||`
 Process the list (max 10 words). One line per word. Output inside ```text block."""
 
 # -----------------------------------------------------------------------------
+# ②e 听音卡（先听发音再回忆）
+# 正面=纯音频 反面=单词+释义+例句，格式同标准卡
+# -----------------------------------------------------------------------------
+CARD_GEN_AUDIO_TEMPLATE = """# Role
+Anki Card Designer for **Audio Cards** (listen first, then recall).
+
+# Goal
+For each target word, output the same 3-field format as standard cards. The card shows audio on the front, then word + definition + example on the back.
+
+# Output Format
+Inside a single `text` code block. One entry per line. Separator: `|||`
+`English word or phrase` ||| `中英释义` ||| `Example sentence. (中文翻译。)`
+
+# Example
+heavy rain ||| 大雨 | Intense rainfall ||| We got caught in heavy rain. (我们遇上了大雨。)
+
+# Input Data
+{words_str}
+
+# Task
+Process the list (max 10 words). Output ONLY the cards, one per line, inside ```text block."""
+
+# -----------------------------------------------------------------------------
 # ③ 第三方 AI 专用（可自定义格式，每批最多 500 词）
 # 占位符由 ai.build_thirdparty_prompt(words_str, fmt) 填入
 # -----------------------------------------------------------------------------
