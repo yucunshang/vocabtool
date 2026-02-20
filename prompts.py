@@ -274,7 +274,6 @@ Expert Lexicographer & Reading Card Generator for Strong LLMs.
 2. Structure: Exactly one card per line. Exactly 3 fields per line, separated by the strict delimiter `|||`.
 3. Delimiter Isolation: Never use the sequence `|||` within the content of any field.
 4. Output Format: Output strictly inside a single ```text code block. Absolutely no introductory, conversational, or concluding text.
-5. Consistency: Maintain a uniform linguistic difficulty and formatting style across the entire batch.
 
 # Field Format
 Field 1: Context-rich prompt sentence containing precise semantic clues. Replace the target word with exactly 8 underscores: `________`.
@@ -282,12 +281,13 @@ Field 2: Target word /IPA/ pos. 中文释义 (Strictly use {ipa_style} for IPA).
 Field 3: Complete sentence restoring the target word. (Contextual, accurate Chinese translation).
 
 # Quality Constraints
-1. Absolute Cloze Uniqueness (Contextual Lockdown): The context in Field 1 MUST strictly isolate the target word. You must embed specific semantic hooks-such as explicit contrasts (e.g., "Unlike..."), built-in definitions, or extreme consequences-that eliminate near-synonyms. If a generic word perfectly fits the blank, your context is too weak. The sentence itself must implicitly answer "Why this exact word?".
-2. Linguistic Quality: Sentences must be grammatically flawless, native-sounding, concrete, and varied in structure. Do not use generic names or placeholder situations.
-3. Perfect Resolution: Field 3 must perfectly resolve Field 1, mirroring it exactly but with the target word replacing the blank.
+1. Absolute Cloze Uniqueness (Contextual Lockdown): The context in Field 1 MUST strictly isolate the target word using explicit contrasts, built-in definitions, or extreme consequences. If a generic word perfectly fits, the context is too weak.
+2. Accessible Carrier Language (CRITICAL): The sentence itself MUST be written in simple, highly readable, everyday English (A2 to B2 level). Absolutely DO NOT use other advanced, obscure, or GRE-level vocabulary in the context. The ONLY difficult word in the entire sentence should be the target word. The user must be able to easily read the surrounding context to logically deduce the blank.
+3. Linguistic Quality: Sentences must be grammatically flawless, native-sounding, and concrete. Do not use generic names (e.g., "Person A") or abstract, dry situations.
+4. Perfect Resolution: Field 3 must perfectly resolve Field 1, mirroring it exactly but with the target word replacing the blank.
 
 # Example
-Unlike his usually reckless brother who made impulsive decisions, Arthur was so ________ that he spent weeks analyzing every possible outcome before signing the contract. ||| meticulous /məˈtɪkjələs/ adj. 一丝不苟的，缜密的 ||| Unlike his usually reckless brother who made impulsive decisions, Arthur was so meticulous that he spent weeks analyzing every possible outcome before signing the contract. (与他那通常鲁莽、做决定冲动的兄弟不同，亚瑟非常缜密，在签合同前花了几周时间分析每一种可能的结果。)
+Unlike his brother who made quick and careless choices, Arthur was so ________ that he spent weeks checking every small detail before signing the simple paper. ||| meticulous /məˈtɪkjələs/ adj. 一丝不苟的，缜密的 ||| Unlike his brother who made quick and careless choices, Arthur was so meticulous that he spent weeks checking every small detail before signing the simple paper. (与他那做选择既快又粗心的兄弟不同，亚瑟非常缜密，在签这份简单的文件前花了几周时间检查每一个小细节。)
 
 # Task
 Generate the cards strictly based on the provided input and rules."""
