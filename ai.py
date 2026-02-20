@@ -67,6 +67,7 @@ def build_card_prompt(
     templates = {
         "standard":    CARD_GEN_USER_TEMPLATE,
         "cloze":       CARD_GEN_CLOZE_TEMPLATE,
+        "production":  CARD_GEN_PRODUCTION_TEMPLATE,
         "translation": CARD_GEN_TRANSLATION_TEMPLATE,
         "audio":       CARD_GEN_USER_TEMPLATE,
     }
