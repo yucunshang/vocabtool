@@ -12,7 +12,10 @@ import constants
 from config import get_config
 from errors import ErrorHandler
 from prompts import (
+    CARD_GEN_CLOZE_TEMPLATE,
+    CARD_GEN_PRODUCTION_TEMPLATE,
     CARD_GEN_SYSTEM_PROMPT,
+    CARD_GEN_TRANSLATION_TEMPLATE,
     CARD_GEN_USER_TEMPLATE,
     LOOKUP_SYSTEM_PROMPT,
     THIRD_PARTY_CARD_TEMPLATE,
@@ -29,6 +32,7 @@ except ImportError:
 
 
 class CardFormat(TypedDict, total=False):
+    card_type: str    # "standard" | "cloze" | "production" | "translation"
     front: str        # "word" | "phrase"
     definition: str   # "cn" | "en" | "en_native" | "both"
     examples: int     # 1 | 2 | 3
@@ -52,9 +56,21 @@ _QUERY_CACHE_MAX = 500
 _OPENAI_CLIENT: Optional[Any] = None
 
 
-def build_card_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
-    """Build the built-in AI card generation prompt. Template is fixed; fmt is ignored but kept for API compatibility."""
-    return CARD_GEN_USER_TEMPLATE.format(words_str=words_str)
+def build_card_prompt(
+    words_str: str,
+    fmt: Optional[CardFormat] = None,
+    card_type: Optional[str] = None,
+) -> str:
+    """Build the built-in AI card generation prompt by card type."""
+    ct = card_type if card_type is not None else (fmt.get("card_type", "standard") if fmt else "standard")
+    templates = {
+        "standard": CARD_GEN_USER_TEMPLATE,
+        "cloze": CARD_GEN_CLOZE_TEMPLATE,
+        "production": CARD_GEN_PRODUCTION_TEMPLATE,
+        "translation": CARD_GEN_TRANSLATION_TEMPLATE,
+    }
+    tpl = templates.get(ct, CARD_GEN_USER_TEMPLATE)
+    return tpl.format(words_str=words_str)
 
 
 def build_thirdparty_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:

@@ -102,6 +102,90 @@ date ||| 日期 | Specific day of the month ||| What is today's date? (今天是
 Process the list (max 20 words per request). One line per word/phrase. 中英释义 (Chinese | English) REQUIRED, one example with natural Chinese translation, no etymology. Ensure zero errors."""
 
 # -----------------------------------------------------------------------------
+# ②b 语境填空卡（输入方向：阅读理解、完形填空）
+# 正面=挖空句子 反面=目标词+音标/释义/搭配/词根
+# -----------------------------------------------------------------------------
+CARD_GEN_CLOZE_TEMPLATE = """# Role
+Anki Card Designer for **Cloze/Context Cards** (input direction: reading comprehension, cloze tests).
+
+# Goal
+For each target word, output ONE cloze sentence (blank for the word) and the answer line. Max 20 words per request.
+
+# Output Format
+Strictly inside a single `text` code block. One entry per line. Separator: `|||` (4 fields: cloze ||| answer_line ||| empty ||| etymology)
+`Cloze sentence with ________ for the target word` ||| `Target word / phonetic / English def / collocation` ||| ||| `Etymology (Simplified Chinese)`
+
+# Field Rules
+1. **Field 1 (Front)**: A natural, authentic English sentence with ________ where the target word goes. The context must make the answer inferable.
+2. **Field 2 (Back)**: Target word / IPA or phonetic / Concise English definition / Common collocation. Use | or / to separate.
+3. **Field 3 (Back)**: Brief etymology or roots in Chinese. Use "词源不可考" only if genuinely unknown.
+
+# Example
+The contract terms were so ________ that both sides interpreted them differently. ||| ambiguous / æmˈbɪɡjuəs / unclear, having multiple meanings / ambiguous statement ||| ||| ambi- (两边) + -ag (驱动) + -uous → 两边都可解释
+
+# Input Data
+{words_str}
+
+# Task
+Process the list (max 20 words). One cloze sentence per word. Output inside ```text block."""
+
+# -----------------------------------------------------------------------------
+# ②c 输出卡（表达方向：写作、口语）
+# 正面=中文场景 反面=英文词块+例句
+# -----------------------------------------------------------------------------
+CARD_GEN_PRODUCTION_TEMPLATE = """# Role
+Anki Card Designer for **Production Cards** (output direction: writing, speaking, active vocabulary).
+
+# Goal
+For each target word, output a Chinese scenario (what the learner wants to express) and the English chunk + example. Max 20 words per request.
+
+# Output Format
+Strictly inside a single `text` code block. One entry per line. Separator: `|||`
+`中文场景描述（你想说...）` ||| `English chunk / collocation` ||| `Example sentence. (中文翻译。)`
+
+# Field Rules
+1. **Field 1 (Front)**: Natural Chinese scenario—what the learner wants to say. E.g. "你想说：这份声明措辞模糊，故意让人猜"
+2. **Field 2 (Back)**: The best English chunk or collocation for that scenario. E.g. "ambiguous statement"
+3. **Field 3 (Back)**: One short example sentence using the chunk, with Chinese translation.
+
+# Example
+你想说：这份声明措辞模糊，故意让人猜。 ||| ambiguous statement ||| The government's ambiguous statement left room for speculation. (政府含糊其辞的声明让人浮想联翩。)
+
+# Input Data
+{words_str}
+
+# Task
+Process the list (max 20 words). One scenario + chunk + example per word. Output inside ```text block."""
+
+# -----------------------------------------------------------------------------
+# ②d 中英互译卡（应试方向：初高中、中英互译题型）
+# 正面=中文释义 反面=英文单词+音标+例句
+# -----------------------------------------------------------------------------
+CARD_GEN_TRANSLATION_TEMPLATE = """# Role
+Anki Card Designer for **Translation Cards** (exam direction: C-E translation, Chinese definition recall).
+
+# Goal
+For each target word, output the Chinese definition (front) and the English word + phonetic + example (back). Max 20 words per request.
+
+# Output Format
+Strictly inside a single `text` code block. One entry per line. Separator: `|||`
+`中文释义` ||| `English word / IPA` ||| `Example sentence. (中文翻译。)`
+
+# Field Rules
+1. **Field 1 (Front)**: ONE concise Chinese definition. E.g. "模糊的，含混不清的"
+2. **Field 2 (Back)**: English word + IPA/phonetic. E.g. "ambiguous / æmˈbɪɡjuəs"
+3. **Field 3 (Back)**: One short example sentence with natural Chinese translation.
+
+# Example
+模糊的，含混不清的 ||| ambiguous / æmˈbɪɡjuəs ||| The instructions were ambiguous. (说明含糊不清。)
+
+# Input Data
+{words_str}
+
+# Task
+Process the list (max 20 words). One line per word. Output inside ```text block."""
+
+# -----------------------------------------------------------------------------
 # ③ 第三方 AI 专用（可自定义格式，每批最多 500 词）
 # 占位符由 ai.build_thirdparty_prompt(words_str, fmt) 填入
 # -----------------------------------------------------------------------------

@@ -30,6 +30,13 @@ TTS_RETRY_ATTEMPTS = 3
 MIN_AUDIO_FILE_SIZE = 100
 
 ANKI_MODEL_ID = 1842957301
+# 多卡片类型需不同 Model ID，避免 Anki 冲突
+ANKI_MODEL_CLOZE_ID = 1842957302
+ANKI_MODEL_PRODUCTION_ID = 1842957303
+ANKI_MODEL_TRANSLATION_ID = 1842957304
+
+# 卡片类型：standard=标准卡, cloze=语境填空, production=输出卡, translation=中英互译
+CARD_TYPES = ["standard", "cloze", "production", "translation"]
 
 ENCODING_PRIORITY = ['utf-8', 'gb18030', 'latin-1']
 

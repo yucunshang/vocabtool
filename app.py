@@ -384,6 +384,7 @@ def _render_builtin_ai_section(
                     file_path, audio_failed, failed_phrases = generate_anki_package(
                         edited_data,
                         current_deck_name,
+                        card_type=card_format.get("card_type", "standard") if card_format else "standard",
                         enable_tts=enable_audio,
                         tts_voice=voice_code,
                         enable_example_tts=enable_example_audio,
@@ -391,6 +392,7 @@ def _render_builtin_ai_section(
                     )
                     set_anki_pkg(file_path, current_deck_name)
                     st.session_state["anki_cards_cache"] = edited_data
+                    st.session_state["_builtin_card_type"] = card_format.get("card_type", "standard") if card_format else "standard"
                     st.session_state["_builtin_audio_failed_count"] = audio_failed
                     st.session_state["_builtin_audio_failed_phrases"] = failed_phrases or []
                     audio_bar.progress(1.0)
@@ -455,6 +457,7 @@ def _render_builtin_ai_section(
                     current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
                     new_file, new_failed, new_phrases = generate_anki_package(
                         cards, current_deck_name,
+                        card_type=st.session_state.get("_builtin_card_type", "standard"),
                         enable_tts=enable_audio, tts_voice=voice_code,
                         enable_example_tts=enable_example_audio,
                     )
@@ -498,7 +501,22 @@ def _render_extract_results() -> None:
 
     if not use_thirdparty:
         st.markdown("#### 内置 AI 一键制卡")
-        _render_builtin_ai_section(words_only, enable_audio, voice_code, enable_example_audio, None)
+        card_type = st.selectbox(
+            "卡片类型",
+            options=constants.CARD_TYPES,
+            format_func=lambda x: {
+                "standard": "📖 标准卡（正面单词，反面中英释义+例句）",
+                "cloze": "📝 语境填空卡（正面挖空句，反面词+音标+释义+搭配+词根）",
+                "production": "✍️ 输出卡（正面中文场景，反面英文词块+例句）",
+                "translation": "🔄 中英互译卡（正面中文释义，反面英文+音标+例句）",
+            }.get(x, x),
+            index=0,
+            key="builtin_card_type",
+        )
+        _render_builtin_ai_section(
+            words_only, enable_audio, voice_code, enable_example_audio,
+            {"card_type": card_type},
+        )
     else:
         _render_thirdparty_section(words_only, enable_audio, voice_code, enable_example_audio)
 
@@ -582,9 +600,22 @@ def _render_thirdparty_section(
 
 
 def _render_manual_card_section() -> None:
-    """第三栏：仅粘贴 AI 生成的内容，解析并制卡（不生成 Prompt）。"""
+    """第三栏：仅粘贴 AI 生成的内容，解析并制卡。"""
     st.markdown("#### 手动制卡")
     st.caption("将任意来源的 AI 制卡结果（如 ChatGPT、Claude 复制的内容）粘贴到下方，解析后生成 .apkg。")
+
+    manual_card_type = st.selectbox(
+        "卡片类型",
+        options=constants.CARD_TYPES,
+        format_func=lambda x: {
+            "standard": "📖 标准卡",
+            "cloze": "📝 语境填空卡",
+            "production": "✍️ 输出卡",
+            "translation": "🔄 中英互译卡",
+        }.get(x, x),
+        index=0,
+        key="manual_card_type",
+    )
 
     pasted = st.text_area(
         "粘贴 AI 生成的制卡结果",
@@ -609,6 +640,7 @@ def _render_manual_card_section() -> None:
             file_path, _, _ = generate_anki_package(
                 parsed,
                 deck_name,
+                card_type=manual_card_type,
                 enable_tts=enable_audio,
                 tts_voice=voice_code,
                 enable_example_tts=enable_example_audio,

@@ -86,7 +86,8 @@ def generate_anki_package(
     enable_tts: bool = False,
     tts_voice: str = "en-US-JennyNeural",
     enable_example_tts: bool = True,
-    progress_callback: Optional[ProgressCallback] = None
+    progress_callback: Optional[ProgressCallback] = None,
+    card_type: str = "standard",
 ) -> Tuple[str, int, List[str]]:
     """Generate Anki package (.apkg) file with optional TTS audio.
 
@@ -165,25 +166,39 @@ def generate_anki_package(
 
     DECK_ID = zlib.adler32(deck_name.encode('utf-8'))
 
+    # Select model by card type; all use same 6 fields for compatibility
+    model_id_map = {
+        "standard": constants.ANKI_MODEL_ID,
+        "cloze": constants.ANKI_MODEL_CLOZE_ID,
+        "production": constants.ANKI_MODEL_PRODUCTION_ID,
+        "translation": constants.ANKI_MODEL_TRANSLATION_ID,
+    }
+    model_id = model_id_map.get(card_type, constants.ANKI_MODEL_ID)
+
+    # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
+    if card_type == "cloze":
+        qfmt = '<div class="phrase" style="font-size:20px;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
+        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}<span class="audio-ex">{{Audio_Example}}</span>'
+    elif card_type == "production":
+        qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
+        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+    elif card_type == "translation":
+        qfmt = '<div class="phrase" style="font-size:24px;">{{Phrase}}</div>'
+        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+    else:
+        qfmt = '<div class="phrase">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
+        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}'
+
     model = genanki.Model(
-        constants.ANKI_MODEL_ID,
-        'VocabFlow Unified Model',
+        model_id,
+        f'VocabFlow {card_type.capitalize()}',
         fields=[
             {'name': 'Phrase'}, {'name': 'Meaning'},
             {'name': 'Example'}, {'name': 'Etymology'},
             {'name': 'Audio_Phrase'}, {'name': 'Audio_Example'}
         ],
-        templates=[{
-            'name': 'Vocab Card',
-            'qfmt': '<div class="phrase">{{Phrase}}</div>'
-                     '<span class="audio-phrase">{{Audio_Phrase}}</span>',
-            'afmt': '{{FrontSide}}'
-                    '<hr>'
-                    '<div class="meaning">{{Meaning}}</div>'
-                    '{{#Example}}<div class="example">{{Example}}</div>{{/Example}}'
-                    '<span class="audio-ex">{{Audio_Example}}</span>'
-                    '{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}',
-        }], css=CSS
+        templates=[{'name': 'Card', 'qfmt': qfmt, 'afmt': afmt}],
+        css=CSS
     )
 
     deck = genanki.Deck(DECK_ID, deck_name)
