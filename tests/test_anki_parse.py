@@ -76,6 +76,16 @@ Another ________ example. ||| word2 / w2 ||| 释义；definition ||| collocation
     assert "word2" in result[1]["m"] and "释义" in result[1]["m"]
 
 
+def test_parse_anki_data_cloze_c1_format():
+    """5-field cloze with {{c1::word}} format."""
+    raw = """The doorknob, made of polished {{c1::brass}}, gleamed in the light. ||| brass / bræs ||| n. 黄铜 ||| polished brass ||| The doorknob, made of polished brass, gleamed in the light."""
+    result = parse_anki_data(raw)
+    assert len(result) == 1
+    assert "{{c1::brass}}" in result[0]["w"]
+    assert "brass" in result[0]["m"]
+    assert result[0]["e"] == "The doorknob, made of polished brass, gleamed in the light."
+
+
 def test_parse_anki_data_card_shape():
     raw = "phrase ||| def ||| example ||| etymology"
     result = parse_anki_data(raw)

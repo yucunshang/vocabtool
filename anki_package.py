@@ -190,8 +190,8 @@ def generate_anki_package(
 
     # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
     if card_type == "cloze":
-        # 反面：单词+音标+发音按钮(内联) | 释义 | 搭配 | 例句(加例句发音)
-        qfmt = '<div class="phrase" style="font-size:20px;">{{Phrase}}</div>'
+        # 使用 Anki 原生 cloze 格式 {{c1::word}}，qfmt 用 {{cloze:Phrase}}
+        qfmt = '{{cloze:Phrase}}'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
     elif card_type == "production":
         qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
@@ -212,7 +212,8 @@ def generate_anki_package(
             {'name': 'Audio_Phrase'}, {'name': 'Audio_Example'}
         ],
         templates=[{'name': 'Card', 'qfmt': qfmt, 'afmt': afmt}],
-        css=CSS
+        css=CSS,
+        model_type=genanki.Model.CLOZE if card_type == "cloze" else genanki.Model.FRONT_BACK
     )
 
     deck = genanki.Deck(DECK_ID, deck_name)

@@ -102,46 +102,36 @@ date ||| 日期 | Specific day of the month ||| What is today's date? (今天是
 Process the list (max 10 words per request). One line per word/phrase. 中英释义 (Chinese | English) REQUIRED, one example with natural Chinese translation, no etymology. Ensure zero errors."""
 
 # -----------------------------------------------------------------------------
-# ②b 阅读卡（语境填空）5 字段：cloze | word/IPA | 释义 | 搭配 | 例句
+# ②b 阅读卡（语境填空）5 字段：cloze({{c1::word}}) | word/IPA | 释义 | 搭配 | 完整句
 # -----------------------------------------------------------------------------
 CARD_GEN_CLOZE_TEMPLATE = """# Role
-You are a strict Anki cloze card generator. Your most important job is sentence quality.
+You are a strict, highly accurate Anki cloze card generator. Your primary goal is to create context-rich sentences where ONLY the target word makes logical and grammatical sense.
 
-# Sentence Quality Check (most critical)
-Write the cloze sentence, then run these 3 checks before outputting:
+# Sentence Quality Constraints (CRITICAL)
+Before generating, ensure your sentence passes these 3 tests:
+1. Uniqueness (The "Only One Word Fits" Test): You MUST add specific contextual clues, strong collocations, or factual constraints.
+   - BAD: "He hid it in the ___." (Could be box, drawer, mind).
+   - GOOD: "He hung his shirts, jackets, and winter coats in the wooden ___." (Context heavily forces "closet").
+2. Show, Don't Tell: Do not write dictionary definitions. Embed the word in a vivid, real-world scenario.
+3. Typical Usage: Use the word in its most frequent, native-sounding collocation.
 
-CHECK 1 — Uniqueness: Could a different word fill the blank just as naturally?
-If yes → rewrite the sentence. Add more specific context until the target word is clearly the best fit.
-Bad: "The child complained of a sore ________." (throat / tummy / ear all work)
-Good: "The toddler clutched her ________ and whimpered after eating too much candy." (tummy — informal, childlike register locks in the answer)
+# Output Format Specification
+You MUST output EXACTLY 5 fields separated by the string ` ||| `.
+DO NOT use markdown tables, bullet points, numbering, or extra line breaks. Output plain text only.
+Use the standard Anki cloze format `{{c1::word}}` for the target word in the first field.
 
-CHECK 2 — Not a definition: Does the sentence explain or define the word rather than use it?
-If yes → rewrite as a real scene.
-Bad: "The word 'children' is the ________ of 'child'." (defines the word)
-Good: "She corrected him gently: 'the ________ of mouse is mice, not mouses.'" (uses it in context)
+Template:
+[Cloze Sentence with {{c1::word}}] ||| [Word] / [{ipa_style} IPA] ||| [Chinese Definition] ||| [2-3 English Collocations with Chinese meaning] ||| [Original Full Sentence]
 
-CHECK 3 — Typical usage: Is the sentence using the word in its most common real-world sense?
-If no → rewrite using a more representative context.
-Bad: "The heavy rains will ________ numerous mushrooms." (unusual context)
-Good: "The viral video ________ dozens of copycat challenges online." (typical usage)
+# Example
+Input: brass, dam
 
-# Output Format
-One card per word. Blank line between cards. All inside a single `text` code block.
-Exactly 5 fields per card, separated by |||:
+Output:
+The doorknob, made of polished {{c1::brass}}, gleamed with a yellowish-gold metallic shine in the hallway light. ||| brass / bræs ||| n. 黄铜 ||| polished brass (抛光的黄铜), brass instrument (铜管乐器) ||| The doorknob, made of polished brass, gleamed with a yellowish-gold metallic shine in the hallway light.
+The beavers worked tirelessly, gnawing down trees to build a wooden {{c1::dam}} across the stream to block the water flow. ||| dam / dæm ||| n. 水坝，堰 ||| build a dam (筑坝), beaver dam (海狸坝) ||| The beavers worked tirelessly, gnawing down trees to build a wooden dam across the stream to block the water flow.
 
-Field 1: Cloze sentence with ________ for the target word
-Field 2: word / {ipa_style} IPA
-Field 3: 中文释义；English definition (core meaning only, one sense)
-Field 4: 2–3 collocations separated by " / ". If uniqueness is borderline, append: "Also possible: [word], but [target word] fits better because..."
-Field 5: Field 1 completed with the answer + (中文翻译)
-
-# Rules
-- Max 10 words per request
-- No etymology, roots, or affixes
-- One card per word, no extras
-- Output only the code block, nothing else
-
-# Input
+# Task
+Process the following words (Max 10 per request). Output ONLY the formatted cards, no introductory or concluding text:
 {words_str}"""
 
 # -----------------------------------------------------------------------------
