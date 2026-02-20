@@ -300,12 +300,11 @@ def _render_builtin_ai_section(
     )
 
     if clicked:
-        # Fresh generate: reset page, clear previous cards, 牌组名称更新为当前时间
+        # Fresh generate: reset page and clear previous cards
         st.session_state["_builtin_gen_page"] = 0
         st.session_state.pop("_builtin_parsed_cards", None)
         st.session_state.pop("_builtin_ai_partial_result", None)
         st.session_state.pop("card_editor", None)
-        st.session_state["builtin_deck_name"] = f"Vocab_{get_beijing_time_str()}"
         # Re-compute pagination for page 0
         words_for_auto_ai = words_only[:page_size]
         remaining_words = max(0, total_word_count - page_size)
