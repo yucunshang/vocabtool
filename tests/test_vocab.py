@@ -2,10 +2,11 @@
 
 import pytest
 
-# Set up minimal vocab dict and mock NLP so tests run without Streamlit/NLTK
 import resources
-resources.VOCAB_DICT = {"run": 100, "running": 100, "hello": 500, "known": 50}
-resources.FULL_DF = None
+import vocab as vocab_module
+
+# Minimal mock vocab dict — used by the autouse fixture below.
+_MOCK_VOCAB = {"run": 100, "running": 100, "hello": 500, "known": 50}
 
 
 class MockLemminflect:
@@ -15,6 +16,15 @@ class MockLemminflect:
         if word == "running":
             return ["run"]
         return [word]
+
+
+@pytest.fixture(autouse=True)
+def mock_vocab_data(monkeypatch):
+    """Patch load_vocab_data to return a small deterministic dict and clear caches."""
+    monkeypatch.setattr(resources, "load_vocab_data", lambda: (_MOCK_VOCAB, None))
+    vocab_module._vocab_dict.cache_clear()
+    yield
+    vocab_module._vocab_dict.cache_clear()
 
 
 @pytest.fixture(autouse=True)
