@@ -512,11 +512,13 @@ def _render_extract_results() -> None:
             "卡片类型",
             options=constants.CARD_TYPES,
             format_func=lambda x: {
-                "standard": "📖 标准卡（正面单词，反面中英释义+例句）",
-                "cloze": "📖 阅读卡（正面挖空句，反面单词+释义+例句）",
+                "standard":    "📖 标准卡（正面单词，反面中英释义+例句）",
+                "cloze":       "📖 阅读卡（正面挖空句，反面单词+释义+例句）",
+                "translation": "📝 互译卡（正面中文释义，反面英文单词+音标）",
+                "audio":       "🔊 听音卡（正面音频，反面单词+释义）",
             }.get(x, x),
             index=1,
-            horizontal=True,
+            horizontal=False,
             key="builtin_card_type",
         )
         _render_builtin_ai_section(

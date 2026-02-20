@@ -193,13 +193,21 @@ def generate_anki_package(
 
     def _make_model(ct: str) -> "genanki.Model":
         model_id_map = {
-            "standard": constants.ANKI_MODEL_ID,
-            "cloze": constants.ANKI_MODEL_CLOZE_ID,
+            "standard":    constants.ANKI_MODEL_ID,
+            "cloze":       constants.ANKI_MODEL_CLOZE_ID,
+            "translation": constants.ANKI_MODEL_TRANSLATION_ID,
+            "audio":       constants.ANKI_MODEL_AUDIO_ID,
         }
         mid = model_id_map.get(ct, constants.ANKI_MODEL_ID)
         if ct == "cloze":
             qfmt = '<div class="phrase" style="font-size:22px;color:#333;line-height:1.5;">{{Phrase}}</div>'
             afmt = '{{FrontSide}}<hr id=answer><div class="meaning" style="font-size:24px;font-weight:bold;margin-bottom:8px;">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+        elif ct == "translation":
+            qfmt = '<div class="phrase">{{Phrase}}</div>'
+            afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+        elif ct == "audio":
+            qfmt = '<span class="audio-phrase" style="font-size:48px;">{{Audio_Phrase}}</span>'
+            afmt = '{{FrontSide}}<hr><div class="phrase">{{Phrase}}</div><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
         else:
             qfmt = '<div class="phrase">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
             afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>{{#Etymology}}<div class="etymology">🌱 {{Etymology}}</div>{{/Etymology}}'
@@ -267,6 +275,28 @@ def generate_anki_package(
                     tts_text = _example_text_for_tts(raw_example)
                     actual_text = tts_text if tts_text else raw_example.strip()
                     if actual_text and len(actual_text) > 3:
+                        ex_path = _audio_cache_path(actual_text, tts_voice)
+                        ex_filename = os.path.basename(ex_path)
+                        if ex_path not in seen_audio_paths:
+                            seen_audio_paths.add(ex_path)
+                            audio_tasks.append({'text': actual_text, 'path': ex_path, 'voice': tts_voice})
+                        example_plans.append((ex_path, ex_filename))
+            elif ct == "translation":
+                # 正面=中文释义(phrase)，无需语音；反面：英文单词发音 + 例句发音
+                answer_word = _extract_answer_word_from_meaning(meaning)
+                if answer_word and len(answer_word) > 1:
+                    phrase_path = _audio_cache_path(answer_word, tts_voice)
+                    phrase_filename = os.path.basename(phrase_path)
+                    if phrase_path not in seen_audio_paths:
+                        seen_audio_paths.add(phrase_path)
+                        audio_tasks.append({'text': answer_word, 'path': phrase_path, 'voice': tts_voice})
+                    phrase_plan = (phrase_path, phrase_filename)
+                if raw_example and enable_example_tts:
+                    for sent in example_sentences:
+                        tts_text = _example_text_for_tts(sent) if sent else ""
+                        actual_text = tts_text if tts_text else sent
+                        if not actual_text or len(actual_text) <= 3:
+                            continue
                         ex_path = _audio_cache_path(actual_text, tts_voice)
                         ex_filename = os.path.basename(ex_path)
                         if ex_path not in seen_audio_paths:
@@ -345,7 +375,7 @@ def generate_anki_package(
                 failed_audio_count += 1
                 plan_has_failure = True
         if plan_has_failure:
-            if plan['ct'] == "cloze":
+            if plan['ct'] in ("cloze", "translation"):
                 w = _extract_answer_word_from_meaning(plan['meaning'])
                 if w:
                     failed_phrases.append(w)

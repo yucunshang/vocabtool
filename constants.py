@@ -31,9 +31,11 @@ MIN_AUDIO_FILE_SIZE = 100
 
 ANKI_MODEL_ID = 1842957301
 ANKI_MODEL_CLOZE_ID = 1842957302
+ANKI_MODEL_TRANSLATION_ID = 1842957303
+ANKI_MODEL_AUDIO_ID = 1842957304
 
-# 卡片类型：standard=标准卡, cloze=阅读卡
-CARD_TYPES = ["standard", "cloze"]
+# 卡片类型：standard=标准卡, cloze=阅读卡, translation=互译卡, audio=听音卡
+CARD_TYPES = ["standard", "cloze", "translation", "audio"]
 
 # 界面显示的 AI 模型名称
 AI_MODEL_DISPLAY = "DeepSeek"

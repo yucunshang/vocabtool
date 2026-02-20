@@ -14,6 +14,7 @@ from errors import ErrorHandler
 from prompts import (
     CARD_GEN_CLOZE_TEMPLATE,
     CARD_GEN_SYSTEM_PROMPT,
+    CARD_GEN_TRANSLATION_TEMPLATE,
     CARD_GEN_USER_TEMPLATE,
     LOOKUP_SYSTEM_PROMPT,
     THIRD_PARTY_CARD_TEMPLATE,
@@ -62,8 +63,10 @@ def build_card_prompt(
     """Build the built-in AI card generation prompt by card type."""
     ct = card_type if card_type is not None else (fmt.get("card_type", "standard") if fmt else "standard")
     templates = {
-        "standard": CARD_GEN_USER_TEMPLATE,
-        "cloze": CARD_GEN_CLOZE_TEMPLATE,
+        "standard":    CARD_GEN_USER_TEMPLATE,
+        "cloze":       CARD_GEN_CLOZE_TEMPLATE,
+        "translation": CARD_GEN_TRANSLATION_TEMPLATE,
+        "audio":       CARD_GEN_USER_TEMPLATE,
     }
     tpl = templates.get(ct, CARD_GEN_USER_TEMPLATE)
     voice = (fmt or {}).get("voice_code", "")
