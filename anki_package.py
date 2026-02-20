@@ -231,6 +231,9 @@ def generate_anki_package(
     for card in cards_data:
         phrase = safe_str_clean(card.get('w', ''))
         meaning = safe_str_clean(card.get('m', ''))
+        # 阅读卡 Meaning 用 ;; 分隔三行，转成换行显示
+        if card_type == "cloze" and " ;; " in meaning:
+            meaning = meaning.replace(" ;; ", "\n")
         raw_example = safe_str_clean(card.get('e', ''))
         etymology = safe_str_clean(card.get('r', ''))
         note_id = card.get('id')

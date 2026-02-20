@@ -112,21 +112,16 @@ Anki Card Designer for **Cloze/Context Cards** (input direction: reading compreh
 For each target word, output ONE cloze sentence and the back content. Max 20 words per request. Do NOT include etymology, word roots, or affixes.
 
 # Output Format
-Strictly inside a single `text` code block. One entry per line. Separator: `|||` (4 fields)
-`Cloze sentence` ||| `Meaning (3 lines)` ||| `Example sentence` |||
+Strictly inside a single `text` code block. **One card per line.** Separator: `|||` (4 fields). Each line must contain exactly 3 occurrences of |||. No line breaks inside a field.
+`Cloze sentence` ||| `word / phonetic ;; 中文释义；English def ;; collocations` ||| `Example sentence` |||
 
 - **Field 1**: Cloze sentence with ________ where the target word goes.
-- **Field 2**: Three lines (use line break between lines):
-  Line 1: word / IPA phonetic
-  Line 2: 中文释义；English definition
-  Line 3: Common collocations (e.g. ambiguous statement, ambiguous about)
+- **Field 2**: Three parts joined by ` ;; ` (space-double-semicolon-space) on ONE line: (1) word / IPA phonetic; (2) 中文释义；English definition; (3) collocations.
 - **Field 3**: One example sentence in English. Optional: (中文翻译) in parentheses.
-- **Field 4**: Leave empty. No etymology.
+- **Field 4**: Leave empty.
 
-# Example
-The contract terms were so ________ that both sides interpreted them differently. ||| ambiguous / æmˈbɪɡjuəs
-模糊的；不清楚的，有歧义的；unclear, having multiple meanings
-ambiguous statement, ambiguous about ||| The government's ambiguous statement left room for speculation. (政府含糊其辞的声明让人浮想联翩。) |||
+# Example (each card = one line)
+The contract terms were so ________ that both sides interpreted them differently. ||| ambiguous / æmˈbɪɡjuəs ;; 模糊的；不清楚的，有歧义的；unclear, having multiple meanings ;; ambiguous statement, ambiguous about ||| The government's ambiguous statement left room for speculation. (政府含糊其辞的声明让人浮想联翩。) |||
 
 # Input Data
 {words_str}
