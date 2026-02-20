@@ -217,7 +217,7 @@ def _rank_from_ai_content(content: str, fallback_rank: int) -> int:
     """
     for line in content.split('\n'):
         line = line.strip()
-        if not line or line.startswith('✏️ 拼写纠正:'):
+        if not line or line.startswith(('✏️ 拼写纠正:', '✔️ 拼写纠正:', '拼写纠正:')):
             continue
         if '(' in line:
             headword = line.split('(', 1)[0].strip()

@@ -262,7 +262,7 @@ def _render_builtin_ai_section(
     card_format: Optional[CardFormat] = None,
 ) -> None:
     """Builtin AI generation flow: button → progress → parse → edit → package → download."""
-    ai_model_label = constants.AI_MODEL_DISPLAY
+    ai_model_label = get_config().get("openai_model_display", constants.AI_MODEL_DISPLAY)
 
     # Fix 1: Deck name input
     deck_name = st.text_input(
@@ -308,6 +308,7 @@ def _render_builtin_ai_section(
         st.session_state["_builtin_gen_page"] = 0
         st.session_state.pop("_builtin_parsed_cards", None)
         st.session_state.pop("_builtin_ai_partial_result", None)
+        st.session_state.pop("_builtin_ai_failed_words", None)
         st.session_state.pop("card_editor", None)
         # Re-compute pagination for page 0
         words_for_auto_ai = words_only[:page_size]
@@ -350,6 +351,8 @@ def _render_builtin_ai_section(
             progress_callback=update_ai_progress,
             card_format=_fmt,
         )
+
+        st.session_state["_builtin_ai_failed_words"] = failed_words or []
 
         # Fix 3: Report failed words
         if failed_words:
@@ -441,6 +444,88 @@ def _render_builtin_ai_section(
         use_container_width=True,
         key="builtin_download_btn",
     )
+
+    ai_failed_words = st.session_state.get("_builtin_ai_failed_words", [])
+    if ai_failed_words and st.session_state.get("_builtin_parsed_cards"):
+        st.warning(
+            f"⚠️ 仍有 {len(ai_failed_words)} 个词未完成制卡："
+            f"{', '.join(ai_failed_words[:20])}"
+            + ("..." if len(ai_failed_words) > 20 else "")
+        )
+        if st.button("🔄 重试失败词制卡", key="btn_retry_failed_words_builtin", use_container_width=True):
+            batch_allowed, batch_msg = check_batch_limit()
+            if not batch_allowed:
+                st.warning(batch_msg)
+            else:
+                record_batch()
+
+                _fmt = dict(card_format) if card_format else {}
+                _fmt["voice_code"] = voice_code
+                current_card_type = st.session_state.get("_builtin_card_type") or (
+                    card_format.get("card_type", "standard") if card_format else "standard"
+                )
+                with st.spinner(f"⏳ 重试 {len(ai_failed_words)} 个失败词..."):
+                    try:
+                        retry_result, retry_failed_words = process_ai_in_batches(
+                            ai_failed_words,
+                            card_format=_fmt,
+                        )
+                        retry_parsed = parse_anki_data(retry_result) if retry_result else []
+
+                        existing_cards = st.session_state.get("_builtin_parsed_cards") or []
+                        seen_words = {str(c.get("w", "")).strip().lower() for c in existing_cards if c.get("w")}
+                        added_cards = []
+                        for card in retry_parsed:
+                            card_word = str(card.get("w", "")).strip().lower()
+                            if not card_word or card_word in seen_words:
+                                continue
+                            seen_words.add(card_word)
+                            added_cards.append(card)
+
+                        merged_cards = existing_cards + added_cards
+                        st.session_state["_builtin_parsed_cards"] = merged_cards
+                        st.session_state.pop("card_editor", None)
+
+                        unresolved_after_parse = []
+                        if current_card_type in ("standard", "cloze", "audio"):
+                            parsed_heads = {str(c.get("w", "")).strip().lower() for c in retry_parsed if c.get("w")}
+                            unresolved_after_parse = [
+                                w for w in ai_failed_words
+                                if w.strip().lower() not in parsed_heads
+                            ]
+                        remaining_failed = list(dict.fromkeys((retry_failed_words or []) + unresolved_after_parse))
+                        st.session_state["_builtin_ai_failed_words"] = remaining_failed
+
+                        if added_cards:
+                            current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
+                            new_file, audio_failed, failed_phrases = generate_anki_package(
+                                merged_cards,
+                                current_deck_name,
+                                card_type=current_card_type,
+                                enable_tts=enable_audio,
+                                tts_voice=voice_code,
+                                enable_example_tts=enable_example_audio,
+                            )
+                            set_anki_pkg(new_file, current_deck_name)
+                            st.session_state["anki_cards_cache"] = merged_cards
+                            st.session_state["_builtin_card_type"] = current_card_type
+                            st.session_state["_builtin_audio_failed_count"] = audio_failed
+                            st.session_state["_builtin_audio_failed_phrases"] = failed_phrases or []
+
+                        if added_cards:
+                            st.success(f"✅ 重试补全 {len(added_cards)} 张卡片。")
+                        else:
+                            st.info("本次重试未解析出新卡片。")
+                        if remaining_failed:
+                            st.warning(
+                                f"⚠️ 仍失败 {len(remaining_failed)} 词："
+                                + ", ".join(remaining_failed[:20])
+                                + ("..." if len(remaining_failed) > 20 else "")
+                            )
+                        run_gc()
+                    except Exception as e:
+                        ErrorHandler.handle(e, "重试失败词制卡失败")
+                st.rerun()
 
     # Audio retry: only re-run TTS for files still missing (cache skips successful ones)
     audio_failed = st.session_state.get("_builtin_audio_failed_count", 0)
@@ -802,7 +887,8 @@ def render_quick_lookup() -> None:
         st.session_state["quick_lookup_word"] = lemma
         _do_lookup(lemma)
 
-    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else f"🔍 {constants.AI_MODEL_DISPLAY}"
+    lookup_model_label = get_config().get("openai_model_display", constants.AI_MODEL_DISPLAY)
+    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else f"🔍 {lookup_model_label}"
     _has_content = bool(st.session_state.get("quick_lookup_word") or st.session_state.get("quick_lookup_last_result"))
 
     with st.form("quick_lookup_form", clear_on_submit=False, border=False):

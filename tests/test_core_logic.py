@@ -248,3 +248,15 @@ class TestGetOpenAIClient:
         assert callable(resources.load_vocab_data)
         assert callable(resources.get_vocab_dict)
         assert callable(resources.get_rank_for_word)
+
+
+class TestRankFromAIContent:
+    def test_skips_typo_notice_line_with_checkmark(self, monkeypatch):
+        monkeypatch.setattr(ai_module, "get_rank_for_word", lambda w: 123 if w == "receive" else 99999)
+        content = "✔️ 拼写纠正: recieve -> receive\nreceive (v. 动词)\n接收 | to get something"
+        assert ai_module._rank_from_ai_content(content, 888) == 123
+
+    def test_skips_typo_notice_line_with_pencil(self, monkeypatch):
+        monkeypatch.setattr(ai_module, "get_rank_for_word", lambda w: 321 if w == "receive" else 99999)
+        content = "✏️ 拼写纠正: recieve -> receive\nreceive (v. 动词)\n接收 | to get something"
+        assert ai_module._rank_from_ai_content(content, 888) == 321

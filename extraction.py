@@ -2,12 +2,15 @@
 
 import csv
 import html
+import ipaddress
 import os
 import re
+import socket
 import sqlite3
 import tempfile
 from io import StringIO
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import pandas as pd
 import requests
@@ -82,9 +85,39 @@ def parse_anki_txt_export(uploaded_file: Any) -> str:
         return ErrorHandler.handle_file_error(e, "Anki Export Import")
 
 
+def _hostname_resolves_to_public_ip(hostname: str) -> bool:
+    """Return True only when hostname resolves and every IP is globally routable."""
+    h = (hostname or "").strip().strip("[]")
+    if not h:
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(h)
+        return ip_obj.is_global
+    except ValueError:
+        pass
+
+    try:
+        infos = socket.getaddrinfo(h, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        return False
+
+    resolved = set()
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        ip_text = sockaddr[0]
+        try:
+            resolved.add(ipaddress.ip_address(ip_text))
+        except ValueError:
+            continue
+    if not resolved:
+        return False
+    return all(ip_obj.is_global for ip_obj in resolved)
+
+
 def _is_safe_url(url: str) -> bool:
-    """Block URLs pointing to localhost, private IPs, or non-HTTP schemes."""
-    from urllib.parse import urlparse
+    """Block URLs pointing to localhost/private IP space or non-HTTP schemes."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return False
@@ -93,14 +126,36 @@ def _is_safe_url(url: str) -> bool:
     for b in blocked:
         if hostname == b or hostname.endswith("." + b):
             return False
-    # Block common private ranges
-    if hostname.startswith(("10.", "192.168.", "169.254.")):
-        return False
-    if hostname.startswith("172."):
-        parts = hostname.split(".")
-        if len(parts) >= 2 and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
-            return False
-    return True
+    return _hostname_resolves_to_public_ip(hostname)
+
+
+def _safe_get_with_redirects(
+    url: str,
+    headers: dict,
+    timeout: int,
+    max_redirects: int = 5,
+) -> requests.Response:
+    """Fetch URL while validating every redirect target."""
+    current_url = url
+    for _ in range(max_redirects + 1):
+        if not _is_safe_url(current_url):
+            raise requests.RequestException("URL blocked for security reasons (private/local address).")
+
+        response = requests.get(
+            current_url,
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=False,
+        )
+        if response.is_redirect or response.is_permanent_redirect:
+            location = response.headers.get("Location", "").strip()
+            if not location:
+                return response
+            current_url = urljoin(current_url, location)
+            continue
+        return response
+
+    raise requests.RequestException(f"Too many redirects (>{max_redirects})")
 
 
 def extract_text_from_url(url: str) -> str:
@@ -114,9 +169,10 @@ def extract_text_from_url(url: str) -> str:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        response = requests.get(
-            url, headers=headers, timeout=constants.REQUEST_TIMEOUT_SECONDS,
-            allow_redirects=True,
+        response = _safe_get_with_redirects(
+            url,
+            headers=headers,
+            timeout=constants.REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
 
@@ -172,7 +228,11 @@ def extract_from_pdf(uploaded_file: Any) -> str:
     try:
         reader = pypdf.PdfReader(uploaded_file)
         pages = reader.pages[: constants.PDF_MAX_PAGES]
-        pages_text = [p.extract_text() for p in pages if p.extract_text()]
+        pages_text = []
+        for p in pages:
+            txt = p.extract_text()
+            if txt:
+                pages_text.append(txt)
         return "\n".join(pages_text)
     except Exception as e:
         return ErrorHandler.handle_file_error(e, "PDF")

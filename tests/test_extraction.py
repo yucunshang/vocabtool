@@ -1,10 +1,11 @@
 # Tests for extraction.clean_anki_field and parse_anki_txt_export.
 
+import socket
 from io import BytesIO
 
 import pytest
 
-from extraction import clean_anki_field, parse_anki_txt_export
+from extraction import _is_safe_url, clean_anki_field, parse_anki_txt_export
 
 
 def test_clean_anki_field_plain():
@@ -61,3 +62,24 @@ def test_parse_anki_txt_export_skips_comments():
     result = parse_anki_txt_export(f)
     assert "comment" not in result
     assert "word1" in result
+
+
+def test_is_safe_url_blocks_localhost():
+    assert _is_safe_url("http://localhost/test") is False
+    assert _is_safe_url("https://127.0.0.1/") is False
+
+
+def test_is_safe_url_blocks_private_resolution(monkeypatch):
+    def _fake_getaddrinfo(*args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("10.0.0.5", 0))]
+
+    monkeypatch.setattr("extraction.socket.getaddrinfo", _fake_getaddrinfo)
+    assert _is_safe_url("https://example.com/path") is False
+
+
+def test_is_safe_url_allows_public_resolution(monkeypatch):
+    def _fake_getaddrinfo(*args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 0))]
+
+    monkeypatch.setattr("extraction.socket.getaddrinfo", _fake_getaddrinfo)
+    assert _is_safe_url("https://example.com/path") is True

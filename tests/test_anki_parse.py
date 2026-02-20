@@ -47,7 +47,7 @@ After."""
 
 def test_parse_anki_data_deduplicates():
     raw = """word ||| meaning ||| ex ||| ety
-word ||| other meaning ||| ex2 ||| ety2"""
+word ||| meaning ||| ex2 ||| ety2"""
     result = parse_anki_data(raw)
     assert len(result) == 1
     assert result[0]["m"] == "meaning"
@@ -60,6 +60,16 @@ valid ||| ok ||| ex ||| ety"""
     result = parse_anki_data(raw)
     assert len(result) == 1
     assert result[0]["w"] == "valid"
+
+
+def test_parse_anki_data_keeps_same_w_with_different_meaning():
+    raw = """模糊的 ||| ambiguous / æmˈbɪɡjuəs ||| ex1
+模糊的 ||| vague / veɪɡ ||| ex2"""
+    result = parse_anki_data(raw)
+    assert len(result) == 2
+    assert result[0]["w"] == "模糊的"
+    assert "ambiguous" in result[0]["m"]
+    assert "vague" in result[1]["m"]
 
 
 def test_parse_anki_data_block_format_multiline():
@@ -96,3 +106,30 @@ def test_parse_anki_data_card_shape():
     assert card["m"] == "def"
     assert card["e"] == "example"
     assert card["r"] == "etymology"
+
+
+def test_parse_anki_data_relaxed_spaced_delimiter():
+    raw = "word | | | 意思 | | | Example sentence."
+    result = parse_anki_data(raw)
+    assert len(result) == 1
+    assert result[0]["w"] == "word"
+    assert result[0]["m"] == "意思"
+    assert result[0]["e"] == "Example sentence."
+
+
+def test_parse_anki_data_fullwidth_delimiter():
+    raw = "phrase ｜｜｜ 释义 ｜｜｜ Example. (例句。)"
+    result = parse_anki_data(raw)
+    assert len(result) == 1
+    assert result[0]["w"] == "phrase"
+    assert result[0]["m"] == "释义"
+    assert result[0]["e"] == "Example. (例句。)"
+
+
+def test_parse_anki_data_cloze_repairs_one_extra_delimiter():
+    raw = "A ________ test. ||| word /wɜːd/ n. 词 ||| Example has accidental ||| delimiter."
+    result = parse_anki_data(raw)
+    assert len(result) == 1
+    assert result[0]["ct"] == "cloze"
+    assert result[0]["w"] == "A ________ test."
+    assert result[0]["e"] == "Example has accidental ||| delimiter."
