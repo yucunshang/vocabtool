@@ -16,7 +16,7 @@ vocabtool/
 │   ├── src/
 │   ├── public/
 │   └── ...
-└── coca_cleaned.csv          # 词库（与 Streamlit 共用）
+└── coca_reranked.csv          # 词库（与 Streamlit 共用）
 ```
 
 ## 本地运行

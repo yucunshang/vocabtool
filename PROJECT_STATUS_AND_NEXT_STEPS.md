@@ -30,7 +30,7 @@ PWA 支持 — manifest.json + service-worker.js
 - `anki_parse.py` — 解析 AI 返回的 `|||` 格式
 - `anki_package.py` — genanki 真实生成 .apkg + TTS
 - `tts.py` — edge-tts 异步批量合成
-- `resources.py` — 加载 coca_cleaned.csv / vocab.pkl
+- `resources.py` — 加载 coca_reranked.csv / vocab.pkl
 
 ❌ **问题：**
 - 依赖 `streamlit`、`st.session_state`、`st.error` 等，无法直接作为 Web API 使用
@@ -81,7 +81,7 @@ D:\project\vocabtool\
 ├── resources.py       # 需改写（去掉 Streamlit 依赖）
 ├── config.py          # 需改写（支持 .env）
 ├── constants.py       # 保留
-├── coca_cleaned.csv   # 词库
+├── coca_reranked.csv   # 词库
 └── ...
 ```
 
