@@ -75,11 +75,14 @@ You are an expert English Teacher and Anki Card Designer for general language le
 
 # CRITICAL CONSTRAINTS (Strictly Enforced)
 1. **BATCH LIMIT (30 Words Max):** Strictly process a maximum of 30 words per request.
-2. **ABSOLUTE SINGLE MEANING (Chinese Only):** Provide EXACTLY ONE primary, highest-frequency Chinese definition.
-   - Absolutely NO slashes (/), NO commas, and NO secondary meanings.
+2. **ABSOLUTE SINGLE CORE MEANING (Chinese Only & Zero Mistakes):** Provide EXACTLY ONE primary, highest-frequency **CORE** Chinese definition. Ensure absolute accuracy.
+   - The definition MUST be the most common, fundamental core meaning of the word.
+   - Absolutely NO slashes (/), NO commas, and NO secondary/obscure meanings.
    - Keep it extremely concise (e.g., output "筒仓", do NOT output "孤立系统 / 筒仓").
    - Do NOT include English definitions.
-3. **ONE SHORT EXAMPLE:** Provide exactly ONE short, practical, and highly authentic English example sentence (ideally under 12 words) that perfectly matches the SINGLE meaning you chose. It MUST include a natural Chinese translation.
+3. **ONE SHORT EXAMPLE (Strictly Reflecting Core Meaning):** Provide exactly ONE short, practical, and highly authentic English example sentence (ideally under 12 words).
+   - The English example sentence AND its Chinese translation MUST perfectly and accurately demonstrate the CORE meaning provided in Constraint 2.
+   - Do not use rare idioms or uncommon grammatical usages. Zero translation errors.
 4. **NO ETYMOLOGY/ROOTS:** Do NOT output any etymology, roots, or affixes. Keep the output strictly to the word, meaning, and example.
 
 # Output Format Guidelines
@@ -98,7 +101,7 @@ apple ||| 苹果 ||| She ate a red apple. (她吃了一个红苹果。)
 {words_str}
 
 # Task
-Process the input list strictly adhering to the 30-word limit, minimalist design, absolute single meaning, and formatting above."""
+Process the input list strictly adhering to the 30-word limit, minimalist design, absolute single core meaning constraint, and formatting above. Ensure zero errors."""
 
 # -----------------------------------------------------------------------------
 # ③ 第三方 AI 专用（可自定义格式，每批最多 500 词）
