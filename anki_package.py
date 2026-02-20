@@ -92,6 +92,22 @@ def _extract_answer_word_from_meaning(meaning: str) -> str:
     return first_line
 
 
+def _normalize_cloze_phrase(phrase: str, meaning: str) -> str:
+    """Ensure Phrase uses {{c1::word}} so Anki generates cards.
+
+    Anki Cloze model only creates cards when the cloze field contains {{c1::...}}.
+    If AI returns ________ (underscores), convert to {{c1::word}} using word from Meaning.
+    """
+    if not phrase or "{{c1::" in phrase:
+        return phrase
+    if "________" not in phrase:
+        return phrase
+    word = _extract_answer_word_from_meaning(meaning)
+    if not word:
+        return phrase
+    return phrase.replace("________", f"{{{{c1::{word}}}}}", 1)
+
+
 def generate_anki_package(
     cards_data: List[Dict[str, str]],
     deck_name: str,
@@ -177,7 +193,8 @@ def generate_anki_package(
     }
     """
 
-    DECK_ID = zlib.adler32(deck_name.encode('utf-8'))
+    # Anki expects positive deck IDs; adler32 can be negative on some platforms
+    DECK_ID = zlib.adler32(deck_name.encode('utf-8')) & 0x7FFFFFFF
 
     # Select model by card type; all use same 6 fields for compatibility
     model_id_map = {
@@ -235,6 +252,8 @@ def generate_anki_package(
         raw_example = safe_str_clean(card.get('e', ''))
         etymology = safe_str_clean(card.get('r', ''))
         note_id = card.get('id')
+        if card_type == "cloze":
+            phrase = _normalize_cloze_phrase(phrase, meaning)
 
         example_sentences = _split_examples(raw_example)
         example_display = "<br>".join(
