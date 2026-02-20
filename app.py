@@ -542,31 +542,40 @@ def _render_thirdparty_section(
     with st.expander("⚙️ 自定义卡片格式", expanded=True):
         tp_card_type = st.radio(
             "卡片类型",
-            options=["standard", "cloze"],
-            format_func=lambda x: "📖 标准卡" if x == "standard" else "📖 阅读卡（挖空填空）",
+            options=["standard", "cloze", "translation", "production"],
+            format_func=lambda x: {
+                "standard":    "📖 标准卡（可自定义格式）",
+                "cloze":       "📖 阅读卡（挖空填空）",
+                "translation": "📝 互译卡（中文释义→英文+音标）",
+                "production":  "✍️ 表达卡（中文场景→英文词块）",
+            }.get(x, x),
             index=0,
             key="thirdparty_card_type",
-            horizontal=True,
+            horizontal=False,
         )
-        tp_front = st.radio(
-            "正面",
-            options=["word", "phrase"],
-            format_func=lambda x: "单词" if x == "word" else "短语/词组",
-            index=1,
-            key="thirdparty_front",
-            horizontal=True,
-        )
-        tp_def = st.radio(
-            "反面释义",
-            options=["cn", "en", "en_native", "both"],
-            format_func=lambda x: {"cn": "中文", "en": "英文(学习型)", "en_native": "英文(母语者词典)", "both": "中英双语"}[x],
-            index=2,
-            key="thirdparty_def",
-            horizontal=True,
-        )
-        tp_ex = st.selectbox("例句数量", options=[1, 2, 3], format_func=lambda x: f"{x} 条", index=1, key="thirdparty_ex")
-        tp_ex_cn = st.checkbox("例句带中文翻译", value=False, key="thirdparty_ex_cn")
-        tp_ety = st.checkbox("词根词源词缀", value=True, key="thirdparty_ety")
+        if tp_card_type == "standard":
+            tp_front = st.radio(
+                "正面",
+                options=["word", "phrase"],
+                format_func=lambda x: "单词" if x == "word" else "短语/词组",
+                index=1,
+                key="thirdparty_front",
+                horizontal=True,
+            )
+            tp_def = st.radio(
+                "反面释义",
+                options=["cn", "en", "en_native", "both"],
+                format_func=lambda x: {"cn": "中文", "en": "英文(学习型)", "en_native": "英文(母语者词典)", "both": "中英双语"}[x],
+                index=2,
+                key="thirdparty_def",
+                horizontal=True,
+            )
+            tp_ex = st.selectbox("例句数量", options=[1, 2, 3], format_func=lambda x: f"{x} 条", index=1, key="thirdparty_ex")
+            tp_ex_cn = st.checkbox("例句带中文翻译", value=False, key="thirdparty_ex_cn")
+            tp_ety = st.checkbox("词根词源词缀", value=True, key="thirdparty_ety")
+        else:
+            st.caption("此卡片类型使用固定格式，无需额外配置。")
+            tp_front, tp_def, tp_ex, tp_ex_cn, tp_ety = "word", "cn", 1, False, False
 
     thirdparty_fmt: CardFormat = {
         "card_type": tp_card_type,
