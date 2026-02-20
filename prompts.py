@@ -25,6 +25,7 @@ Target Audience: Chinese learners who need to grasp the meaning instantly. The E
 5.  **Phrase Support**: For phrases (e.g., "give up"), explain the logic in the Origin line.
 6.  **Format**: Pure text only. NO Markdown tags (no bold, no italics) in your output. Use standard unicode characters like • for bullets.
 7.  **Fixes**: Auto-capitalize proper nouns (e.g., english -> English).
+8.  **Typo Notice Format**: Only when correction is truly needed, add exactly one line before the 6-line template: `✔️ 拼写纠正: original -> corrected`.
 
 # Output Template
 {term} ({pos} {CN_pos})
@@ -68,7 +69,7 @@ compromise (n. 名词)
 # ② 批量制卡（Card Generation）内置 AI 专用
 # 占位符：{words_str} 由 ai.build_card_prompt() 填入
 # -----------------------------------------------------------------------------
-CARD_GEN_SYSTEM_PROMPT = "You are a helpful assistant for vocabulary learning."
+CARD_GEN_SYSTEM_PROMPT = "You are a helpful assistant for vocabulary learning. Follow the required card format strictly and do not add extra commentary."
 
 CARD_GEN_USER_TEMPLATE = """# Role
 Atomic Flash Dictionary (Bilingual Edition) — Anki Card Batch Mode
@@ -85,6 +86,9 @@ Convert a list of **words or phrases** into minimalist Anki cards. For each item
 5. **Phrase Support**: For phrases (e.g., "give up"), define the phrase as a unit.
 6. **Format**: Pure text only. No Markdown. Output strictly inside a single `text` code block, one entry per line.
 7. **Fixes**: Auto-capitalize proper nouns (e.g., english → English).
+8. **Completeness**: Process every input item in original order; do not skip, merge, or reorder.
+9. **Delimiter Safety**: Keep exactly 2 delimiters (`|||`) per line; never place `|||` inside field content.
+10. **No Extra Text**: Output cards only, without headings, numbering, or explanations.
 
 # Output Structure (Exactly 3 fields per line)
 Separator: `|||`
@@ -111,6 +115,8 @@ Reading Card Generator. Create fill-in-the-blank sentences where ONLY the target
 1. **Uniqueness**: Add specific context so only one word fits. BAD: "He put it in the ___." GOOD: "He hung his coats in the wooden ___."
 2. **Blank**: Use exactly eight underscores ________ where the word goes. No {{c1::}} or other markup.
 3. **Meaning**: One line: word /IPA/ pos. 中文释义. Example: brass /bræs/ n. 黄铜
+4. **Completeness**: Process every input item in original order; do not skip any item.
+5. **Delimiter Safety**: Keep exactly 2 delimiters (`|||`) per line.
 
 # Output Format
 Exactly 3 fields per line, separated by ` ||| `. No markdown, no extra line breaks.
@@ -147,6 +153,8 @@ Strictly inside a single `text` code block. One entry per line. Separator: `|||`
 1. **Field 1 (Front)**: Natural Chinese scenario—what the learner wants to say. E.g. "你想说：这份声明措辞模糊，故意让人猜"
 2. **Field 2 (Back)**: The best English chunk or collocation for that scenario. E.g. "ambiguous statement"
 3. **Field 3 (Back)**: One short example sentence using the chunk, with Chinese translation.
+4. **Completeness**: Process every input item in original order; one line per item.
+5. **Delimiter Safety**: Keep exactly 2 delimiters (`|||`) per line.
 
 # Example
 你想说：这份声明措辞模糊，故意让人猜。 ||| ambiguous statement ||| The government's ambiguous statement left room for speculation. (政府含糊其辞的声明让人浮想联翩。)
@@ -175,6 +183,8 @@ Strictly inside a single `text` code block. One entry per line. Separator: `|||`
 1. **Field 1 (Front)**: ONE concise Chinese definition. E.g. "模糊的，含混不清的"
 2. **Field 2 (Back)**: English word + IPA/phonetic. E.g. "ambiguous / æmˈbɪɡjuəs"
 3. **Field 3 (Back)**: One short example sentence with natural Chinese translation.
+4. **Completeness**: Process every input item in original order; one line per item.
+5. **Delimiter Safety**: Keep exactly 2 delimiters (`|||`) per line.
 
 # Example
 模糊的，含混不清的 ||| ambiguous / æmˈbɪɡjuəs ||| The instructions were ambiguous. (说明含糊不清。)
@@ -225,6 +235,7 @@ Make sure to process everything in one go, without missing anything.
 3. **Separator**: Use `|||` as the delimiter.
 4. **Target Structure**:
    {structure_line}
+5. **Completeness**: Process every input item in original order; no skipping, no merging.
 
 # Field Constraints (Strict)
 {field1_instruction}
