@@ -782,6 +782,11 @@ def render_quick_lookup() -> None:
         st.session_state["quick_lookup_word"] = pending_word
         st.session_state["_auto_lookup_word"] = pending_word
 
+    # Update input to lemma only (no lookup) - must run before widget creation
+    update_input_only = st.session_state.pop("_quick_lookup_update_input_only", "")
+    if update_input_only:
+        st.session_state["quick_lookup_word"] = update_input_only
+
     # Handle pending clear (must happen before text_input widget is created)
     if st.session_state.pop("_quick_lookup_pending_clear", False):
         st.session_state["quick_lookup_word"] = ""
@@ -840,8 +845,9 @@ def render_quick_lookup() -> None:
                 st.info("⏱️ 请求过于频繁，请稍后再试。")
             else:
                 lemma = get_lemma_for_word(query_word)
-                st.session_state["quick_lookup_word"] = lemma
                 _do_lookup(lemma)
+                st.session_state["_quick_lookup_update_input_only"] = lemma
+                st.rerun()
 
     result = st.session_state.get("quick_lookup_last_result")
     if result and 'error' not in result:
