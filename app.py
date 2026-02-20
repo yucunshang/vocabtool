@@ -508,7 +508,7 @@ def _render_extract_results() -> None:
             options=getattr(constants, "CARD_TYPES", ["standard", "cloze", "production", "translation"]),
             format_func=lambda x: {
                 "standard": "📖 标准卡（正面单词，反面中英释义+例句）",
-                "cloze": "📖 阅读卡（正面挖空句，反面：单词+音标/中文+英文释义/搭配/例句）",
+                "cloze": "📖 阅读卡（正面挖空句，反面：单词/中文+英文释义/例句）",
                 "production": "🗣️ 口语卡（正面中文场景，反面英文词块+例句）",
                 "translation": "📋 应试卡（正面中文释义，反面英文+音标+例句）",
             }.get(x, x),

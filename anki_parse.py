@@ -24,10 +24,10 @@ def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
     seen_phrases: set = set()
 
     def _parse_parts(parts: list) -> Optional[Dict[str, str]]:
-        if len(parts) >= 5 and "________" in (parts[0] or ""):
+        if len(parts) >= 4 and "________" in (parts[0] or ""):
             phrase = parts[0].strip()
-            meaning = "\n".join(p.strip() for p in parts[1:4] if p.strip())
-            example = parts[4].strip() if len(parts) > 4 else ""
+            meaning = "\n".join(p.strip() for p in parts[1:3] if p.strip())
+            example = parts[3].strip() if len(parts) > 3 else ""
             return {'w': phrase, 'm': meaning, 'e': example, 'r': ""}
         if len(parts) >= 2:
             phrase = parts[0].strip()

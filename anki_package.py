@@ -81,15 +81,15 @@ def _example_text_for_tts(display_text: str) -> str:
 
 
 def _extract_answer_word_from_meaning(meaning: str) -> str:
-    """Extract the target word from cloze Meaning field (format: word / phonetic / def / collocation)."""
+    """Extract the target word from cloze Meaning field (first line = word, second line = definition)."""
     if not meaning:
         return ""
-    # First segment before " / " or " | " is the word
+    first_line = meaning.split("\n")[0].strip()
     for sep in (" / ", " | "):
-        idx = meaning.find(sep)
+        idx = first_line.find(sep)
         if idx != -1:
-            return meaning[:idx].strip()
-    return meaning.strip()
+            return first_line[:idx].strip()
+    return first_line
 
 
 def generate_anki_package(
