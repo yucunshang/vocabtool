@@ -321,7 +321,7 @@ def generate_anki_package(
                     phrase_filename = os.path.basename(phrase_path)
                     if phrase_path not in seen_audio_paths:
                         seen_audio_paths.add(phrase_path)
-                        audio_tasks.append({'text': answer_word, 'path': phrase_path, 'voice': tts_voice})
+                        audio_tasks.append({'text': tts_text, 'path': phrase_path, 'voice': tts_voice})
                     phrase_plan = (phrase_path, phrase_filename)
                 if raw_example and enable_example_tts:
                     for sent in example_sentences:
