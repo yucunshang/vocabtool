@@ -102,34 +102,47 @@ date ||| 日期 | Specific day of the month ||| What is today's date? (今天是
 Process the list (max 20 words per request). One line per word/phrase. 中英释义 (Chinese | English) REQUIRED, one example with natural Chinese translation, no etymology. Ensure zero errors."""
 
 # -----------------------------------------------------------------------------
-# ②b 语境填空卡（输入方向：阅读理解、完形填空）
-# 反面：单词 | 中文释义+英文释义 | 例句（无音标、无搭配）
+# ②b 阅读卡（语境填空）5 字段：cloze | word/IPA | 释义 | 搭配 | 例句
 # -----------------------------------------------------------------------------
 CARD_GEN_CLOZE_TEMPLATE = """# Role
-Anki Card Designer for **Cloze/Context Cards** (input direction: reading comprehension, cloze tests).
+You are a strict Anki cloze card generator. Your most important job is sentence quality.
 
-# Goal
-For each target word, output ONE cloze sentence and the back content. Max 20 words per request. Do NOT include etymology, word roots, phonetic transcription, or collocations.
+# Sentence Quality Check (most critical)
+Write the cloze sentence, then run these 3 checks before outputting:
+
+CHECK 1 — Uniqueness: Could a different word fill the blank just as naturally?
+If yes → rewrite the sentence. Add more specific context until the target word is clearly the best fit.
+Bad: "The child complained of a sore ________." (throat / tummy / ear all work)
+Good: "The toddler clutched her ________ and whimpered after eating too much candy." (tummy — informal, childlike register locks in the answer)
+
+CHECK 2 — Not a definition: Does the sentence explain or define the word rather than use it?
+If yes → rewrite as a real scene.
+Bad: "The word 'children' is the ________ of 'child'." (defines the word)
+Good: "She corrected him gently: 'the ________ of mouse is mice, not mouses.'" (uses it in context)
+
+CHECK 3 — Typical usage: Is the sentence using the word in its most common real-world sense?
+If no → rewrite using a more representative context.
+Bad: "The heavy rains will ________ numerous mushrooms." (unusual context)
+Good: "The viral video ________ dozens of copycat challenges online." (typical usage)
 
 # Output Format
-Strictly inside a single `text` code block. Use **blank line between cards**. All fields separated by `|||` (exactly 4 fields per card).
-`Cloze sentence` ||| `word` ||| `中文释义；English definition` ||| `Example (complete filled-in sentence)` |||
+One card per word. Blank line between cards. All inside a single `text` code block.
+Exactly 5 fields per card, separated by |||:
 
-- **Field 1**: Cloze sentence with ________ where the target word goes.
-- **Field 2**: Target word only (no phonetic, no IPA)
-- **Field 3**: 中文释义；English definition (concise)
-- **Field 4**: The COMPLETE sentence — same as Field 1 but with ________ replaced by the answer word. Optional: (中文翻译) in parentheses.
+Field 1: Cloze sentence with ________ for the target word
+Field 2: word / {ipa_style} IPA
+Field 3: 中文释义；English definition (core meaning only, one sense)
+Field 4: 2–3 collocations separated by " / ". If uniqueness is borderline, append: "Also possible: [word], but [target word] fits better because..."
+Field 5: Field 1 completed with the answer + (中文翻译)
 
-# Example (blank line between cards)
-The contract terms were so ________ that both sides interpreted them differently. ||| ambiguous ||| 模糊的；不清楚的，有歧义的；unclear, having multiple meanings ||| The contract terms were so ambiguous that both sides interpreted them differently. (合同条款如此模糊，双方各有解读。) |||
+# Rules
+- Max 20 words per request
+- No etymology, roots, or affixes
+- One card per word, no extras
+- Output only the code block, nothing else
 
-Another word. ||| word2 ||| 释义；definition ||| Complete example sentence. |||
-
-# Input Data
-{words_str}
-
-# Task
-Process the list (max 20 words). One cloze per word. Output inside block."""
+# Input
+{words_str}"""
 
 # -----------------------------------------------------------------------------
 # ②c 输出卡（表达方向：写作、口语）

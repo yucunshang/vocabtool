@@ -300,11 +300,12 @@ def _render_builtin_ai_section(
     )
 
     if clicked:
-        # Fresh generate: reset page and clear previous cards
+        # Fresh generate: reset page, clear previous cards, 牌组名称更新为当前时间
         st.session_state["_builtin_gen_page"] = 0
         st.session_state.pop("_builtin_parsed_cards", None)
         st.session_state.pop("_builtin_ai_partial_result", None)
         st.session_state.pop("card_editor", None)
+        st.session_state["builtin_deck_name"] = f"Vocab_{get_beijing_time_str()}"
         # Re-compute pagination for page 0
         words_for_auto_ai = words_only[:page_size]
         remaining_words = max(0, total_word_count - page_size)
@@ -361,7 +362,10 @@ def _render_builtin_ai_section(
 
             if parsed_data:
                 card_bar.progress(1.0)
-                card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
+                req = len(words_for_auto_ai)
+                got = len(parsed_data)
+                count_msg = f"共 {got} 张" + (f"（请求 {req} 词）" if got != req else "")
+                card_text.markdown(f"**制卡进度**：✅ 完成（{count_msg}）")
                 audio_text.markdown("**音频进度**：进行中...")
 
                 # Fix 4: Checkpoint — save raw AI text in case packaging fails
@@ -400,7 +404,9 @@ def _render_builtin_ai_section(
                     audio_bar.progress(1.0)
                     suffix = f"（{audio_failed} 条失败，可点击下方重试）" if audio_failed else ""
                     audio_text.markdown(f"**音频进度**：✅ 完成{suffix}")
-                    st.info(f"✅ 解析完成，共 {len(edited_data)} 张卡片。")
+                    req = len(words_for_auto_ai)
+                    got = len(edited_data)
+                    st.info(f"✅ 解析完成，共 {got} 张卡片。" + (f"（请求 {req} 词，{req - got} 词未解析成功）" if got < req else ""))
                     st.balloons()
                     run_gc()
                 except Exception as e:
@@ -508,7 +514,7 @@ def _render_extract_results() -> None:
             options=getattr(constants, "CARD_TYPES", ["standard", "cloze", "production", "translation"]),
             format_func=lambda x: {
                 "standard": "📖 标准卡（正面单词，反面中英释义+例句）",
-                "cloze": "📖 阅读卡（正面挖空句，反面：单词/中文+英文释义/例句）",
+                "cloze": "📖 阅读卡（正面挖空句，反面：单词+音标/释义/搭配/例句）",
                 "production": "🗣️ 口语卡（正面中文场景，反面英文词块+例句）",
                 "translation": "📋 应试卡（正面中文释义，反面英文+音标+例句）",
             }.get(x, x),

@@ -9,7 +9,7 @@ def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
 
     Supports variable field counts:
       - 4 fields: phrase ||| meaning ||| example ||| etymology (standard/production/translation)
-      - 5 fields: cloze ||| word/phonetic ||| 释义 ||| collocations ||| example (cloze card)
+      - 5 fields cloze: cloze ||| word/IPA ||| 释义 ||| 搭配 ||| example (reading card)
     """
     parsed_cards: List[Dict[str, str]] = []
     text = raw_text.strip()
@@ -24,6 +24,11 @@ def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
     seen_phrases: set = set()
 
     def _parse_parts(parts: list) -> Optional[Dict[str, str]]:
+        if len(parts) >= 5 and "________" in (parts[0] or ""):
+            phrase = parts[0].strip()
+            meaning = "\n".join(p.strip() for p in parts[1:4] if p.strip())
+            example = parts[4].strip() if len(parts) > 4 else ""
+            return {'w': phrase, 'm': meaning, 'e': example, 'r': ""}
         if len(parts) >= 4 and "________" in (parts[0] or ""):
             phrase = parts[0].strip()
             meaning = "\n".join(p.strip() for p in parts[1:3] if p.strip())
@@ -37,22 +42,23 @@ def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
             return {'w': phrase, 'm': meaning, 'e': example, 'r': etymology}
         return None
 
-    # Block format: cards separated by blank line(s)
+    # Block format: blank lines separate blocks; each block can have multiple cards (one per line)
     if "\n\n" in text or re.search(r'\n\s{2,}\n', text):
         blocks = re.split(r'\n\s*\n', text)
         block_cards: List[Dict[str, str]] = []
         for block in blocks:
-            block = block.strip()
-            if not block or "|||" not in block:
-                continue
-            parts = [p.strip() for p in block.split("|||")]
-            card = _parse_parts(parts)
-            if not card or not card["w"] or not card["m"]:
-                continue
-            if card["w"].lower() in seen_phrases:
-                continue
-            seen_phrases.add(card["w"].lower())
-            block_cards.append(card)
+            for line in block.split('\n'):
+                line = line.strip()
+                if not line or "|||" not in line:
+                    continue
+                parts = [p.strip() for p in line.split("|||")]
+                card = _parse_parts(parts)
+                if not card or not card["w"] or not card["m"]:
+                    continue
+                if card["w"].lower() in seen_phrases:
+                    continue
+                seen_phrases.add(card["w"].lower())
+                block_cards.append(card)
         if block_cards:
             return block_cards
         seen_phrases.clear()

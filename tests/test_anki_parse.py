@@ -63,14 +63,14 @@ valid ||| ok ||| ex ||| ety"""
 
 
 def test_parse_anki_data_block_format_multiline():
-    """Block format: blank line between cards; 4-field cloze (word, 释义, example)."""
-    raw = """The terms were so ________ that both sides disagreed. ||| ambiguous ||| 模糊的；unclear, having multiple meanings ||| The terms were so ambiguous that both sides disagreed. |||
+    """Block format: blank line between cards; 5-field cloze (word/IPA, 释义, 搭配, example)."""
+    raw = """The terms were so ________ that both sides disagreed. ||| ambiguous / æmˈbɪɡjuəs ||| 模糊的；unclear, having multiple meanings ||| ambiguous statement ||| The terms were so ambiguous that both sides disagreed. |||
 
-Another ________ example. ||| word2 ||| 释义；definition ||| Another word2 example. |||"""
+Another ________ example. ||| word2 / w2 ||| 释义；definition ||| collocation ||| Another word2 example. |||"""
     result = parse_anki_data(raw)
     assert len(result) == 2
     assert result[0]["w"] == "The terms were so ________ that both sides disagreed."
-    assert "ambiguous" in result[0]["m"] and "模糊的" in result[0]["m"]
+    assert "ambiguous" in result[0]["m"] and "模糊的" in result[0]["m"] and "ambiguous statement" in result[0]["m"]
     assert result[0]["e"] == "The terms were so ambiguous that both sides disagreed."
     assert result[1]["w"] == "Another ________ example."
     assert "word2" in result[1]["m"] and "释义" in result[1]["m"]
