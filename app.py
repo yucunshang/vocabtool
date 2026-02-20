@@ -32,7 +32,7 @@ from rate_limiter import (
 from state import set_generated_words_state
 from ui_styles import APP_STYLES_HTML
 from utils import get_beijing_time_str, render_copy_button, run_gc
-from vocab import analyze_logic
+from vocab import analyze_logic, get_lemma_for_word
 
 logger = logging.getLogger(__name__)
 
@@ -791,7 +791,9 @@ def render_quick_lookup() -> None:
 
     auto_word = st.session_state.pop("_auto_lookup_word", "")
     if auto_word and not in_cooldown:
-        _do_lookup(auto_word)
+        lemma = get_lemma_for_word(auto_word)
+        st.session_state["quick_lookup_word"] = lemma
+        _do_lookup(lemma)
 
     _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else f"🔍 {constants.AI_MODEL_DISPLAY}"
     _has_content = bool(st.session_state.get("quick_lookup_word") or st.session_state.get("quick_lookup_last_result"))
@@ -837,7 +839,9 @@ def render_quick_lookup() -> None:
             elif time.time() < st.session_state["quick_lookup_block_until"]:
                 st.info("⏱️ 请求过于频繁，请稍后再试。")
             else:
-                _do_lookup(query_word)
+                lemma = get_lemma_for_word(query_word)
+                st.session_state["quick_lookup_word"] = lemma
+                _do_lookup(lemma)
 
     result = st.session_state.get("quick_lookup_last_result")
     if result and 'error' not in result:
@@ -1086,20 +1090,23 @@ with tab_extract_anki:
                     if not valid_words:
                         st.error("❌ 没有识别到有效的英文单词（2–25 字母），请检查输入内容。")
                     else:
-                        unique_words = []
-                        seen = set()
+                        seen_lemmas = set()
+                        data_list = []
                         for word in valid_words:
-                            w_lower = word.lower().strip()
-                            if not w_lower or w_lower in seen:
+                            w = word.strip()
+                            if not w:
                                 continue
-                            seen.add(w_lower)
-                            unique_words.append(word)
+                            lemma = get_lemma_for_word(w)
+                            if lemma in seen_lemmas:
+                                continue
+                            seen_lemmas.add(lemma)
+                            data_list.append((lemma, resources.get_rank_for_word(lemma)))
 
                         raw_count = len(valid_words)
-                        data_list = [(w, resources.get_rank_for_word(w)) for w in unique_words]
                         set_generated_words_state(data_list, raw_count, None)
-                        duplicated = raw_count - len(unique_words)
-                        msg = f"✅ 已加载 {len(unique_words)} 个单词（不筛 rank）"
+                        unique_count = len(data_list)
+                        duplicated = raw_count - unique_count
+                        msg = f"✅ 已加载 {unique_count} 个单词（不筛 rank，已统一为 lemma）"
                         if duplicated > 0:
                             msg += f"（去重 {duplicated} 个）"
                         st.toast(msg, icon="🎉")

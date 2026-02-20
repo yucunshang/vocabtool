@@ -12,9 +12,11 @@ _MOCK_VOCAB = {"run": 100, "running": 100, "hello": 500, "known": 50}
 class MockLemminflect:
     @staticmethod
     def getLemma(word, upos="VERB"):
-        # Simple mock: return [word] for common forms
+        # Simple mock: return lemma for common inflected forms
         if word == "running":
             return ["run"]
+        if word == "cats":
+            return ["cat"]
         return [word]
 
 

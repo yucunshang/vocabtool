@@ -41,12 +41,23 @@ def is_valid_word(word: str) -> bool:
 
 
 def get_lemma(word: str, lemminflect: Any) -> str:
-    """Get lemma of a word with error handling."""
-    try:
-        lemmas = lemminflect.getLemma(word, upos='VERB')
-        return lemmas[0] if lemmas else word
-    except Exception:
+    """Get lemma of a word. Tries NOUN, VERB, ADJ, ADV; returns first non-empty result."""
+    if not word:
         return word
+    for upos in ("NOUN", "VERB", "ADJ", "ADV"):
+        try:
+            lemmas = lemminflect.getLemma(word, upos=upos)
+            if lemmas:
+                return lemmas[0]
+        except Exception:
+            continue
+    return word
+
+
+def get_lemma_for_word(word: str) -> str:
+    """Public helper: load NLP resources and return lemma for a single word."""
+    _, lemminflect = load_nlp_resources()
+    return get_lemma(word.strip().lower(), lemminflect)
 
 
 def analyze_logic(
@@ -90,7 +101,7 @@ def analyze_logic(
             include_word = (best_rank == 99999 and include_unknown)
 
         if include_word:
-            word_to_keep = lemma if rank_lemma != 99999 else word
+            word_to_keep = lemma
             if lemma not in seen_lemmas:
                 final_candidates.append((word_to_keep, best_rank))
                 seen_lemmas.add(lemma)

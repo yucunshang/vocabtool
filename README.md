@@ -85,7 +85,7 @@ streamlit run app.py
 
 项目使用 **The New General Service List (NGSL)** 作为词频与 rank 依据。词库 CSV 文件名为 `ngsl_word_rank.csv`，需放在项目根目录。若该文件缺失，项目会依次尝试 `data.csv`、`vocab.csv` 作为兜底。
 
-> **致谢**：本项目的词库基于 [The New General Service List (NGSL)](https://www.ngsl.org/)，感谢 NGSL 项目团队为英语学习者提供的优质词表。
+> **致谢**：本项目的词库基于 [The New General Service List (NGSL)](https://www.newgeneralservicelist.com/)，感谢 NGSL 项目团队为英语学习者提供的优质词表。
 
 ## 测试
 
