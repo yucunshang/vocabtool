@@ -59,7 +59,7 @@ class TestLoadVocabData:
         source = {"hectic": 8000, "altruism": 12000, "serendipity": 18000}
         test_df = _make_df(source)
 
-        monkeypatch.setattr(os.path, "exists", lambda p: p.endswith("coca_reranked.csv"))
+        monkeypatch.setattr(os.path, "exists", lambda p: p.endswith("ngsl_word_rank.csv"))
         monkeypatch.setattr(resources.pd, "read_csv", lambda _p: test_df.copy())
 
         vocab, df = resources.load_vocab_data()
@@ -82,7 +82,7 @@ class TestLoadVocabData:
         def _raise(_p):
             raise OSError("simulated disk error")
 
-        monkeypatch.setattr(os.path, "exists", lambda p: p.endswith("coca_reranked.csv"))
+        monkeypatch.setattr(os.path, "exists", lambda p: p.endswith("ngsl_word_rank.csv"))
         monkeypatch.setattr(resources.pd, "read_csv", _raise)
 
         vocab, df = resources.load_vocab_data()
@@ -95,7 +95,7 @@ class TestLoadVocabData:
             "word": ["run", "run", "run"],
             "rank": [500.0, 200.0, 800.0],
         })
-        monkeypatch.setattr(os.path, "exists", lambda p: p.endswith("coca_reranked.csv"))
+        monkeypatch.setattr(os.path, "exists", lambda p: p.endswith("ngsl_word_rank.csv"))
         monkeypatch.setattr(resources.pd, "read_csv", lambda _p: test_df.copy())
 
         vocab, _ = resources.load_vocab_data()

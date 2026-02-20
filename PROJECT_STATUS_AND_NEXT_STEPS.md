@@ -24,13 +24,13 @@ PWA 支持 — manifest.json + service-worker.js
 ### 2.1 vocabtool（Streamlit）— 逻辑完整
 
 ✅ **已有完整实现：**
-- `vocab.py` — 基于 COCA 词频 + NLTK/lemminflect 的 `analyze_logic`
+- `vocab.py` — 基于 NGSL 词频 + NLTK/lemminflect 的 `analyze_logic`
 - `ai.py` — OpenAI 查词 `get_word_quick_definition`、批量生成 `process_ai_in_batches`
 - `extraction.py` — 支持 PDF、DOCX、EPUB、URL、CSV、Excel、SQLite、Anki 导出
 - `anki_parse.py` — 解析 AI 返回的 `|||` 格式
 - `anki_package.py` — genanki 真实生成 .apkg + TTS
 - `tts.py` — edge-tts 异步批量合成
-- `resources.py` — 加载 coca_reranked.csv / vocab.pkl
+- `resources.py` — 加载 ngsl_word_rank.csv
 
 ❌ **问题：**
 - 依赖 `streamlit`、`st.session_state`、`st.error` 等，无法直接作为 Web API 使用
@@ -41,7 +41,7 @@ PWA 支持 — manifest.json + service-worker.js
 
 | 模块 | 状态 | 问题 |
 |------|------|------|
-| **vocab_service** | ❌ 简化版 | 用 `Counter` 模拟词频，无 COCA、无 NLTK |
+| **vocab_service** | ❌ 简化版 | 用 `Counter` 模拟词频，无 NGSL、无 NLTK |
 | **ai_service** | ❌ Stub | 返回假数据，未接入 OpenAI |
 | **anki_service** | ❌ Stub | 生成占位 .apkg（PK\x03\x04），未用 genanki |
 | **tts_service** | ❌ Stub | 空 mp3，未接入 edge-tts |
@@ -81,7 +81,7 @@ D:\project\vocabtool\
 ├── resources.py       # 需改写（去掉 Streamlit 依赖）
 ├── config.py          # 需改写（支持 .env）
 ├── constants.py       # 保留
-├── coca_reranked.csv   # 词库
+├── ngsl_word_rank.csv  # 词库（NGSL）
 └── ...
 ```
 
@@ -90,7 +90,7 @@ D:\project\vocabtool\
 | 任务 | 说明 |
 |------|------|
 | 1. 将 `backend/` 从 project_plan 复制到 vocabtool | 保持 FastAPI 结构 |
-| 2. `vocab_service` | 调用 `vocab.analyze_logic`，使用 COCA 词库 |
+| 2. `vocab_service` | 调用 `vocab.analyze_logic`，使用 NGSL 词库 |
 | 3. `ai_service` | 调用 `ai.get_word_quick_definition`、`process_ai_in_batches`（需去 Streamlit） |
 | 4. `anki_service` | 调用 `ai.process_ai_in_batches` → `anki_parse.parse_anki_data` → `anki_package.generate_anki_package` |
 | 5. `tts_service` | 调用 `tts.run_async_batch` 或直接使用 edge-tts |

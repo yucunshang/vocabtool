@@ -881,7 +881,7 @@ if hasattr(st, "fragment"):
     _render_extract_results = st.fragment(_render_extract_results)
 
 if not VOCAB_DICT:
-    st.error("⚠️ 缺失 `coca_reranked.csv` 词库文件，请检查目录。")
+    st.error("⚠️ 缺失 `ngsl_word_rank.csv` 词库文件，请检查目录。")
 
 with st.expander("使用指南 & 支持格式", expanded=False):
     st.markdown("""

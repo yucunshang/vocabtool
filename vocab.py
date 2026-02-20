@@ -9,7 +9,7 @@ import constants
 from resources import get_vocab_dict, load_nlp_resources
 
 # Common words that should always be treated as basic vocabulary.
-# Months and weekdays often missing from COCA or ranked oddly high.
+# Months and weekdays often missing from NGSL or ranked oddly high.
 _BASIC_WORDS: Dict[str, int] = {
     "january": 400, "february": 400, "march": 400, "april": 400,
     "may": 400, "june": 400, "july": 400, "august": 400,

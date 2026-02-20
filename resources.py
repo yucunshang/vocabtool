@@ -77,7 +77,7 @@ def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame]]:
     """Load vocabulary data from CSV files only."""
     root_dir = os.path.dirname(os.path.abspath(__file__))
 
-    possible_names = ["coca_reranked.csv", "coca_cleaned.csv", "data.csv", "vocab.csv"]
+    possible_names = ["ngsl_word_rank.csv", "data.csv", "vocab.csv"]
     file_path = next(
         (os.path.join(root_dir, f) for f in possible_names
          if os.path.exists(os.path.join(root_dir, f))),
