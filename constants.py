@@ -19,7 +19,7 @@ APKG_CLEANUP_MAX_AGE_SECONDS = 24 * 3600  # 24 hours
 MIN_WORD_LENGTH = 2
 MAX_WORD_LENGTH = 25
 
-AI_BATCH_SIZE = 20     # 每组 20 词
+AI_BATCH_SIZE = 10     # 每组 10 词
 AI_CONCURRENCY = 5     # 并发 5
 MAX_AUTO_LIMIT = 500   # 一次性制卡上限
 MAX_RETRIES = 2        # 失败重试 1 次，减少无效消耗

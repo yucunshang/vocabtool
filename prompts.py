@@ -99,7 +99,7 @@ date ||| 日期 | Specific day of the month ||| What is today's date? (今天是
 {words_str}
 
 # Task
-Process the list (max 20 words per request). One line per word/phrase. 中英释义 (Chinese | English) REQUIRED, one example with natural Chinese translation, no etymology. Ensure zero errors."""
+Process the list (max 10 words per request). One line per word/phrase. 中英释义 (Chinese | English) REQUIRED, one example with natural Chinese translation, no etymology. Ensure zero errors."""
 
 # -----------------------------------------------------------------------------
 # ②b 阅读卡（语境填空）5 字段：cloze | word/IPA | 释义 | 搭配 | 例句
@@ -136,7 +136,7 @@ Field 4: 2–3 collocations separated by " / ". If uniqueness is borderline, app
 Field 5: Field 1 completed with the answer + (中文翻译)
 
 # Rules
-- Max 20 words per request
+- Max 10 words per request
 - No etymology, roots, or affixes
 - One card per word, no extras
 - Output only the code block, nothing else
@@ -152,7 +152,7 @@ CARD_GEN_PRODUCTION_TEMPLATE = """# Role
 Anki Card Designer for **Production Cards** (output direction: writing, speaking, active vocabulary).
 
 # Goal
-For each target word, output a Chinese scenario (what the learner wants to express) and the English chunk + example. Max 20 words per request.
+For each target word, output a Chinese scenario (what the learner wants to express) and the English chunk + example. Max 10 words per request.
 
 # Output Format
 Strictly inside a single `text` code block. One entry per line. Separator: `|||`
@@ -170,7 +170,7 @@ Strictly inside a single `text` code block. One entry per line. Separator: `|||`
 {words_str}
 
 # Task
-Process the list (max 20 words). One scenario + chunk + example per word. Output inside ```text block."""
+Process the list (max 10 words). One scenario + chunk + example per word. Output inside ```text block."""
 
 # -----------------------------------------------------------------------------
 # ②d 中英互译卡（应试方向：初高中、中英互译题型）
@@ -180,7 +180,7 @@ CARD_GEN_TRANSLATION_TEMPLATE = """# Role
 Anki Card Designer for **Translation Cards** (exam direction: C-E translation, Chinese definition recall).
 
 # Goal
-For each target word, output the Chinese definition (front) and the English word + phonetic + example (back). Max 20 words per request.
+For each target word, output the Chinese definition (front) and the English word + phonetic + example (back). Max 10 words per request.
 
 # Output Format
 Strictly inside a single `text` code block. One entry per line. Separator: `|||`
@@ -198,7 +198,7 @@ Strictly inside a single `text` code block. One entry per line. Separator: `|||`
 {words_str}
 
 # Task
-Process the list (max 20 words). One line per word. Output inside ```text block."""
+Process the list (max 10 words). One line per word. Output inside ```text block."""
 
 # -----------------------------------------------------------------------------
 # ③ 第三方 AI 专用（可自定义格式，每批最多 500 词）
