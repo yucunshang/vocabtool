@@ -103,7 +103,7 @@ Process the list (max 20 words per request). One line per word/phrase. 中英释
 
 # -----------------------------------------------------------------------------
 # ②b 语境填空卡（输入方向：阅读理解、完形填空）
-# 反面：一行单词+音标 | 一行中文释义+英文释义 | 一行搭配 | 一个例句；不要词源词根
+# 反面：单词+音标 | 中文释义+英文释义 | 搭配 | 例句；音标需与用户发音一致（英/美）
 # -----------------------------------------------------------------------------
 CARD_GEN_CLOZE_TEMPLATE = """# Role
 Anki Card Designer for **Cloze/Context Cards** (input direction: reading comprehension, cloze tests).
@@ -111,17 +111,23 @@ Anki Card Designer for **Cloze/Context Cards** (input direction: reading compreh
 # Goal
 For each target word, output ONE cloze sentence and the back content. Max 20 words per request. Do NOT include etymology, word roots, or affixes.
 
+# IPA
+Use **{ipa_style}** for phonetic transcription. The IPA must match the learner's pronunciation choice (British or American).
+
 # Output Format
-Strictly inside a single `text` code block. **One card per line.** Separator: `|||` (4 fields). Each line must contain exactly 3 occurrences of |||. No line breaks inside a field.
-`Cloze sentence` ||| `word / phonetic ;; 中文释义；English def ;; collocations` ||| `Example sentence` |||
+Strictly inside a single `text` code block. Use **blank line between cards**. All fields separated by `|||` (exactly 5 fields per card).
+`Cloze sentence` ||| `word / phonetic` ||| `中文释义；English definition` ||| `collocations` ||| `Example (complete filled-in sentence)` |||
 
 - **Field 1**: Cloze sentence with ________ where the target word goes.
-- **Field 2**: Three parts joined by ` ;; ` (space-double-semicolon-space) on ONE line: (1) word / IPA phonetic; (2) 中文释义；English definition; (3) collocations.
-- **Field 3**: One example sentence in English. Optional: (中文翻译) in parentheses.
-- **Field 4**: Leave empty.
+- **Field 2**: word / {ipa_style} phonetic (e.g. ambiguous / æmˈbɪɡjuəs)
+- **Field 3**: 中文释义；English definition (concise)
+- **Field 4**: Common collocations (e.g. ambiguous statement, ambiguous about)
+- **Field 5**: The COMPLETE sentence — same as Field 1 but with ________ replaced by the answer word. Optional: (中文翻译) in parentheses.
 
-# Example (each card = one line)
-The contract terms were so ________ that both sides interpreted them differently. ||| ambiguous / æmˈbɪɡjuəs ;; 模糊的；不清楚的，有歧义的；unclear, having multiple meanings ;; ambiguous statement, ambiguous about ||| The government's ambiguous statement left room for speculation. (政府含糊其辞的声明让人浮想联翩。) |||
+# Example (blank line between cards)
+The contract terms were so ________ that both sides interpreted them differently. ||| ambiguous / æmˈbɪɡjuəs ||| 模糊的；不清楚的，有歧义的；unclear, having multiple meanings ||| ambiguous statement, ambiguous about ||| The contract terms were so ambiguous that both sides interpreted them differently. (合同条款如此模糊，双方各有解读。) |||
+
+Another word. ||| word2 / w2 ||| 释义；definition ||| collocation1, collocation2 ||| Complete example sentence. |||
 
 # Input Data
 {words_str}

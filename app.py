@@ -338,11 +338,13 @@ def _render_builtin_ai_section(
             end = min(batch_idx * batch_size, total)
             card_text.markdown(f"**制卡进度**：第 {batch_idx} 组（{start}–{end}/{total}）AI 生成中...")
 
-        # Fix 3: Unpack (content, failed_words) tuple
+        # Fix 3: Unpack (content, failed_words) tuple; pass voice for IPA style (BrE/AmE)
+        _fmt = dict(card_format) if card_format else {}
+        _fmt["voice_code"] = voice_code
         ai_result, failed_words = process_ai_in_batches(
             words_for_auto_ai,
             progress_callback=update_ai_progress,
-            card_format=card_format,
+            card_format=_fmt,
         )
 
         # Fix 3: Report failed words

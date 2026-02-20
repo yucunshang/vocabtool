@@ -70,7 +70,9 @@ def build_card_prompt(
         "translation": CARD_GEN_TRANSLATION_TEMPLATE,
     }
     tpl = templates.get(ct, CARD_GEN_USER_TEMPLATE)
-    return tpl.format(words_str=words_str)
+    voice = (fmt or {}).get("voice_code", "")
+    ipa_style = "British IPA" if voice.startswith("en-GB") else "American IPA"
+    return tpl.format(words_str=words_str, ipa_style=ipa_style)
 
 
 def build_thirdparty_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:

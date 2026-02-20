@@ -62,6 +62,21 @@ valid ||| ok ||| ex ||| ety"""
     assert result[0]["w"] == "valid"
 
 
+def test_parse_anki_data_block_format_multiline():
+    """Block format: blank line between cards; 4-field (legacy) or 5-field (cloze) format."""
+    # 5-field cloze format (all ||| separators)
+    raw = """The terms were so ________ that both sides disagreed. ||| ambiguous / æmˈbɪɡjuəs ||| 模糊的；unclear ||| ambiguous statement ||| The terms were so ambiguous that both sides disagreed. |||
+
+Another ________ example. ||| word2 / w2 ||| 释义；definition ||| collocation ||| Complete sentence here. |||"""
+    result = parse_anki_data(raw)
+    assert len(result) == 2
+    assert result[0]["w"] == "The terms were so ________ that both sides disagreed."
+    assert "ambiguous" in result[0]["m"] and "模糊的" in result[0]["m"] and "ambiguous statement" in result[0]["m"]
+    assert result[0]["e"] == "The terms were so ambiguous that both sides disagreed."
+    assert result[1]["w"] == "Another ________ example."
+    assert "word2" in result[1]["m"] and "释义" in result[1]["m"]
+
+
 def test_parse_anki_data_card_shape():
     raw = "phrase ||| def ||| example ||| etymology"
     result = parse_anki_data(raw)

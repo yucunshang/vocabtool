@@ -190,9 +190,9 @@ def generate_anki_package(
 
     # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
     if card_type == "cloze":
-        # 反面：一行单词+音标，一行中文+英文释义，一行搭配，一个例句；不要词源
+        # 反面：单词+音标(加单词发音) | 释义 | 搭配 | 例句(加例句发音)
         qfmt = '<div class="phrase" style="font-size:20px;">{{Phrase}}</div>'
-        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>{{#Example}}<div class="example">{{Example}}</div><span class="audio-ex">{{Audio_Example}}</span>{{/Example}}'
     elif card_type == "production":
         qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
@@ -231,9 +231,6 @@ def generate_anki_package(
     for card in cards_data:
         phrase = safe_str_clean(card.get('w', ''))
         meaning = safe_str_clean(card.get('m', ''))
-        # 阅读卡 Meaning 用 ;; 分隔三行，转成换行显示
-        if card_type == "cloze" and " ;; " in meaning:
-            meaning = meaning.replace(" ;; ", "\n")
         raw_example = safe_str_clean(card.get('e', ''))
         etymology = safe_str_clean(card.get('r', ''))
         note_id = card.get('id')
@@ -248,15 +245,25 @@ def generate_anki_package(
 
         if enable_tts:
             if card_type == "cloze":
-                # 挖空句不要语音；反面单词需要语音
+                # 挖空句不要语音；反面：单词发音 + 例句(完整句)发音
                 answer_word = _extract_answer_word_from_meaning(meaning)
                 if answer_word and len(answer_word) > 1:
-                    ex_path = _audio_cache_path(answer_word, tts_voice)
-                    ex_filename = os.path.basename(ex_path)
-                    if ex_path not in seen_audio_paths:
-                        seen_audio_paths.add(ex_path)
-                        audio_tasks.append({'text': answer_word, 'path': ex_path, 'voice': tts_voice})
-                    example_plans.append((ex_path, ex_filename))
+                    phrase_path = _audio_cache_path(answer_word, tts_voice)
+                    phrase_filename = os.path.basename(phrase_path)
+                    if phrase_path not in seen_audio_paths:
+                        seen_audio_paths.add(phrase_path)
+                        audio_tasks.append({'text': answer_word, 'path': phrase_path, 'voice': tts_voice})
+                    phrase_plan = (phrase_path, phrase_filename)
+                if raw_example and enable_example_tts:
+                    tts_text = _example_text_for_tts(raw_example)
+                    actual_text = tts_text if tts_text else raw_example.strip()
+                    if actual_text and len(actual_text) > 3:
+                        ex_path = _audio_cache_path(actual_text, tts_voice)
+                        ex_filename = os.path.basename(ex_path)
+                        if ex_path not in seen_audio_paths:
+                            seen_audio_paths.add(ex_path)
+                            audio_tasks.append({'text': actual_text, 'path': ex_path, 'voice': tts_voice})
+                        example_plans.append((ex_path, ex_filename))
             else:
                 if phrase:
                     phrase_path = _audio_cache_path(phrase, tts_voice)
