@@ -79,7 +79,7 @@ Convert a list of **words or phrases** into minimalist Anki cards. For each item
 
 # CORE RULES
 1. **Single Sense Lock**: Select ONLY the primary meaning. Casing: china = porcelain (瓷器); China = country (中国).
-2. **Bilingual Definition**: [Chinese] | [Short English]. One core meaning only; both must be concise and natural.
+2. **中英释义 (Bilingual Definition)**: [中文释义] | [Short English]. BOTH Chinese and English are REQUIRED. One core meaning only; keep both concise and natural.
 3. **ONE Example**: Exactly one short English example sentence with a natural Chinese translation in parentheses. The example MUST match the definition strictly.
 4. **NO Etymology**: Do NOT output any etymology, roots, or affixes. Output only: word, definition, example.
 5. **Phrase Support**: For phrases (e.g., "give up"), define the phrase as a unit.
@@ -88,7 +88,7 @@ Convert a list of **words or phrases** into minimalist Anki cards. For each item
 
 # Output Structure (Exactly 3 fields per line)
 Separator: `|||`
-`Target Word` ||| `中文释义 | Short English definition` ||| `English example. (中文翻译。)`
+`Target Word` ||| `中英释义（中文 | English）` ||| `English example. (中文翻译。)`
 
 # Valid Examples
 spring ||| 春天 | The season after winter ||| Flowers bloom in spring. (花朵在春天绽放。)
@@ -99,7 +99,7 @@ date ||| 日期 | Specific day of the month ||| What is today's date? (今天是
 {words_str}
 
 # Task
-Process the list (max 20 words per request). One line per word/phrase. Bilingual definition (中文 | English), one example with natural Chinese translation, no etymology. Ensure zero errors."""
+Process the list (max 20 words per request). One line per word/phrase. 中英释义 (Chinese | English) REQUIRED, one example with natural Chinese translation, no etymology. Ensure zero errors."""
 
 # -----------------------------------------------------------------------------
 # ③ 第三方 AI 专用（可自定义格式，每批最多 500 词）
