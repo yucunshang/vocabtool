@@ -190,9 +190,9 @@ def generate_anki_package(
 
     # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
     if card_type == "cloze":
-        # 反面：单词+音标(加单词发音) | 释义 | 搭配 | 例句(加例句发音)；例句音频放外面确保显示
+        # 反面：单词+音标+发音按钮(内联) | 释义 | 搭配 | 例句(加例句发音)
         qfmt = '<div class="phrase" style="font-size:20px;">{{Phrase}}</div>'
-        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
+        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
     elif card_type == "production":
         qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
@@ -343,8 +343,19 @@ def generate_anki_package(
                 failed_phrases.append(plan['phrase'])
         audio_example_field = "".join(audio_example_parts)
 
+        # 挖空卡：单词音频内联到 Meaning 第一行（单词旁）
+        if card_type == "cloze" and audio_phrase_field:
+            first_nl = plan['meaning'].find("\n")
+            if first_nl >= 0:
+                meaning_display = plan['meaning'][:first_nl] + " " + audio_phrase_field + plan['meaning'][first_nl:]
+            else:
+                meaning_display = plan['meaning'] + " " + audio_phrase_field
+            audio_phrase_field = ""
+        else:
+            meaning_display = plan['meaning']
+
         fields = [
-            plan['phrase'], plan['meaning'], plan['example_display'],
+            plan['phrase'], meaning_display, plan['example_display'],
             plan['etymology'], audio_phrase_field, audio_example_field,
         ]
 
