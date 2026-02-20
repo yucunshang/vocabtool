@@ -503,7 +503,7 @@ def _render_extract_results() -> None:
 
     if not use_thirdparty:
         st.markdown("#### 内置 AI 一键制卡")
-        card_type = st.selectbox(
+        card_type = st.radio(
             "卡片类型",
             options=getattr(constants, "CARD_TYPES", ["standard", "cloze", "production", "translation"]),
             format_func=lambda x: {
@@ -512,7 +512,8 @@ def _render_extract_results() -> None:
                 "production": "🗣️ 口语卡（正面中文场景，反面英文词块+例句）",
                 "translation": "📋 应试卡（正面中文释义，反面英文+音标+例句）",
             }.get(x, x),
-            index=0,
+            index=1,
+            horizontal=True,
             key="builtin_card_type",
         )
         _render_builtin_ai_section(
@@ -606,7 +607,7 @@ def _render_manual_card_section() -> None:
     st.markdown("#### 手动制卡")
     st.caption("将任意来源的 AI 制卡结果（如 ChatGPT、Claude 复制的内容）粘贴到下方，解析后生成 .apkg。")
 
-    manual_card_type = st.selectbox(
+    manual_card_type = st.radio(
         "卡片类型",
         options=constants.CARD_TYPES,
         format_func=lambda x: {
@@ -615,7 +616,8 @@ def _render_manual_card_section() -> None:
             "production": "🗣️ 口语卡",
             "translation": "📋 应试卡",
         }.get(x, x),
-        index=0,
+        index=1,
+        horizontal=True,
         key="manual_card_type",
     )
 

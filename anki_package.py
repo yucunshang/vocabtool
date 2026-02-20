@@ -190,9 +190,9 @@ def generate_anki_package(
 
     # Template varies by card type: w=front, m/e/r=back (semantics differ per type)
     if card_type == "cloze":
-        # 反面：单词+音标(加单词发音) | 释义 | 搭配 | 例句(加例句发音)
+        # 反面：单词+音标(加单词发音) | 释义 | 搭配 | 例句(加例句发音)；例句音频放外面确保显示
         qfmt = '<div class="phrase" style="font-size:20px;">{{Phrase}}</div>'
-        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>{{#Example}}<div class="example">{{Example}}</div><span class="audio-ex">{{Audio_Example}}</span>{{/Example}}'
+        afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
     elif card_type == "production":
         qfmt = '<div class="phrase" style="font-size:22px;color:#333;">{{Phrase}}</div><span class="audio-phrase">{{Audio_Phrase}}</span>'
         afmt = '{{FrontSide}}<hr><div class="meaning">{{Meaning}}</div>{{#Example}}<div class="example">{{Example}}</div>{{/Example}}<span class="audio-ex">{{Audio_Example}}</span>'
