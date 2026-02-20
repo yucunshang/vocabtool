@@ -3,7 +3,7 @@
 
 import pytest
 
-from ai import DEFAULT_CARD_FORMAT, build_card_prompt
+from ai import DEFAULT_CARD_FORMAT, build_card_prompt, build_thirdparty_prompt
 
 
 def test_build_card_prompt_contains_separator():
@@ -50,3 +50,17 @@ def test_build_card_prompt_empty_words():
     assert "|||" in out
     assert isinstance(out, str)
     assert len(out) > 0
+
+
+def test_build_thirdparty_prompt_standard_strong_model_template():
+    out = build_thirdparty_prompt("altruism, hectic", {"card_type": "standard"})
+    assert "strong frontier models" in out
+    assert "|||" in out
+    assert "no skipping, no merging" in out
+
+
+def test_build_thirdparty_prompt_cloze_not_limited_to_10():
+    out = build_thirdparty_prompt("brass, dam", {"card_type": "cloze", "voice_code": "en-US-JennyNeural"})
+    assert "This is one batch from a larger list" in out
+    assert "Max 10" not in out and "max 10" not in out
+    assert "|||" in out

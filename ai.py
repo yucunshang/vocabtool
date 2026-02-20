@@ -12,7 +12,6 @@ import constants
 from config import get_config
 from errors import ErrorHandler
 from prompts import (
-    CARD_GEN_AUDIO_TEMPLATE,
     CARD_GEN_CLOZE_TEMPLATE,
     CARD_GEN_PRODUCTION_TEMPLATE,
     CARD_GEN_SYSTEM_PROMPT,
@@ -20,6 +19,10 @@ from prompts import (
     CARD_GEN_USER_TEMPLATE,
     LOOKUP_SYSTEM_PROMPT,
     THIRD_PARTY_CARD_TEMPLATE,
+    THIRD_PARTY_CLOZE_TEMPLATE,
+    THIRD_PARTY_TRANSLATION_TEMPLATE,
+    THIRD_PARTY_PRODUCTION_TEMPLATE,
+    THIRD_PARTY_AUDIO_TEMPLATE,
 )
 from resources import get_rank_for_word
 
@@ -93,16 +96,16 @@ def build_thirdparty_prompt(words_str: str, fmt: Optional[CardFormat] = None) ->
     if card_type == "cloze":
         voice = fmt.get("voice_code", "")
         ipa_style = "British IPA" if voice.startswith("en-GB") else "American IPA"
-        return CARD_GEN_CLOZE_TEMPLATE.format(words_str=words_str, ipa_style=ipa_style)
+        return THIRD_PARTY_CLOZE_TEMPLATE.format(words_str=words_str, ipa_style=ipa_style)
 
     if card_type == "translation":
-        return CARD_GEN_TRANSLATION_TEMPLATE.format(words_str=words_str)
+        return THIRD_PARTY_TRANSLATION_TEMPLATE.format(words_str=words_str)
 
     if card_type == "production":
-        return CARD_GEN_PRODUCTION_TEMPLATE.format(words_str=words_str)
+        return THIRD_PARTY_PRODUCTION_TEMPLATE.format(words_str=words_str)
 
     if card_type == "audio":
-        return CARD_GEN_AUDIO_TEMPLATE.format(words_str=words_str)
+        return THIRD_PARTY_AUDIO_TEMPLATE.format(words_str=words_str)
 
     front = fmt.get("front", "phrase")
     def_lang = fmt.get("definition", "en_native")

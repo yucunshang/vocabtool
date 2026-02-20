@@ -223,8 +223,9 @@ Process the list (max 10 words). Output ONLY the cards, one per line, inside ```
 # 占位符由 ai.build_thirdparty_prompt(words_str, fmt) 填入
 # -----------------------------------------------------------------------------
 THIRD_PARTY_CARD_TEMPLATE = """# Role
-You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** when phrase mode is required.
-Make sure to process everything in one go, without missing anything.
+You are a senior English Lexicographer and Anki Card Designer.
+Your task is to convert the provided batch into high-quality, import-ready cards for serious learners.
+This prompt is designed for strong frontier models. Prioritize semantic precision, natural usage, and consistency.
 
 # Input Data
 {words_str}
@@ -236,6 +237,8 @@ Make sure to process everything in one go, without missing anything.
 4. **Target Structure**:
    {structure_line}
 5. **Completeness**: Process every input item in original order; no skipping, no merging.
+6. **Delimiter Safety**: Do NOT use `|||` inside any field content.
+7. **No Chat Noise**: Output cards only. No explanation, no analysis, no numbering.
 
 # Field Constraints (Strict)
 {field1_instruction}
@@ -243,8 +246,129 @@ Make sure to process everything in one go, without missing anything.
 {field3_instruction}
 {field4_instruction}
 
+# Quality Bar (Strong-Model Requirements)
+1. Choose the primary/common sense unless a phrase strongly implies another sense.
+2. Definitions must be accurate, concise, and level-appropriate to the selected mode.
+3. Example sentences must be natural, specific, and strictly aligned with the definition.
+4. Avoid generic, robotic, or templated wording.
+5. Maintain stable style and punctuation across all lines.
+
 # Valid Example
 {example_line}
 
 # Task
 Process the provided input list strictly adhering to the format above."""
+
+
+# -----------------------------------------------------------------------------
+# ③b 第三方 AI 固定卡型模板（强模型版，无总量限制；当前输入为单批，最多 500）
+# -----------------------------------------------------------------------------
+THIRD_PARTY_CLOZE_TEMPLATE = """# Role
+Reading Card Generator for strong LLMs.
+
+# Input Data
+{words_str}
+
+# Global Rules
+1. This is one batch from a larger list. Process every item in this batch; do not skip any.
+2. One card per line. Exactly 3 fields separated by `|||`.
+3. Do not use `|||` inside fields.
+4. Output strictly inside one ```text code block. No explanation text.
+5. Keep style consistent across the whole batch.
+
+# Field Format
+Field 1: Context-rich sentence with exactly one blank: ________
+Field 2: word /IPA/ pos. 中文释义 (use {ipa_style})
+Field 3: Full sentence with answer. (中文翻译)
+
+# Quality Constraints
+1. The blank should strongly prefer only the target word.
+2. Sentence must be natural, concrete, and not trivial.
+3. Field 3 must exactly resolve Field 1 with the target word.
+
+# Example
+The doorknob, made of polished ________, gleamed in the hallway light. ||| brass /bræs/ n. 黄铜 ||| The doorknob, made of polished brass, gleamed in the hallway light. (门把手在走廊灯光下闪闪发亮。)
+
+# Task
+Generate cards only."""
+
+
+THIRD_PARTY_TRANSLATION_TEMPLATE = """# Role
+Translation Card Generator for strong LLMs.
+
+# Input Data
+{words_str}
+
+# Global Rules
+1. Process every input item in order.
+2. One line per item. Exactly 3 fields separated by `|||`.
+3. Do not use `|||` inside fields.
+4. Output strictly inside one ```text code block. No explanation text.
+
+# Field Format
+`中文释义` ||| `English word / IPA` ||| `Example sentence. (中文翻译。)`
+
+# Quality Constraints
+1. Field 1 should be concise but discriminative Chinese meaning.
+2. Field 2 should be canonical headword + clean IPA.
+3. Field 3 should be natural, high-quality usage example.
+
+# Example
+模糊的，含混不清的 ||| ambiguous / æmˈbɪɡjuəs ||| The instructions were ambiguous. (说明含糊不清。)
+
+# Task
+Generate cards only."""
+
+
+THIRD_PARTY_PRODUCTION_TEMPLATE = """# Role
+Production Card Generator for strong LLMs (active output training).
+
+# Input Data
+{words_str}
+
+# Global Rules
+1. Process every input item in order.
+2. One line per item. Exactly 3 fields separated by `|||`.
+3. Do not use `|||` inside fields.
+4. Output strictly inside one ```text code block. No explanation text.
+
+# Field Format
+`中文场景描述（你想说...）` ||| `English chunk / collocation` ||| `Example sentence. (中文翻译。)`
+
+# Quality Constraints
+1. Field 1 should be realistic communication intent in natural Chinese.
+2. Field 2 should be the strongest, most usable chunk/collocation.
+3. Field 3 must demonstrate Field 2 in a natural context.
+
+# Example
+你想说：这份声明措辞模糊，故意让人猜。 ||| ambiguous statement ||| The government's ambiguous statement left room for speculation. (政府含糊其辞的声明让人浮想联翩。)
+
+# Task
+Generate cards only."""
+
+
+THIRD_PARTY_AUDIO_TEMPLATE = """# Role
+Audio Card Generator for strong LLMs.
+
+# Input Data
+{words_str}
+
+# Global Rules
+1. Process every input item in order.
+2. One line per item. Exactly 3 fields separated by `|||`.
+3. Do not use `|||` inside fields.
+4. Output strictly inside one ```text code block. No explanation text.
+
+# Field Format
+`English word or phrase` ||| `中英释义` ||| `Example sentence. (中文翻译。)`
+
+# Quality Constraints
+1. Keep Field 1 as clean headword/phrase only.
+2. Field 2 must be balanced bilingual meaning (中文 | English).
+3. Field 3 should be natural, specific, and easy to remember.
+
+# Example
+heavy rain ||| 大雨 | Intense rainfall ||| We got caught in heavy rain. (我们遇上了大雨。)
+
+# Task
+Generate cards only."""
