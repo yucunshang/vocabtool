@@ -27,7 +27,12 @@ def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
         return "________" in (s or "") or "{{c1::" in (s or "")
 
     def _parse_parts(parts: list) -> Optional[Dict[str, str]]:
-        # Reading card: 3 fields (phrase with ________ ||| meaning ||| example) or legacy 4–5 fields
+        # Reading card: 3 fields (phrase ||| meaning ||| example) or legacy 5 fields (phrase ||| word/IPA ||| 释义 ||| 搭配 ||| example)
+        if len(parts) >= 5 and _is_cloze_phrase(parts[0]):
+            phrase = parts[0].strip()
+            meaning = "\n".join(p.strip() for p in parts[1:4] if p.strip())
+            example = parts[4].strip() if len(parts) > 4 else ""
+            return {'w': phrase, 'm': meaning, 'e': example, 'r': "", 'ct': 'cloze'}
         if len(parts) >= 3 and _is_cloze_phrase(parts[0]):
             phrase = parts[0].strip()
             meaning = parts[1].strip()

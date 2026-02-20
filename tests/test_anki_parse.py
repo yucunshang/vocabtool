@@ -91,7 +91,7 @@ def test_parse_anki_data_card_shape():
     result = parse_anki_data(raw)
     assert len(result) == 1
     card = result[0]
-    assert set(card.keys()) == {"w", "m", "e", "r"}
+    assert set(card.keys()) == {"w", "m", "e", "r", "ct"}
     assert card["w"] == "phrase"
     assert card["m"] == "def"
     assert card["e"] == "example"

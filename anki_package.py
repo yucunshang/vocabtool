@@ -235,7 +235,7 @@ def generate_anki_package(
     card_plans = []
 
     for card in cards_data:
-        ct = card.get('ct', card_type) if use_auto else card_type
+        ct = card.get('ct', 'standard') if use_auto else card_type
         phrase = safe_str_clean(card.get('w', ''))
         meaning = safe_str_clean(card.get('m', ''))
         raw_example = safe_str_clean(card.get('e', ''))
