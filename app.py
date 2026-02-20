@@ -1073,7 +1073,7 @@ def _render_shared_rank_selection() -> tuple[int, int]:
     else:
         col1, col2 = st.columns(2)
         min_rank = col1.number_input(
-            "忽略前 N 高频词 (Min Rank)", 1, 20000, st.session_state["extract_min_rank"], step=100,
+            "忽略前 N 高频词 (Min Rank)", 1, 50000, st.session_state["extract_min_rank"], step=100,
             key="extract_min_rank"
         )
         max_rank = col2.number_input(
@@ -1259,7 +1259,7 @@ with tab_extract_anki:
                 st.session_state["rank_start_2_4"] = shared_min_rank
                 st.session_state["rank_start_sync_min"] = shared_min_rank
             col_a, col_b = st.columns(2)
-            start_rank = col_a.number_input("起始排名", 1, 20000, shared_min_rank, step=100, key="rank_start_2_4")
+            start_rank = col_a.number_input("起始排名", 1, 50000, shared_min_rank, step=100, key="rank_start_2_4")
             count = col_b.number_input("数量", 10, 5000, 10, step=10)
 
             if st.button("🚀 生成列表"):
