@@ -231,7 +231,8 @@ def get_word_quick_definition(
             for event in stream:
                 delta = ""
                 if getattr(event, "choices", None):
-                    delta = (event.choices[0].delta.content or "")
+                    delta_obj = event.choices[0].delta
+                    delta = (delta_obj.content or "") if delta_obj is not None else ""
                 if delta:
                     chunks.append(delta)
                     stream_callback("".join(chunks))

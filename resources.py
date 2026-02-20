@@ -89,6 +89,9 @@ def load_vocab_data() -> Tuple[Dict[str, int], Optional[pd.DataFrame]]:
             df = pd.read_csv(file_path)
             df.columns = [c.strip().lower() for c in df.columns]
 
+            if len(df.columns) < 2:
+                logger.error("CSV file %s has fewer than 2 columns", file_path)
+                return {}, None
             word_col = next((c for c in df.columns if 'word' in c), df.columns[0])
             rank_col = next((c for c in df.columns if 'rank' in c), df.columns[1])
 
