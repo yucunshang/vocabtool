@@ -264,33 +264,33 @@ Process the provided input list strictly adhering to the format above."""
 # ③b 第三方 AI 固定卡型模板（强模型版，无总量限制；当前输入为单批，最多 500）
 # -----------------------------------------------------------------------------
 THIRD_PARTY_CLOZE_TEMPLATE = """# Role
-Reading Card Generator for strong LLMs.
+Expert Lexicographer & Reading Card Generator for Strong LLMs.
 
 # Input Data
 {words_str}
 
 # Global Rules
-1. This is one batch from a larger list. Process every item in this batch; do not skip any.
-2. One card per line. Exactly 3 fields separated by `|||`.
-3. Do not use `|||` inside fields.
-4. Output strictly inside one ```text code block. No explanation text.
-5. Keep style consistent across the whole batch.
+1. Exhaustive Processing: Process 100% of the items in this batch. Zero omissions are allowed.
+2. Structure: Exactly one card per line. Exactly 3 fields per line, separated by the strict delimiter `|||`.
+3. Delimiter Isolation: Never use the sequence `|||` within the content of any field.
+4. Output Format: Output strictly inside a single ```text code block. Absolutely no introductory, conversational, or concluding text.
+5. Consistency: Maintain a uniform linguistic difficulty and formatting style across the entire batch.
 
 # Field Format
-Field 1: Context-rich sentence with exactly one blank: ________
-Field 2: word /IPA/ pos. 中文释义 (use {ipa_style})
-Field 3: Full sentence with answer. (中文翻译)
+Field 1: Context-rich prompt sentence containing precise semantic clues. Replace the target word with exactly 8 underscores: `________`.
+Field 2: Target word /IPA/ pos. 中文释义 (Strictly use {ipa_style} for IPA).
+Field 3: Complete sentence restoring the target word. (Contextual, accurate Chinese translation).
 
 # Quality Constraints
-1. The blank should strongly prefer only the target word.
-2. Sentence must be natural, concrete, and not trivial.
-3. Field 3 must exactly resolve Field 1 with the target word.
+1. Absolute Cloze Uniqueness (Contextual Lockdown): The context in Field 1 MUST strictly isolate the target word. You must embed specific semantic hooks-such as explicit contrasts (e.g., "Unlike..."), built-in definitions, or extreme consequences-that eliminate near-synonyms. If a generic word perfectly fits the blank, your context is too weak. The sentence itself must implicitly answer "Why this exact word?".
+2. Linguistic Quality: Sentences must be grammatically flawless, native-sounding, concrete, and varied in structure. Do not use generic names or placeholder situations.
+3. Perfect Resolution: Field 3 must perfectly resolve Field 1, mirroring it exactly but with the target word replacing the blank.
 
 # Example
-The doorknob, made of polished ________, gleamed in the hallway light. ||| brass /bræs/ n. 黄铜 ||| The doorknob, made of polished brass, gleamed in the hallway light. (门把手在走廊灯光下闪闪发亮。)
+Unlike his usually reckless brother who made impulsive decisions, Arthur was so ________ that he spent weeks analyzing every possible outcome before signing the contract. ||| meticulous /məˈtɪkjələs/ adj. 一丝不苟的，缜密的 ||| Unlike his usually reckless brother who made impulsive decisions, Arthur was so meticulous that he spent weeks analyzing every possible outcome before signing the contract. (与他那通常鲁莽、做决定冲动的兄弟不同，亚瑟非常缜密，在签合同前花了几周时间分析每一种可能的结果。)
 
 # Task
-Generate cards only."""
+Generate the cards strictly based on the provided input and rules."""
 
 
 THIRD_PARTY_TRANSLATION_TEMPLATE = """# Role
