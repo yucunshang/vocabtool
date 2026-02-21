@@ -17,9 +17,6 @@ import constants
 import resources
 from ai import (
     CardFormat,
-    build_card_prompt,
-    build_thirdparty_format_definition,
-    build_thirdparty_prompt,
     get_word_quick_definition,
     process_ai_in_batches,
 )
@@ -593,271 +590,25 @@ def _render_extract_results() -> None:
 
     enable_audio, voice_code, enable_example_audio = _render_audio_settings("auto")
 
-    use_thirdparty = st.radio(
-        "制卡方式",
-        options=["内置 AI 一键制卡", "第三方 AI（复制 Prompt + 粘贴制卡）"],
-        index=0,
-        horizontal=True,
-        key="card_gen_mode",
-    )
-    use_thirdparty = use_thirdparty.startswith("第三方")
-
-    if not use_thirdparty:
-        st.markdown("#### 内置 AI 一键制卡")
-        card_type = st.radio(
-            "卡片类型",
-            options=constants.CARD_TYPES,
-            format_func=lambda x: {
-                "standard":    "📖 标准卡（正面单词，反面中英释义+例句）",
-                "cloze":       "📖 阅读卡（正面挖空句，反面单词+释义+例句）",
-                "production":  "✍️ 口语表达卡（正面中文场景，反面英文词块+例句）",
-                "translation": "📝 互译卡（正面中文释义，反面英文单词+音标）",
-                "audio":       "🔊 听音卡（正面音频，反面单词+释义）",
-            }.get(x, x),
-            index=1,
-            horizontal=False,
-            key="builtin_card_type",
-        )
-        _render_builtin_ai_section(
-            words_only, enable_audio, voice_code, enable_example_audio,
-            {"card_type": card_type},
-        )
-    else:
-        _render_thirdparty_section(words_only, enable_audio, voice_code, enable_example_audio)
-
-
-def _render_thirdparty_section(
-    words_only: list,
-    enable_audio: bool,
-    voice_code: str,
-    enable_example_audio: bool,
-) -> None:
-    """选择第三方时：自定义格式 + 分组 Prompt。无上限，每批最多 200 词。"""
-    st.markdown("#### 第三方 AI")
-    st.caption("无总量上限，自动按每批 200 词分组。此 Prompt 面向强模型（如 GPT-4.1/Claude Opus 等），用于高质量制卡。")
-
-    with st.expander("⚙️ 自定义卡片格式", expanded=True):
-        tp_card_type = st.radio(
-            "卡片类型",
-            options=["standard", "cloze", "translation", "production", "audio"],
-            format_func=lambda x: {
-                "standard":    "📖 标准卡（可自定义格式）",
-                "cloze":       "📖 阅读卡（挖空填空）",
-                "translation": "📝 互译卡（中文释义→英文+音标）",
-                "production":  "✍️ 表达卡（中文场景→英文词块）",
-                "audio":       "🔊 听音卡（先听发音再回忆）",
-            }.get(x, x),
-            index=0,
-            key="thirdparty_card_type",
-            horizontal=False,
-        )
-        if tp_card_type == "standard":
-            tp_front = st.radio(
-                "正面",
-                options=["word", "phrase"],
-                format_func=lambda x: "单词" if x == "word" else "短语/词组",
-                index=1,
-                key="thirdparty_front",
-                horizontal=True,
-            )
-            tp_def = st.radio(
-                "反面释义",
-                options=["cn", "en", "en_native", "both"],
-                format_func=lambda x: {"cn": "中文", "en": "英文(学习型)", "en_native": "英文(母语者词典)", "both": "中英双语"}[x],
-                index=2,
-                key="thirdparty_def",
-                horizontal=True,
-            )
-            tp_ex = st.selectbox("例句数量", options=[1, 2, 3], format_func=lambda x: f"{x} 条", index=1, key="thirdparty_ex")
-            tp_ex_cn = st.checkbox("例句带中文翻译", value=False, key="thirdparty_ex_cn")
-            tp_ety = st.checkbox("词根词源词缀", value=True, key="thirdparty_ety")
-        else:
-            st.caption("此卡片类型使用固定格式，无需额外配置。")
-            tp_front, tp_def, tp_ex, tp_ex_cn, tp_ety = "word", "cn", 1, False, False
-
-    thirdparty_fmt: CardFormat = {
-        "card_type": tp_card_type,
-        "voice_code": voice_code,
-        "front": tp_front,
-        "definition": tp_def,
-        "examples": tp_ex,
-        "examples_with_cn": tp_ex_cn,
-        "etymology": tp_ety,
-    }
-
-    with st.expander("🧩 第三方 AI 卡片格式定义", expanded=False):
-        fmt_def = build_thirdparty_format_definition(thirdparty_fmt)
-        fmt_key = "thirdparty_format_definition"
-        fmt_sig_key = "thirdparty_format_definition_sig"
-        # Streamlit text_area with a fixed key keeps stale user-edited content.
-        # Refresh only when format definition actually changes.
-        if st.session_state.get(fmt_sig_key) != fmt_def:
-            st.session_state[fmt_key] = fmt_def
-            st.session_state[fmt_sig_key] = fmt_def
-        col_f, col_fc = st.columns([5, 1])
-        with col_f:
-            st.text_area(
-                "格式定义",
-                value=st.session_state.get(fmt_key, fmt_def),
-                height=180,
-                key=fmt_key,
-                label_visibility="collapsed",
-            )
-        with col_fc:
-            render_copy_button(fmt_def, key="copy_thirdparty_format_definition")
-
-    # 分组：总量无限，固定每批 200 词
-    batch_size = constants.THIRD_PARTY_PROMPT_BATCH_SIZE
-    total = len(words_only)
-    num_batches = (total + batch_size - 1) // batch_size
-
-    for i in range(num_batches):
-        start = i * batch_size
-        end = min((i + 1) * batch_size, total)
-        batch_words = words_only[start:end]
-        words_str = ", ".join(batch_words)
-        prompt_text = build_thirdparty_prompt(words_str, thirdparty_fmt)
-
-        if num_batches > 1:
-            with st.expander(f"📋 第 {i + 1} 批（{start + 1}–{end} 词，共 {len(batch_words)} 词）", expanded=(i == 0)):
-                prompt_key = f"thirdparty_prompt_{i}"
-                prompt_sig_key = f"thirdparty_prompt_sig_{i}"
-                # Keep manual edits for same config, but auto-refresh when card type/format changes.
-                if st.session_state.get(prompt_sig_key) != prompt_text:
-                    st.session_state[prompt_key] = prompt_text
-                    st.session_state[prompt_sig_key] = prompt_text
-                col_p, col_c = st.columns([5, 1])
-                with col_p:
-                    st.text_area(
-                        "Prompt",
-                        value=st.session_state.get(prompt_key, prompt_text),
-                        height=200,
-                        key=prompt_key,
-                        label_visibility="collapsed",
-                    )
-                with col_c:
-                    render_copy_button(prompt_text, key=f"copy_thirdparty_{i}")
-        else:
-            prompt_key = "thirdparty_prompt_0"
-            prompt_sig_key = "thirdparty_prompt_sig_0"
-            if st.session_state.get(prompt_sig_key) != prompt_text:
-                st.session_state[prompt_key] = prompt_text
-                st.session_state[prompt_sig_key] = prompt_text
-            col_p, col_c = st.columns([5, 1])
-            with col_p:
-                st.text_area(
-                    "Prompt",
-                    value=st.session_state.get(prompt_key, prompt_text),
-                    height=220,
-                    key=prompt_key,
-                    label_visibility="collapsed",
-                )
-            with col_c:
-                render_copy_button(prompt_text, key="copy_thirdparty_0")
-
-
-def _render_manual_card_section() -> None:
-    """第三栏：仅粘贴 AI 生成的内容，解析并制卡。"""
-    st.markdown("#### 手动制卡")
-    st.caption("将 AI 制卡结果粘贴到下方。自动识别时可混合标准卡与阅读卡；若整批为互译/表达/听音卡，请在下拉框指定。")
-
-    manual_parse_type = st.selectbox(
-        "解析类型",
-        options=["auto", "standard", "cloze", "translation", "production", "audio"],
+    st.markdown("#### 内置 AI 一键制卡")
+    card_type = st.radio(
+        "卡片类型",
+        options=constants.CARD_TYPES,
         format_func=lambda x: {
-            "auto": "🔄 自动识别（标准卡+阅读卡混合）",
-            "standard": "📖 标准卡",
-            "cloze": "📖 阅读卡",
-            "translation": "📝 互译卡",
-            "production": "✍️ 表达卡",
-            "audio": "🔊 听音卡",
+            "standard":    "📖 标准卡（正面单词，反面中英释义+例句）",
+            "cloze":       "📖 阅读卡（正面挖空句，反面单词+释义+例句）",
+            "production":  "✍️ 口语表达卡（正面中文场景，反面英文词块+例句）",
+            "translation": "📝 互译卡（正面中文释义，反面英文单词+音标）",
+            "audio":       "🔊 听音卡（正面音频，反面单词+释义）",
         }.get(x, x),
-        index=0,
-        key="manual_parse_type",
+        index=1,
+        horizontal=False,
+        key="builtin_card_type",
     )
-
-    pasted = st.text_area(
-        "粘贴 AI 生成的制卡结果",
-        height=280,
-        key="manual_pasted_output",
-        placeholder="标准卡：word ||| 释义 ||| 例句\n阅读卡：挖空句（含________）||| 单词 /IPA/ 词性. 中文释义 ||| 完整句（含中文翻译）\n可混合粘贴，自动识别",
-        label_visibility="collapsed",
+    _render_builtin_ai_section(
+        words_only, enable_audio, voice_code, enable_example_audio,
+        {"card_type": card_type},
     )
-
-    deck_name = st.text_input("🏷️ 牌组名称", value=f"Vocab_{get_beijing_time_str()}", key="manual_deck_name")
-    enable_audio, voice_code, enable_example_audio = _render_audio_settings("manual")
-
-    if st.button("🔁 解析并生成 .apkg", key="btn_manual_parse", use_container_width=True):
-        if not pasted.strip():
-            st.warning("请先粘贴 AI 返回的制卡结果。")
-            return
-        parsed = parse_anki_data(pasted.strip())
-        if not parsed:
-            st.error("解析失败，格式不符。标准卡：`word ||| 释义 ||| 例句`；阅读卡：`挖空句(含________) ||| 单词 /IPA/ 词性. 中文释义 ||| 完整句(含中文翻译)`。")
-            return
-        if manual_parse_type != "auto":
-            for c in parsed:
-                c["ct"] = manual_parse_type
-        try:
-            progress_text = st.empty()
-            progress_bar = st.progress(0.0) if enable_audio else None
-            if enable_audio:
-                progress_text.markdown("**音频进度**：0/0")
-
-            def _update_manual_pkg_progress(ratio: float, text: str) -> None:
-                if not enable_audio:
-                    return
-                if progress_bar is not None:
-                    progress_bar.progress(max(0.0, min(1.0, ratio)))
-                m = re.search(r"\((\d+)\s*/\s*(\d+)\)", text or "")
-                if m:
-                    progress_text.markdown(f"**音频进度**：{m.group(1)}/{m.group(2)}")
-                else:
-                    progress_text.markdown(f"**音频进度**：{text}")
-
-            with st.spinner("⏳ 正在生成牌组" + ("（含音频，请稍候…）" if enable_audio else "…")):
-                file_path, _, _ = generate_anki_package(
-                    parsed,
-                    deck_name,
-                    card_type=manual_parse_type if manual_parse_type != "auto" else "auto",
-                    enable_tts=enable_audio,
-                    tts_voice=voice_code,
-                    enable_example_tts=enable_example_audio,
-                    progress_callback=_update_manual_pkg_progress,
-                )
-            if enable_audio:
-                if progress_bar is not None:
-                    progress_bar.progress(1.0)
-                progress_text.markdown("**音频进度**：✅ 完成")
-            set_anki_pkg(file_path, deck_name)
-            st.session_state["manual_anki_pkg_path"] = file_path
-            st.session_state["manual_anki_pkg_name"] = f"{deck_name}.apkg"
-            st.session_state["anki_cards_cache"] = parsed
-            st.success(f"✅ 解析完成，共 {len(parsed)} 张卡片。")
-            st.balloons()
-            run_gc()
-        except Exception as e:
-            ErrorHandler.handle(e, "生成 .apkg 出错")
-
-    # 仅在本流程生成成功后才显示下载按钮
-    manual_path = st.session_state.get("manual_anki_pkg_path")
-    if manual_path:
-        if not os.path.exists(manual_path):
-            st.session_state.pop("manual_anki_pkg_path", None)
-            st.session_state.pop("manual_anki_pkg_name", None)
-        else:
-            try:
-                with open(manual_path, "rb") as f:
-                    st.download_button(
-                        "📥 下载牌组",
-                        data=f.read(),
-                        file_name=st.session_state.get("manual_anki_pkg_name", "deck.apkg"),
-                        mime="application/octet-stream",
-                        use_container_width=True,
-                        key="manual_download_btn",
-                    )
-            except OSError:
-                pass
 
 
 def _do_lookup(query_word: str) -> None:
@@ -1054,17 +805,13 @@ with st.expander("使用指南 & 支持格式", expanded=False):
     TXT · PDF · DOCX · EPUB · CSV · XLSX · XLS · DB · SQLite · Anki 导出 (.txt)
     """)
 
-tab_lookup, tab_extract_anki, tab_manual = st.tabs([
+tab_lookup, tab_extract_anki = st.tabs([
     "AI查词",
     "筛选单词&制卡",
-    "手动制卡",
 ])
 
 with tab_lookup:
     render_quick_lookup()
-
-with tab_manual:
-    _render_manual_card_section()
 
 # ==========================================
 # Tab 1: Word Extraction（筛选单词）
