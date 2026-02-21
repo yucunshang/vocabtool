@@ -82,6 +82,55 @@ def _parse_parts(parts: List[str]) -> Optional[Dict[str, str]]:
     return None
 
 
+def _contains_chinese(text: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", text or ""))
+
+
+def _contains_english(text: str) -> bool:
+    return bool(re.search(r"[A-Za-z]", text or ""))
+
+
+def _looks_production_front(text: str) -> bool:
+    s = (text or "").strip()
+    if not s:
+        return False
+    if s.startswith("你想说"):
+        return True
+    return _contains_chinese(s) and not _contains_english(s)
+
+
+def _looks_production_back_chunk(text: str) -> bool:
+    s = (text or "").strip()
+    if not s:
+        return False
+    if " /" in s:
+        return False
+    if " | " in s:
+        return False
+    if _contains_chinese(s):
+        return False
+    return _contains_english(s)
+
+
+def _normalize_card_by_expected_type(card: Dict[str, str], expected_card_type: str) -> Dict[str, str]:
+    if not card:
+        return card
+    expected = (expected_card_type or "").strip().lower()
+    if expected != "production":
+        return card
+
+    front = (card.get("w") or "").strip()
+    back = (card.get("m") or "").strip()
+    if not front or not back:
+        return card
+
+    # Production cards should be: front=中文场景, back=英文词块.
+    # Some AI outputs accidentally swap these two fields.
+    if _looks_production_front(back) and _looks_production_back_chunk(front):
+        card["w"], card["m"] = back, front
+    return card
+
+
 def _dedupe_key(card: Dict[str, str]) -> tuple:
     """Build a dedupe key that avoids dropping translation cards with same CN gloss."""
     ct = (card.get("ct") or "standard").strip().lower()
@@ -92,7 +141,7 @@ def _dedupe_key(card: Dict[str, str]) -> tuple:
     return (ct, w, m)
 
 
-def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
+def parse_anki_data(raw_text: str, expected_card_type: Optional[str] = None) -> List[Dict[str, str]]:
     """Parse AI-generated text into structured Anki card data.
 
     Supports variable field counts:
@@ -114,6 +163,7 @@ def parse_anki_data(raw_text: str) -> List[Dict[str, str]]:
         card = _parse_parts(parts)
         if not card or not card["w"] or not card["m"]:
             continue
+        card = _normalize_card_by_expected_type(card, expected_card_type or "")
         key = _dedupe_key(card)
         if key in seen_phrases:
             continue

@@ -349,6 +349,7 @@ def _render_builtin_ai_section(
         # Fix 3: Unpack (content, failed_words) tuple; pass voice for IPA style (BrE/AmE)
         _fmt = dict(card_format) if card_format else {}
         _fmt["voice_code"] = voice_code
+        current_card_type = card_format.get("card_type", "standard") if card_format else "standard"
         ai_result, failed_words = process_ai_in_batches(
             words_for_auto_ai,
             progress_callback=update_ai_progress,
@@ -367,7 +368,7 @@ def _render_builtin_ai_section(
 
         if ai_result:
             card_text.markdown("**制卡进度**：正在解析 AI 结果...")
-            parsed_data = parse_anki_data(ai_result)
+            parsed_data = parse_anki_data(ai_result, expected_card_type=current_card_type)
 
             if parsed_data:
                 card_bar.progress(1.0)
@@ -399,7 +400,7 @@ def _render_builtin_ai_section(
                     file_path, audio_failed, failed_phrases = generate_anki_package(
                         edited_data,
                         current_deck_name,
-                        card_type=card_format.get("card_type", "standard") if card_format else "standard",
+                        card_type=current_card_type,
                         enable_tts=enable_audio,
                         tts_voice=voice_code,
                         enable_example_tts=enable_example_audio,
@@ -407,7 +408,7 @@ def _render_builtin_ai_section(
                     )
                     set_anki_pkg(file_path, current_deck_name)
                     st.session_state["anki_cards_cache"] = edited_data
-                    st.session_state["_builtin_card_type"] = card_format.get("card_type", "standard") if card_format else "standard"
+                    st.session_state["_builtin_card_type"] = current_card_type
                     st.session_state["_builtin_audio_failed_count"] = audio_failed
                     st.session_state["_builtin_audio_failed_phrases"] = failed_phrases or []
                     audio_bar.progress(1.0)
@@ -473,7 +474,10 @@ def _render_builtin_ai_section(
                             ai_failed_words,
                             card_format=_fmt,
                         )
-                        retry_parsed = parse_anki_data(retry_result) if retry_result else []
+                        retry_parsed = (
+                            parse_anki_data(retry_result, expected_card_type=current_card_type)
+                            if retry_result else []
+                        )
 
                         existing_cards = st.session_state.get("_builtin_parsed_cards") or []
                         seen_words = {str(c.get("w", "")).strip().lower() for c in existing_cards if c.get("w")}

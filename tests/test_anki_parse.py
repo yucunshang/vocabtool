@@ -133,3 +133,19 @@ def test_parse_anki_data_cloze_repairs_one_extra_delimiter():
     assert result[0]["ct"] == "cloze"
     assert result[0]["w"] == "A ________ test."
     assert result[0]["e"] == "Example has accidental ||| delimiter."
+
+
+def test_parse_anki_data_production_swaps_reversed_front_back():
+    raw = "ambiguous statement ||| 你想说：这份声明措辞模糊，故意让人猜。 ||| The government's ambiguous statement left room for speculation. (政府含糊其辞的声明让人浮想联翩。)"
+    result = parse_anki_data(raw, expected_card_type="production")
+    assert len(result) == 1
+    assert result[0]["w"].startswith("你想说：")
+    assert result[0]["m"] == "ambiguous statement"
+
+
+def test_parse_anki_data_production_keeps_normal_order():
+    raw = "你想说：这份声明措辞模糊，故意让人猜。 ||| ambiguous statement ||| The government's ambiguous statement left room for speculation. (政府含糊其辞的声明让人浮想联翩。)"
+    result = parse_anki_data(raw, expected_card_type="production")
+    assert len(result) == 1
+    assert result[0]["w"].startswith("你想说：")
+    assert result[0]["m"] == "ambiguous statement"
