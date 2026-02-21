@@ -10,7 +10,6 @@ import re
 import time
 from typing import Optional
 
-import pandas as pd
 import streamlit as st
 
 import constants

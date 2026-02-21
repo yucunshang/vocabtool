@@ -51,10 +51,8 @@ These can be imported and tested without a running Streamlit session.
 |---|---|---|
 | `_render_extraction_stats` | `(data: list) -> None` | Show 4 metrics: coverage, target density, raw count, filtered count. |
 | `_render_word_editor` | `(data: list) -> list` | Editable textarea with copy button. Returns the current word list (edited or original). |
-| `_render_audio_settings` | `(key_prefix: str) -> tuple[bool, str]` | Audio enable checkbox + voice radio. `key_prefix` keeps widget keys unique (use `"auto"` here). Returns `(enable_audio, voice_code)`. |
-| `_render_builtin_ai_section` | `(words_only, enable_audio, voice_code, card_format, use_builtin_ai) -> None` | Generate button, progress bars, AI batch call, package generation, download button. |
-| `_render_thirdparty_prompt_section` | `(words_only, examples_colloquial, use_builtin_ai) -> None` | Card-format options and a copyable prompt block for third-party AI services. |
-| `_render_rank_inputs` | `(key_suffix: str) -> tuple[int, int]` | Shared min/max rank number inputs with validation warning. Used in `mode_paste` (`"2_1"`), `mode_url` (`"2_2"`), `mode_upload` (`"2_3"`). Returns `(min_rank, max_rank)`. |
+| `_render_audio_settings` | `(key_prefix: str) -> tuple[bool, str, bool]` | Audio enable checkbox + voice radio. `key_prefix` keeps widget keys unique (use `"auto"` here). Returns `(enable_audio, voice_code, enable_example_audio)`. |
+| `_render_builtin_ai_section` | `(words_only, enable_audio, voice_code, enable_example_audio, card_format) -> None` | Generate button, progress bars, AI batch call, package generation, download button. |
 
 ---
 
@@ -63,7 +61,7 @@ These can be imported and tested without a running Streamlit session.
 - **Python:** `C:\Users\shangcunyu\AppData\Local\Programs\Python\Python313\python.exe`
 - **Run:** `python -m pytest tests/ -v`
 - **JUnit XML:** `python -m pytest tests/ --junitxml=test-results.xml` (committed to repo)
-- **50 tests** across: `test_ai.py`, `test_anki_parse.py`, `test_core_logic.py`, `test_extraction.py`, `test_vocab.py`
+- **69 tests** across: `test_ai.py`, `test_anki_parse.py`, `test_config.py`, `test_core_logic.py`, `test_extraction.py`, `test_vocab.py`
 - `test_core_logic.py` proves `resources.py` and `ai.py` are testable without Streamlit.
 
 ### Test patterns
