@@ -2,6 +2,7 @@
 # 提示词模板见 prompts.py，可直接修改，不影响制卡 / apkg / 语音 / 卡片格式。
 
 import logging
+import hashlib
 import threading
 import time
 from collections import OrderedDict
@@ -11,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 import constants
 from config import get_config
 from errors import ErrorHandler
+from persistent_cache import cache_get as persistent_cache_get, cache_set as persistent_cache_set
 from prompts import (
     CARD_GEN_CLOZE_TEMPLATE,
     CARD_GEN_PRODUCTION_TEMPLATE,
@@ -57,7 +59,45 @@ DEFAULT_CARD_FORMAT: CardFormat = {
 # Fast in-memory cache for quick lookup to match vocabtool behavior.
 _QUERY_CACHE: OrderedDict[str, str] = OrderedDict()
 _QUERY_CACHE_MAX = 500
+_CARD_BATCH_CACHE: OrderedDict[str, str] = OrderedDict()
+_CARD_BATCH_CACHE_MAX = 1000
+_CARD_BATCH_CACHE_LOCK = threading.Lock()
 _OPENAI_CLIENT: Optional[Any] = None
+
+
+def _stable_cache_key(kind: str, model_name: str, prompt_text: str, payload: str) -> str:
+    """Build a stable hash key for persistent cache entries."""
+    raw = "\n".join([
+        constants.APP_RELEASE_CHANNEL,
+        kind,
+        model_name,
+        prompt_text,
+        payload,
+    ])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _set_lookup_cache(cache_key: str, content: str) -> None:
+    _QUERY_CACHE[cache_key] = content
+    _QUERY_CACHE.move_to_end(cache_key)
+    if len(_QUERY_CACHE) > _QUERY_CACHE_MAX:
+        _QUERY_CACHE.popitem(last=False)
+
+
+def _get_card_batch_cache(cache_key: str) -> Optional[str]:
+    with _CARD_BATCH_CACHE_LOCK:
+        if cache_key in _CARD_BATCH_CACHE:
+            _CARD_BATCH_CACHE.move_to_end(cache_key)
+            return _CARD_BATCH_CACHE[cache_key]
+    return None
+
+
+def _set_card_batch_cache(cache_key: str, content: str) -> None:
+    with _CARD_BATCH_CACHE_LOCK:
+        _CARD_BATCH_CACHE[cache_key] = content
+        _CARD_BATCH_CACHE.move_to_end(cache_key)
+        if len(_CARD_BATCH_CACHE) > _CARD_BATCH_CACHE_MAX:
+            _CARD_BATCH_CACHE.popitem(last=False)
 
 
 def build_card_prompt(
@@ -355,6 +395,17 @@ def get_word_quick_definition(
         cached = _QUERY_CACHE[cache_key]
         return {"result": cached, "rank": _rank_from_ai_content(cached, rank), "cached": True}
 
+    persistent_key = _stable_cache_key(
+        kind="lookup",
+        model_name=model_name,
+        prompt_text=LOOKUP_SYSTEM_PROMPT,
+        payload=word_clean,
+    )
+    persistent_cached = persistent_cache_get(persistent_key)
+    if persistent_cached:
+        _set_lookup_cache(cache_key, persistent_cached)
+        return {"result": persistent_cached, "rank": _rank_from_ai_content(persistent_cached, rank), "cached": True}
+
     try:
         if stream_callback is not None:
             stream = client.chat.completions.create(
@@ -391,9 +442,8 @@ def get_word_quick_definition(
         if not content:
             return {"error": "AI 返回为空"}
 
-        _QUERY_CACHE[cache_key] = content
-        if len(_QUERY_CACHE) > _QUERY_CACHE_MAX:
-            _QUERY_CACHE.popitem(last=False)
+        _set_lookup_cache(cache_key, content)
+        persistent_cache_set(persistent_key, content)
 
         return {"result": content, "rank": _rank_from_ai_content(content, rank)}
 
@@ -412,6 +462,22 @@ def _process_one_batch(
     """Process a single batch, return (batch_index, content). Empty string on failure."""
     current_batch_str = ", ".join(batch)
     user_prompt = build_card_prompt(current_batch_str, card_format)
+    cache_key = _stable_cache_key(
+        kind="card_batch",
+        model_name=model_name,
+        prompt_text=CARD_GEN_SYSTEM_PROMPT,
+        payload=user_prompt,
+    )
+
+    cached_content = _get_card_batch_cache(cache_key)
+    if cached_content:
+        return (batch_index, cached_content)
+
+    persistent_cached = persistent_cache_get(cache_key)
+    if persistent_cached:
+        _set_card_batch_cache(cache_key, persistent_cached)
+        return (batch_index, persistent_cached)
+
     max_attempts = constants.AI_BATCH_MAX_RETRIES
     for attempt in range(max_attempts):
         try:
@@ -427,6 +493,8 @@ def _process_one_batch(
             content = (response.choices[0].message.content or "").strip()
             if not content:
                 raise ValueError("Empty AI batch response")
+            _set_card_batch_cache(cache_key, content)
+            persistent_cache_set(cache_key, content)
             return (batch_index, content)
         except Exception as e:
             if attempt < max_attempts - 1:

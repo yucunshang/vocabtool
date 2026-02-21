@@ -73,6 +73,26 @@ OPENAI_BASE_URL = "https://api.openai.com/v1"  # 可替换为兼容网关
 OPENAI_MODEL = "deepseek-chat"
 ```
 
+可选：启用 Google Sheets 持久缓存（查词 + 内置制卡各卡型）。
+
+```toml
+GOOGLE_SHEETS_CACHE_ENABLED = true
+GOOGLE_SHEETS_CACHE_SPREADSHEET_ID = "your-spreadsheet-id"
+GOOGLE_SHEETS_CACHE_WORKSHEET = "cache"  # 可选，默认 cache
+
+# 二选一：推荐直接放 dict（Streamlit secrets 支持）
+[GOOGLE_SHEETS_SERVICE_ACCOUNT]
+type = "service_account"
+project_id = "xxx"
+private_key_id = "xxx"
+private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+client_email = "xxx@xxx.iam.gserviceaccount.com"
+client_id = "xxx"
+token_uri = "https://oauth2.googleapis.com/token"
+```
+
+并将目标 Google Sheet 共享给该 `client_email`（至少编辑权限），否则无法写入缓存。
+
 ## 运行方式
 
 ```bash
