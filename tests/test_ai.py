@@ -66,7 +66,8 @@ def test_build_thirdparty_prompt_standard_strong_model_template():
 
 def test_build_thirdparty_prompt_cloze_not_limited_to_10():
     out = build_thirdparty_prompt("brass, dam", {"card_type": "cloze", "voice_code": "en-US-JennyNeural"})
-    assert "This is one batch from a larger list" in out
+    assert "Expert Lexicographer & Reading Card Generator for Strong LLMs." in out
+    assert "Target word /IPA/ pos. 中文释义" in out
     assert "Max 10" not in out and "max 10" not in out
     assert "|||" in out
 

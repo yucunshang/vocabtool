@@ -687,13 +687,20 @@ def _render_thirdparty_section(
 
     with st.expander("🧩 第三方 AI 卡片格式定义", expanded=False):
         fmt_def = build_thirdparty_format_definition(thirdparty_fmt)
+        fmt_key = "thirdparty_format_definition"
+        fmt_sig_key = "thirdparty_format_definition_sig"
+        # Streamlit text_area with a fixed key keeps stale user-edited content.
+        # Refresh only when format definition actually changes.
+        if st.session_state.get(fmt_sig_key) != fmt_def:
+            st.session_state[fmt_key] = fmt_def
+            st.session_state[fmt_sig_key] = fmt_def
         col_f, col_fc = st.columns([5, 1])
         with col_f:
             st.text_area(
                 "格式定义",
-                value=fmt_def,
+                value=st.session_state.get(fmt_key, fmt_def),
                 height=180,
-                key="thirdparty_format_definition",
+                key=fmt_key,
                 label_visibility="collapsed",
             )
         with col_fc:
@@ -713,25 +720,36 @@ def _render_thirdparty_section(
 
         if num_batches > 1:
             with st.expander(f"📋 第 {i + 1} 批（{start + 1}–{end} 词，共 {len(batch_words)} 词）", expanded=(i == 0)):
+                prompt_key = f"thirdparty_prompt_{i}"
+                prompt_sig_key = f"thirdparty_prompt_sig_{i}"
+                # Keep manual edits for same config, but auto-refresh when card type/format changes.
+                if st.session_state.get(prompt_sig_key) != prompt_text:
+                    st.session_state[prompt_key] = prompt_text
+                    st.session_state[prompt_sig_key] = prompt_text
                 col_p, col_c = st.columns([5, 1])
                 with col_p:
                     st.text_area(
                         "Prompt",
-                        value=prompt_text,
+                        value=st.session_state.get(prompt_key, prompt_text),
                         height=200,
-                        key=f"thirdparty_prompt_{i}",
+                        key=prompt_key,
                         label_visibility="collapsed",
                     )
                 with col_c:
                     render_copy_button(prompt_text, key=f"copy_thirdparty_{i}")
         else:
+            prompt_key = "thirdparty_prompt_0"
+            prompt_sig_key = "thirdparty_prompt_sig_0"
+            if st.session_state.get(prompt_sig_key) != prompt_text:
+                st.session_state[prompt_key] = prompt_text
+                st.session_state[prompt_sig_key] = prompt_text
             col_p, col_c = st.columns([5, 1])
             with col_p:
                 st.text_area(
                     "Prompt",
-                    value=prompt_text,
+                    value=st.session_state.get(prompt_key, prompt_text),
                     height=220,
-                    key="thirdparty_prompt_0",
+                    key=prompt_key,
                     label_visibility="collapsed",
                 )
             with col_c:
@@ -762,7 +780,7 @@ def _render_manual_card_section() -> None:
         "粘贴 AI 生成的制卡结果",
         height=280,
         key="manual_pasted_output",
-        placeholder="标准卡：word ||| 释义 ||| 例句\n阅读卡：挖空句（含________）||| 释义 ||| 例句\n可混合粘贴，自动识别",
+        placeholder="标准卡：word ||| 释义 ||| 例句\n阅读卡：挖空句（含________）||| 单词 /IPA/ 词性. 中文释义 ||| 完整句（含中文翻译）\n可混合粘贴，自动识别",
         label_visibility="collapsed",
     )
 
@@ -775,7 +793,7 @@ def _render_manual_card_section() -> None:
             return
         parsed = parse_anki_data(pasted.strip())
         if not parsed:
-            st.error("解析失败，格式不符。标准卡：`word ||| 释义 ||| 例句`；阅读卡：`挖空句(含________) ||| 释义 ||| 例句`。")
+            st.error("解析失败，格式不符。标准卡：`word ||| 释义 ||| 例句`；阅读卡：`挖空句(含________) ||| 单词 /IPA/ 词性. 中文释义 ||| 完整句(含中文翻译)`。")
             return
         if manual_parse_type != "auto":
             for c in parsed:

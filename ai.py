@@ -202,9 +202,9 @@ def build_thirdparty_format_definition(fmt: Optional[CardFormat] = None) -> str:
     if card_type == "cloze":
         lines.extend([
             "卡片类型：阅读卡（cloze）",
-            "字段格式：挖空句 ||| 单词/音标词性释义 ||| 完整句(含中文翻译)",
+            "字段格式：挖空句 ||| Target word /IPA/ pos. 中文释义 ||| 完整句(含中文翻译)",
             "约束：挖空位固定为 ________（8个下划线）；3字段固定。",
-            "示例：The door was made of ________. ||| brass /bræs/ n. 黄铜 ||| The door was made of brass. (门是黄铜做的。)",
+            "示例：The doorknob was made of polished ________ and reflected the hallway light. ||| brass /bræs/ n. 黄铜 ||| The doorknob was made of polished brass and reflected the hallway light. (门把手由抛光黄铜制成，反射着走廊里的灯光。)",
         ])
         return "\n".join(lines)
 
