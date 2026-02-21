@@ -26,7 +26,7 @@ MAX_RETRIES = 2        # 失败重试 1 次，减少无效消耗
 AI_BATCH_MAX_RETRIES = 4  # 批量制卡每组最多尝试 4 次（3 次重试），应对限流/超时
 
 # Third-party prompt batching: unlimited total, split into chunks of this size.
-THIRD_PARTY_PROMPT_BATCH_SIZE = 500
+THIRD_PARTY_PROMPT_BATCH_SIZE = 200
 
 TTS_CONCURRENCY = 5
 TTS_RETRY_ATTEMPTS = 3

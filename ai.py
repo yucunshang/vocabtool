@@ -81,7 +81,7 @@ def build_card_prompt(
 
 
 def build_thirdparty_prompt(words_str: str, fmt: Optional[CardFormat] = None) -> str:
-    """Build third-party AI prompt from card format (up to 500 words per batch)."""
+    """Build third-party AI prompt from card format (up to 200 words per batch)."""
     if fmt is None:
         fmt = {
             "card_type": "standard",
@@ -194,7 +194,7 @@ def build_thirdparty_format_definition(fmt: Optional[CardFormat] = None) -> str:
     card_type = fmt.get("card_type", "standard")
     lines: List[str] = [
         "【第三方 AI 卡片格式定义】",
-        "总量不限；系统会自动按每批最多 500 词分组。",
+        "总量不限；系统会自动按每批最多 200 词分组。",
         "每行一张卡，字段分隔符固定为：|||",
         "字段内禁止再次出现分隔符 |||",
     ]

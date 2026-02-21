@@ -632,9 +632,9 @@ def _render_thirdparty_section(
     voice_code: str,
     enable_example_audio: bool,
 ) -> None:
-    """选择第三方时：自定义格式 + 分组 Prompt。无上限，每批最多 500 词。"""
+    """选择第三方时：自定义格式 + 分组 Prompt。无上限，每批最多 200 词。"""
     st.markdown("#### 第三方 AI")
-    st.caption("无总量上限，自动按每批 500 词分组。此 Prompt 面向强模型（如 GPT-4.1/Claude Opus 等），用于高质量制卡。")
+    st.caption("无总量上限，自动按每批 200 词分组。此 Prompt 面向强模型（如 GPT-4.1/Claude Opus 等），用于高质量制卡。")
 
     with st.expander("⚙️ 自定义卡片格式", expanded=True):
         tp_card_type = st.radio(
@@ -699,7 +699,7 @@ def _render_thirdparty_section(
         with col_fc:
             render_copy_button(fmt_def, key="copy_thirdparty_format_definition")
 
-    # 分组：总量无限，固定每批 500 词
+    # 分组：总量无限，固定每批 200 词
     batch_size = constants.THIRD_PARTY_PROMPT_BATCH_SIZE
     total = len(words_only)
     num_batches = (total + batch_size - 1) // batch_size
