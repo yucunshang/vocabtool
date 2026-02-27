@@ -2,12 +2,15 @@
 
 import csv
 import html
+import ipaddress
 import os
 import re
+import socket
 import sqlite3
 import tempfile
 from io import StringIO
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import pandas as pd
 import requests
@@ -19,15 +22,33 @@ from utils import detect_file_encoding
 
 logger = __import__("logging").getLogger(__name__)
 
+_RE_CLOZE = re.compile(r'\{\{c\d+::(.*?)(?::.*?)?\}\}')
+_RE_HTML  = re.compile(r'<[^>]+>')
+_RE_SOUND = re.compile(r'\[sound:.*?\]')
+_RE_IMAGE = re.compile(r'\[Image:.*?\]')
+
 
 def clean_anki_field(text: str) -> str:
     """Helper to clean a single Anki field content."""
-    text = re.sub(r'\{\{c\d+::(.*?)(?::.*?)?\}\}', r'\1', text)
-    text = re.sub(r'<[^>]+>', ' ', text)
+    text = _RE_CLOZE.sub(r'\1', text)
+    text = _RE_HTML.sub(' ', text)
     text = html.unescape(text)
-    text = re.sub(r'\[sound:.*?\]', '', text)
-    text = re.sub(r'\[Image:.*?\]', '', text)
+    text = _RE_SOUND.sub('', text)
+    text = _RE_IMAGE.sub('', text)
     return text.strip()
+
+
+def _extract_df_columns_text(df: pd.DataFrame) -> list:
+    """Flatten non-empty string values from all columns of a DataFrame."""
+    parts = []
+    for col in df.columns:
+        try:
+            col_text = df[col].astype(str)
+        except Exception:
+            col_text = df[col].apply(lambda x: str(x) if x is not None else "")
+        col_text = col_text[col_text.notna() & (col_text != '') & (col_text != 'nan')]
+        parts.extend(col_text.tolist())
+    return parts
 
 
 def parse_anki_txt_export(uploaded_file: Any) -> str:
@@ -64,25 +85,77 @@ def parse_anki_txt_export(uploaded_file: Any) -> str:
         return ErrorHandler.handle_file_error(e, "Anki Export Import")
 
 
+def _hostname_resolves_to_public_ip(hostname: str) -> bool:
+    """Return True only when hostname resolves and every IP is globally routable."""
+    h = (hostname or "").strip().strip("[]")
+    if not h:
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(h)
+        return ip_obj.is_global
+    except ValueError:
+        pass
+
+    try:
+        infos = socket.getaddrinfo(h, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        return False
+
+    resolved = set()
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        ip_text = sockaddr[0]
+        try:
+            resolved.add(ipaddress.ip_address(ip_text))
+        except ValueError:
+            continue
+    if not resolved:
+        return False
+    return all(ip_obj.is_global for ip_obj in resolved)
+
+
 def _is_safe_url(url: str) -> bool:
-    """Block URLs pointing to localhost, private IPs, or non-HTTP schemes."""
-    from urllib.parse import urlparse
+    """Block URLs pointing to localhost/private IP space or non-HTTP schemes."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return False
     hostname = (parsed.hostname or "").lower()
-    blocked = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]", "metadata.google")
+    blocked = ("localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]", "metadata.google")
     for b in blocked:
         if hostname == b or hostname.endswith("." + b):
             return False
-    # Block common private ranges
-    if hostname.startswith(("10.", "192.168.", "169.254.")):
-        return False
-    if hostname.startswith("172."):
-        parts = hostname.split(".")
-        if len(parts) >= 2 and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
-            return False
-    return True
+    return _hostname_resolves_to_public_ip(hostname)
+
+
+def _safe_get_with_redirects(
+    url: str,
+    headers: dict,
+    timeout: int,
+    max_redirects: int = 5,
+) -> requests.Response:
+    """Fetch URL while validating every redirect target."""
+    current_url = url
+    for _ in range(max_redirects + 1):
+        if not _is_safe_url(current_url):
+            raise requests.RequestException("URL blocked for security reasons (private/local address).")
+
+        response = requests.get(
+            current_url,
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=False,
+        )
+        if response.is_redirect or response.is_permanent_redirect:
+            location = response.headers.get("Location", "").strip()
+            if not location:
+                return response
+            current_url = urljoin(current_url, location)
+            continue
+        return response
+
+    raise requests.RequestException(f"Too many redirects (>{max_redirects})")
 
 
 def extract_text_from_url(url: str) -> str:
@@ -96,9 +169,10 @@ def extract_text_from_url(url: str) -> str:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        response = requests.get(
-            url, headers=headers, timeout=constants.REQUEST_TIMEOUT_SECONDS,
-            allow_redirects=True,
+        response = _safe_get_with_redirects(
+            url,
+            headers=headers,
+            timeout=constants.REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
 
@@ -111,7 +185,24 @@ def extract_text_from_url(url: str) -> str:
         for element in soup(["script", "style", "nav", "footer", "iframe", "noscript"]):
             element.decompose()
 
-        return soup.get_text(separator=' ', strip=True)
+        text = soup.get_text(separator=' ', strip=True)
+
+        # If extracted text is very short, try Jina Reader as fallback (handles JS-rendered pages)
+        if len(text.split()) < 100:
+            try:
+                jina_url = f"https://r.jina.ai/{url}"
+                jina_resp = requests.get(
+                    jina_url,
+                    headers={"Accept": "text/plain"},
+                    timeout=constants.REQUEST_TIMEOUT_SECONDS,
+                )
+                jina_resp.raise_for_status()
+                if len(jina_resp.text.split()) > len(text.split()):
+                    return jina_resp.text
+            except Exception:
+                pass  # Fall through to original text
+
+        return text
     except requests.RequestException as e:
         return ErrorHandler.handle_file_error(e, "URL")
     except Exception as e:
@@ -131,12 +222,17 @@ def extract_from_txt(uploaded_file: Any) -> str:
 
 
 def extract_from_pdf(uploaded_file: Any) -> str:
-    """Extract text from PDF file."""
+    """Extract text from PDF file. Only first PDF_MAX_PAGES pages to keep speed."""
     pypdf, _, _, _, _ = get_file_parsers()
 
     try:
         reader = pypdf.PdfReader(uploaded_file)
-        pages_text = [page.extract_text() for page in reader.pages if page.extract_text()]
+        pages = reader.pages[: constants.PDF_MAX_PAGES]
+        pages_text = []
+        for p in pages:
+            txt = p.extract_text()
+            if txt:
+                pages_text.append(txt)
         return "\n".join(pages_text)
     except Exception as e:
         return ErrorHandler.handle_file_error(e, "PDF")
@@ -177,11 +273,9 @@ def extract_from_csv(uploaded_file: Any) -> str:
     try:
         content = bytes_data.decode(encoding)
         df = pd.read_csv(StringIO(content))
-        text_parts = []
-        for col in df.columns:
-            col_text = df[col].astype(str)
-            col_text = col_text[col_text.notna() & (col_text != '') & (col_text != 'nan')]
-            text_parts.extend(col_text.tolist())
+        if df.empty or len(df.columns) == 0:
+            return "Error: CSV 文件为空或无数据行。"
+        text_parts = _extract_df_columns_text(df)
         return " ".join(text_parts)
     except Exception as e:
         return ErrorHandler.handle_file_error(e, "CSV")
@@ -198,12 +292,13 @@ def extract_from_excel(uploaded_file: Any) -> str:
             return ErrorHandler.handle_file_error(e, "Excel")
 
     try:
+        if not df:
+            return "Error: Excel 文件无法读取任何工作表。"
         text_parts = []
         for sheet_name, sheet_df in df.items():
-            for col in sheet_df.columns:
-                col_text = sheet_df[col].astype(str)
-                col_text = col_text[col_text.notna() & (col_text != '') & (col_text != 'nan')]
-                text_parts.extend(col_text.tolist())
+            if sheet_df.empty:
+                continue
+            text_parts.extend(_extract_df_columns_text(sheet_df))
         return " ".join(text_parts)
     except Exception as e:
         return ErrorHandler.handle_file_error(e, "Excel")
