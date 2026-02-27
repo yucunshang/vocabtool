@@ -19,7 +19,9 @@ APKG_CLEANUP_MAX_AGE_SECONDS = 24 * 3600  # 24 hours
 MIN_WORD_LENGTH = 2
 MAX_WORD_LENGTH = 25
 
-AI_BATCH_SIZE = 20   # 每批请求词数，越大 API 调用越少、整体越快，但单次响应更慢
+AI_BATCH_SIZE = 10     # 每组 10 词
+AI_CONCURRENCY = 5     # 并发 5
+AI_BATCH_MAX_RETRIES = 4  # 批量制卡每组最多尝试 4 次（3 次重试），应对限流/超时
 MAX_AUTO_LIMIT = 200  # 内置 AI 一次性制卡上限
 MAX_RETRIES = 3
 
@@ -28,6 +30,13 @@ TTS_RETRY_ATTEMPTS = 3
 MIN_AUDIO_FILE_SIZE = 100
 
 ANKI_MODEL_ID = 1842957301
+ANKI_MODEL_CLOZE_ID = 1842957302
+ANKI_MODEL_TRANSLATION_ID = 1842957303
+ANKI_MODEL_PRODUCTION_ID = 1842957304
+ANKI_MODEL_AUDIO_ID = 1842957305
+
+# 卡片类型：standard=标准卡, cloze=阅读卡, translation=互译卡, production=表达卡, audio=听音卡
+CARD_TYPES = ["standard", "cloze", "translation", "production", "audio"]
 
 ENCODING_PRIORITY = ['utf-8', 'gb18030', 'latin-1']
 

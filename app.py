@@ -8,13 +8,17 @@ import logging
 import os
 import re
 import time
+from typing import Optional
 
-import pandas as pd
 import streamlit as st
 
 import constants
 import resources
-from ai import CardFormat, build_card_prompt, get_word_quick_definition, process_ai_in_batches
+from ai import (
+    CardFormat,
+    get_word_quick_definition,
+    process_ai_in_batches,
+)
 from anki_package import cleanup_old_apkg_files, generate_anki_package
 from anki_parse import parse_anki_data
 from config import get_config
@@ -23,62 +27,15 @@ from extraction import (
     extract_text_from_file,
     extract_text_from_url,
     is_upload_too_large,
-    parse_anki_txt_export,
 )
 from rate_limiter import (
     check_batch_limit, check_lookup_limit, check_url_limit,
     record_batch, record_lookup, record_url,
 )
 from state import set_generated_words_state
+from ui_styles import APP_STYLES_HTML
 from utils import get_beijing_time_str, render_copy_button, run_gc
-from vocab import analyze_logic
-
-# Load vocab and expose to app (and to resources for vocab/ai modules)
-VOCAB_DICT, FULL_DF = resources.load_vocab_data()
-resources.VOCAB_DICT = VOCAB_DICT
-resources.FULL_DF = FULL_DF
-
-# Clean old .apkg files from our temp subdir (e.g. from previous sessions)
-cleanup_old_apkg_files()
-
-# Stop words to filter out in direct-input mode (articles, pronouns,
-# prepositions, conjunctions, auxiliary verbs, determiners, etc.).
-_DIRECT_INPUT_STOPWORDS: set = {
-    # Articles & determiners
-    "a", "an", "the", "this", "that", "these", "those",
-    # Pronouns
-    "i", "me", "my", "mine", "myself",
-    "you", "your", "yours", "yourself", "yourselves",
-    "he", "him", "his", "himself",
-    "she", "her", "hers", "herself",
-    "it", "its", "itself",
-    "we", "us", "our", "ours", "ourselves",
-    "they", "them", "their", "theirs", "themselves",
-    "who", "whom", "whose", "which", "what",
-    # Prepositions
-    "in", "on", "at", "to", "for", "of", "with", "by", "from",
-    "up", "out", "off", "into", "onto", "upon", "about", "over",
-    "under", "after", "before", "between", "through", "during",
-    "above", "below", "around", "against", "along", "across",
-    "behind", "beyond", "within", "without", "toward", "towards",
-    # Conjunctions
-    "and", "but", "or", "nor", "so", "yet", "for",
-    "both", "either", "neither", "whether",
-    # Auxiliary / common verbs
-    "is", "am", "are", "was", "were", "be", "been", "being",
-    "do", "did", "does", "done", "doing",
-    "has", "had", "have", "having",
-    "will", "would", "shall", "should",
-    "can", "could", "may", "might", "must",
-    # Very common adverbs / particles
-    "not", "no", "yes", "very", "too", "also", "just",
-    "then", "than", "now", "here", "there",
-    "how", "when", "where", "why",
-    # Other function words
-    "if", "as", "all", "each", "every", "any", "some",
-    "such", "more", "most", "much", "many", "few",
-    "other", "own", "same", "only",
-}
+from vocab import analyze_logic, get_lemma_for_word
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +48,19 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="collapsed"
 )
+
+# Logging: ensure root logger has a handler when running as main app
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s:%(name)s:%(message)s",
+    )
+
+# Load vocab data for use in mode_rank tab and the vocab error check below.
+VOCAB_DICT, FULL_DF = resources.load_vocab_data()
+
+# Clean old .apkg files from our temp subdir (e.g. from previous sessions)
+cleanup_old_apkg_files()
 
 # Initialize Session State
 for key, default_value in constants.DEFAULT_SESSION_STATE.items():
@@ -105,420 +75,8 @@ if _clicked_word:
     st.session_state["quick_lookup_word"] = _clicked_word
     st.session_state["_auto_lookup_word"] = _clicked_word
 
-# Custom CSS – app-like design
-st.markdown("""
-<style>
-    /* ===== Global: hide Streamlit chrome, set base font ===== */
-    #MainMenu, footer, header {visibility: hidden;}
-    .stApp {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-                     'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-        text-size-adjust: 100%;
-        -webkit-text-size-adjust: 100%;
-        font-size: 19px;
-    }
-
-    /* iOS safe-area support */
-    .main .block-container {
-        padding-left: max(1rem, env(safe-area-inset-left));
-        padding-right: max(1rem, env(safe-area-inset-right));
-        padding-bottom: max(1rem, env(safe-area-inset-bottom));
-    }
-
-    /* ===== Smooth transitions on all interactive elements ===== */
-    button, input, textarea, [data-baseweb="tab"], .stExpander {
-        transition: all 0.2s ease !important;
-    }
-
-    /* ===== Buttons: pill-shaped, elevated feel ===== */
-    .stButton>button {
-        border-radius: 10px; font-weight: 600; width: 100%; margin-top: 4px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        letter-spacing: 0.01em;
-        min-height: 48px;
-        font-size: 18px;
-        position: relative;
-        overflow: hidden;
-    }
-    .stButton>button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.10);
-    }
-    .stButton>button:active {
-        transform: scale(0.93);
-        box-shadow: 0 0 0 rgba(0,0,0,0);
-        filter: brightness(0.88);
-        transition: transform 0.06s ease, box-shadow 0.06s ease, filter 0.06s ease !important;
-    }
-
-    /* Form submit buttons (e.g. lookup) – stronger active feedback */
-    .stForm [data-testid="stFormSubmitButton"] button {
-        position: relative;
-        overflow: hidden;
-    }
-    .stForm [data-testid="stFormSubmitButton"] button:active {
-        transform: scale(0.90);
-        box-shadow: 0 0 0 rgba(0,0,0,0);
-        filter: brightness(0.85);
-        transition: transform 0.06s ease, filter 0.06s ease !important;
-    }
-
-    /* Ripple animation for all buttons */
-    @keyframes btn-ripple {
-        0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.35); }
-        100% { box-shadow: 0 0 0 12px rgba(59,130,246,0); }
-    }
-    .stButton>button:focus-visible,
-    .stForm [data-testid="stFormSubmitButton"] button:focus-visible {
-        animation: btn-ripple 0.4s ease-out;
-    }
-
-    /* ===== Text areas ===== */
-    .stTextArea textarea {
-        font-family: 'Consolas', 'SF Mono', 'Monaco', monospace;
-        font-size: 18px; border-radius: 10px;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    /* ===== Form cards (only for bordered forms) ===== */
-    .stForm:not([class*="borderless"]) {
-        border-radius: 14px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.04);
-        margin-bottom: 1rem;
-    }
-
-    /* ===== Text input: comfortable height ===== */
-    .stTextInput input {
-        min-height: 50px;
-        font-size: 19px;
-    }
-
-    /* ===== Metric cards ===== */
-    [data-testid="stMetric"] {
-        background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-        padding: 1rem; border-radius: 12px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
-    [data-testid="stMetric"] [data-testid="stMetricValue"] {
-        font-weight: 700; letter-spacing: -0.02em; font-size: 1.6rem;
-    }
-
-    /* ===== Tabs: segmented-control style ===== */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 4px; background: #f1f5f9; padding: 4px;
-        border-radius: 12px; border: 1px solid #e2e8f0;
-    }
-    .stTabs [data-baseweb="tab"] {
-        padding: 0.6rem 1.1rem; border-radius: 10px;
-        font-weight: 600; font-size: 1.1rem;
-    }
-    .stTabs [data-baseweb="tab"][aria-selected="true"] {
-        background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    }
-
-    /* ===== Expanders ===== */
-    .stExpander {
-        border: 1px solid #e5e7eb; border-radius: 12px;
-        margin-bottom: 10px; overflow: hidden;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
-    }
-
-    /* ===== Progress bar ===== */
-    .stProgress > div > div > div > div {
-        background: linear-gradient(90deg, #3b82f6 0%, #6366f1 100%);
-        border-radius: 6px;
-    }
-
-    /* ===== Section dividers ===== */
-    hr { border: none; height: 1px; background: #e5e7eb; margin: 1.5rem 0; }
-
-    /* ===== AI lookup result styles ===== */
-    .ql-result { padding: 4px 0; }
-    .ql-word   { color: #1e3a8a; margin-bottom: 6px; font-size: 18px; line-height: 1.7; }
-    .ql-def    { color: #1e3a8a; margin-bottom: 6px; font-size: 18px; line-height: 1.7; }
-    .ql-etym   { color: #065f46; background: #ecfdf5; padding: 6px 10px; border-radius: 8px; margin: 8px 0; line-height: 1.7; }
-    .ql-ex     { color: #374151; margin-top: 6px; font-size: 18px; line-height: 1.7; }
-    .ql-misc   { color: #6b7280; margin-bottom: 8px; font-size: 18px; line-height: 1.7; }
-    .ql-stream { padding: 10px 12px; border: 1px solid #dbeafe; background: #f8fbff; border-radius: 10px; color: #1f2937; line-height: 1.7; font-size: 18px; }
-
-    /* ===== App footer ===== */
-    .app-footer {
-        margin-top: 3rem; padding: 1.25rem 0; text-align: center;
-        color: #94a3b8; font-size: 0.8rem; letter-spacing: 0.02em;
-        border-top: 1px solid #f1f5f9;
-    }
-
-    /* ===== Hero header ===== */
-    .app-hero {
-        text-align: center; padding: 1.5rem 0 0.5rem;
-    }
-    .app-hero h1 {
-        font-size: 2.45rem; font-weight: 900; letter-spacing: -0.03em;
-        background: linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #6366f1 100%);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        background-clip: text; margin-bottom: 0.2rem;
-    }
-    .app-hero p {
-        color: #64748b; font-size: 1.12rem; margin: 0;
-        font-weight: 600;
-    }
-    /* ===== Radio buttons: chip style ===== */
-    .stRadio > div { gap: 0.4rem; }
-    .stRadio > div > label {
-        border: 1px solid #e2e8f0; border-radius: 8px;
-        padding: 0.35rem 0.85rem; font-size: 0.95rem;
-        transition: all 0.15s ease;
-    }
-    .stRadio > div > label:hover {
-        border-color: #93c5fd; background: #f0f9ff;
-    }
-
-    /* ===== Number inputs ===== */
-    .stNumberInput input { border-radius: 10px; }
-    .stTextInput input, .stSelectbox input, .stNumberInput input {
-        min-height: 46px;
-        font-size: 18px;
-    }
-
-    /* ===== Toast / info / warning boxes ===== */
-    .stAlert { border-radius: 10px; }
-    .stMarkdown p, .stCaption, label, .stRadio label, .stCheckbox label {
-        font-size: 1.08rem;
-    }
-
-    /* ===== Download button ===== */
-    .stDownloadButton > button {
-        border-radius: 10px; font-weight: 600;
-        box-shadow: 0 2px 8px rgba(59,130,246,0.15);
-        min-height: 48px;
-        font-size: 18px;
-    }
-
-    /* ===== Dark mode refinement ===== */
-    @media (prefers-color-scheme: dark) {
-        /* -- Base -- */
-        .stApp { background: #0b1120; color: #e2e8f0; }
-
-        /* -- Hero gradient for dark bg -- */
-        .app-hero h1 {
-            background: linear-gradient(135deg, #60a5fa 0%, #818cf8 50%, #a78bfa 100%);
-            -webkit-background-clip: text; background-clip: text;
-        }
-        .app-hero p { color: #94a3b8; }
-
-        /* -- Forms & cards -- */
-        .stForm {
-            background: #111827;
-            border-color: #1e293b;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.45);
-        }
-
-        /* -- Inputs: text, number, select, textarea -- */
-        .stTextInput input, .stNumberInput input, .stSelectbox input {
-            background: #1e293b; color: #e2e8f0;
-            border-color: #334155;
-        }
-        .stTextInput input:focus, .stNumberInput input:focus, .stSelectbox input:focus {
-            border-color: #60a5fa;
-            box-shadow: 0 0 0 2px rgba(96,165,250,0.25);
-        }
-        .stTextInput input::placeholder { color: #64748b; }
-        .stTextArea textarea {
-            background: #1e293b; color: #e2e8f0;
-            border-color: #334155;
-        }
-        .stTextArea textarea:focus {
-            border-color: #60a5fa;
-            box-shadow: 0 0 0 2px rgba(96,165,250,0.25);
-        }
-        .stTextArea textarea::placeholder { color: #64748b; }
-
-        /* -- Buttons -- */
-        .stButton>button {
-            border-color: #334155;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-        }
-        .stButton>button:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.35);
-        }
-        .stDownloadButton > button {
-            box-shadow: 0 2px 8px rgba(96,165,250,0.2);
-        }
-
-        /* -- Metric cards -- */
-        [data-testid="stMetric"] {
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-            border-color: #1e293b;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-        }
-        [data-testid="stMetric"] [data-testid="stMetricValue"] { color: #f1f5f9; }
-        [data-testid="stMetric"] [data-testid="stMetricLabel"] { color: #94a3b8; }
-
-        /* -- Tabs -- */
-        .stTabs [data-baseweb="tab-list"] {
-            background: #0f172a;
-            border-color: #1e293b;
-        }
-        .stTabs [data-baseweb="tab"] { color: #94a3b8; }
-        .stTabs [data-baseweb="tab"]:hover { color: #cbd5e1; }
-        .stTabs [data-baseweb="tab"][aria-selected="true"] {
-            background: #1e293b;
-            color: #f1f5f9;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-        }
-
-        /* -- Expanders -- */
-        .stExpander {
-            border-color: #1e293b;
-            background: #111827;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.3);
-        }
-        .stExpander summary span { color: #e2e8f0; }
-
-        /* -- Alerts -- */
-        .stAlert {
-            background: #0f172a;
-            border-color: #1e293b;
-            color: #e2e8f0;
-        }
-
-        /* -- Radio chips -- */
-        .stRadio > div > label {
-            border-color: #334155;
-            color: #cbd5e1;
-            background: #1e293b;
-        }
-        .stRadio > div > label:hover {
-            border-color: #60a5fa;
-            background: #172554;
-            color: #e2e8f0;
-        }
-
-        /* -- Checkbox -- */
-        .stCheckbox label { color: #cbd5e1; }
-
-        /* -- Progress bar dark glow -- */
-        .stProgress > div > div > div > div {
-            background: linear-gradient(90deg, #3b82f6 0%, #818cf8 100%);
-        }
-
-        /* -- Markdown text -- */
-        .stMarkdown p, .stMarkdown li, .stMarkdown h1,
-        .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 { color: #e2e8f0; }
-        .stCaption { color: #94a3b8 !important; }
-        label { color: #cbd5e1; }
-
-        /* -- Code block -- */
-        .stCodeBlock, pre, code {
-            background: #0f172a !important;
-            color: #e2e8f0 !important;
-            border-color: #1e293b !important;
-        }
-
-        /* -- Dataframe -- */
-        .stDataFrame { border-color: #1e293b; }
-
-        /* -- Dividers & footer -- */
-        hr { background: #1e293b; }
-        .app-footer { color: #64748b; border-top-color: #1e293b; }
-
-        /* -- File uploader -- */
-        [data-testid="stFileUploader"] {
-            border-color: #334155;
-        }
-        [data-testid="stFileUploader"] section {
-            background: #1e293b;
-            border-color: #334155;
-        }
-
-        /* -- Spinner text -- */
-        .stSpinner > div { color: #94a3b8; }
-
-        /* -- AI lookup result card -- */
-        .ql-result { background: #1e293b !important; border-color: #334155 !important; }
-        .ql-word { color: #93c5fd !important; }
-        .ql-def  { color: #c4b5fd !important; }
-        .ql-etym { background: #1a2332 !important; color: #6ee7b7 !important; }
-        .ql-ex   { color: #cbd5e1 !important; }
-        .ql-misc { color: #94a3b8 !important; }
-
-        /* -- Streaming box -- */
-        .ql-stream { background: #1e293b !important; border-color: #334155 !important; color: #e2e8f0 !important; }
-    }
-
-    /* ===== Mobile (iOS/Android) ===== */
-    @media (max-width: 768px) {
-        .main .block-container {
-            padding-top: 0.8rem;
-            padding-left: max(0.75rem, env(safe-area-inset-left));
-            padding-right: max(0.75rem, env(safe-area-inset-right));
-            padding-bottom: max(1rem, env(safe-area-inset-bottom));
-        }
-        .app-hero {
-            padding: 0.9rem 0 0.2rem;
-        }
-        .app-hero h1 {
-            font-size: 1.95rem;
-        }
-        .app-hero p {
-            font-size: 0.92rem;
-        }
-        .stTabs [data-baseweb="tab-list"] {
-            overflow-x: auto;
-            white-space: nowrap;
-            scrollbar-width: none;
-        }
-        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
-            display: none;
-        }
-        .stTabs [data-baseweb="tab"] {
-            padding: 0.55rem 0.75rem;
-            font-size: 0.9rem;
-            min-height: 40px;
-        }
-        .stButton>button,
-        .stDownloadButton > button {
-            min-height: 46px;
-            border-radius: 12px;
-        }
-        /* Force lookup form columns to stay side-by-side on mobile */
-        .stForm [data-testid="stColumns"] {
-            flex-wrap: nowrap !important;
-            gap: 6px !important;
-        }
-        .stForm [data-testid="stFormSubmitButton"] button {
-            min-width: 72px;
-            min-height: 46px;
-            font-size: 14px;
-            padding: 0 8px;
-        }
-        .stForm .stTextInput input {
-            min-height: 46px;
-        }
-        /* Avoid hover lift on touch devices */
-        .stButton>button:hover {
-            transform: none;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        }
-        /* Stronger touch feedback on mobile */
-        .stButton>button:active,
-        .stForm [data-testid="stFormSubmitButton"] button:active {
-            transform: scale(0.90) !important;
-            filter: brightness(0.82) !important;
-            transition: transform 0.05s ease, filter 0.05s ease !important;
-        }
-        .stTextArea textarea {
-            font-size: 16px !important;
-        }
-        .stCaption {
-            font-size: 0.9rem;
-        }
-    }
-</style>
-""", unsafe_allow_html=True)
+# Custom CSS – app-like design (see ui_styles.py)
+st.markdown(APP_STYLES_HTML, unsafe_allow_html=True)
 
 
 def set_anki_pkg(file_path: str, deck_name: str) -> None:
@@ -542,7 +100,8 @@ def render_anki_download_button(
     label: str,
     *,
     button_type: str = "primary",
-    use_container_width: bool = False
+    use_container_width: bool = False,
+    key: str | None = None,
 ) -> None:
     """Safely render Anki package download button if file exists."""
     file_path = st.session_state.get('anki_pkg_path')
@@ -557,14 +116,17 @@ def render_anki_download_button(
 
     try:
         with open(file_path, "rb") as f:
-            st.download_button(
+            kwargs = dict(
                 label=label,
                 data=f.read(),
                 file_name=file_name,
                 mime="application/octet-stream",
                 type=button_type,
-                use_container_width=use_container_width
+                use_container_width=use_container_width,
             )
+            if key is not None:
+                kwargs["key"] = key
+            st.download_button(**kwargs)
         st.caption("💡 如下载无反应，请在浏览器（Safari / Chrome）中打开本页面再点击下载。")
     except OSError as e:
         logger.error("Failed to open package for download: %s", e)
@@ -578,22 +140,36 @@ def render_anki_download_button(
 
 def _rank_badge_style(rank: int) -> tuple[str, str]:
     """Map numeric rank to badge color and label."""
-    if rank <= 5000:
-        return "#10b981", "高频词"
+    if rank <= 2809:
+        return "#10b981", "核心"
+    if rank <= 6000:
+        return "#22c55e", "基础"
     if rank <= 10000:
-        return "#3b82f6", "常用词"
-    if rank <= 20000:
+        return "#3b82f6", "常用"
+    if rank <= 15000:
         return "#f59e0b", "进阶词"
+    if rank <= 20000:
+        return "#f97316", "高级词"
     if rank < 99999:
-        return "#ef4444", "专业词"
+        return "#ef4444", "低频词"
     return "#6b7280", "未收录"
+
+
+@st.cache_data(show_spinner=False)
+def _cached_analyze(text: str, min_rank: int, max_rank: int, include_unknown: bool):
+    return analyze_logic(text, min_rank, max_rank, include_unknown)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_extract_url(url: str) -> str:
+    return extract_text_from_url(url)
 
 
 def _analyze_and_set_words(raw_text: str, min_rank: int, max_rank: int) -> bool:
     """Run rank-based analysis and update session state. Returns success."""
     if len(raw_text) <= 2:
         return False
-    final_data, raw_count, stats_info = analyze_logic(raw_text, min_rank, max_rank, False)
+    final_data, raw_count, stats_info = _cached_analyze(raw_text, min_rank, max_rank, False)
     set_generated_words_state(final_data, raw_count, stats_info)
     if not final_data:
         st.info(
@@ -612,14 +188,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def _render_extract_results() -> None:
-    """Render the extracted words results, AI card generation, and third-party prompt."""
-    if not st.session_state.get('gen_words_data'):
-        return
-
-    data = st.session_state['gen_words_data']
+def _render_extraction_stats(data: list) -> None:
+    """Show 4 metrics: coverage, target density, raw count, filtered count."""
     original_count = len(data)
-
     if st.session_state.get('stats_info'):
         stats = st.session_state['stats_info']
         col_s1, col_s2 = st.columns(2)
@@ -637,10 +208,12 @@ def _render_extract_results() -> None:
     with col_t2:
         st.metric("✅ 筛选后单词总数", original_count)
 
-    st.markdown("### ✅ 提取成功！")
 
+def _render_word_editor(data: list) -> list:
+    """Render editable word list textarea with copy button. Returns current words_only."""
     words_only = [w for w, r in data]
     words_text = "\n".join(words_only)
+    original_count = len(data)
     if "word_list_editor" not in st.session_state:
         st.session_state["word_list_editor"] = words_text
 
@@ -661,237 +234,384 @@ def _render_extract_results() -> None:
     )
 
     if edited_words != words_text:
-        edited_word_list = [w.strip() for w in edited_words.split('\n') if w.strip()]
-        st.info(f"📝 已编辑：当前共 {len(edited_word_list)} 个单词")
-        words_only = edited_word_list
+        result_words = [w.strip() for w in edited_words.split('\n') if w.strip()]
+        st.info(f"📝 已编辑：当前共 {len(result_words)} 个单词")
     else:
-        words_only = [w for w, r in data]
+        result_words = words_only
 
-    st.markdown("---")
-    st.markdown("### 🤖 AI 生成 Anki 卡片")
+    return result_words
 
-    # ---------- 公用设置（内置 AI 与第三方 Prompt 共用）----------
-    st.markdown("#### ① 通用设置")
-    enable_audio_auto = st.checkbox("启用语音", value=True, key="chk_audio_auto")
-    if enable_audio_auto:
+
+def _render_audio_settings(key_prefix: str) -> tuple[bool, str, bool]:
+    """Render audio toggle + voice selector. Example audio always on when TTS enabled.
+    Returns (enable_audio, voice_code, enable_example_audio)."""
+    enable_audio = st.checkbox("启用语音", value=True, key=f"chk_audio_{key_prefix}")
+    if enable_audio:
         selected_voice_label = st.radio(
             "🎙️ 发音人",
             options=list(constants.VOICE_MAP.keys()),
             index=0,
-            horizontal=True,
-            key="sel_voice_auto",
+            horizontal=False,
+            key=f"sel_voice_{key_prefix}",
         )
-        selected_voice_code = constants.VOICE_MAP[selected_voice_label]
+        voice_code = constants.VOICE_MAP[selected_voice_label]
     else:
-        selected_voice_code = list(constants.VOICE_MAP.values())[0]
+        voice_code = list(constants.VOICE_MAP.values())[0]
+    return enable_audio, voice_code, True  # 例句默认发音，不提供选项
 
-    examples_colloquial = st.checkbox(
-        "例句用口语",
-        value=False,
-        key="chk_examples_colloquial",
-        help="例句使用日常口语化表达，而非书面语",
+
+def _render_builtin_ai_section(
+    words_only: list, enable_audio: bool, voice_code: str, enable_example_audio: bool,
+    card_format: Optional[CardFormat] = None,
+) -> None:
+    """Builtin AI generation flow: button → progress → parse → edit → package → download."""
+    ai_model_label = get_config().get("openai_model_display", constants.AI_MODEL_DISPLAY)
+
+    # Fix 1: Deck name input
+    deck_name = st.text_input(
+        "🏷️ 牌组名称",
+        value=f"Vocab_{get_beijing_time_str()}",
+        key="builtin_deck_name",
+        help="生成的 .apkg 文件和 Anki 牌组名称",
     )
 
-    # 固定模板：正面单词，反面中文释义 + 2 条例句带中文翻译，不加词根词缀
-    shared_card_format: CardFormat = {
-        "front": "word",
-        "definition": "cn",
-        "examples": 2,
-        "examples_with_cn": True,
-        "etymology": False,
-        "examples_colloquial": examples_colloquial,
-    }
+    # Fix 7: Pagination — slice words into pages of MAX_AUTO_LIMIT
+    total_word_count = len(words_only)
+    page_size = constants.MAX_AUTO_LIMIT
+    page = st.session_state.get("_builtin_gen_page", 0)
+    start_idx = page * page_size
+    end_idx = (page + 1) * page_size
+    words_for_auto_ai = words_only[start_idx:min(end_idx, total_word_count)]
+    remaining_words = max(0, total_word_count - end_idx)
 
-    st.markdown("#### ② 生成方式")
-    use_builtin_ai = st.radio(
-        "选择",
-        options=["builtin", "thirdparty"],
-        format_func=lambda x: "内置 AI 一键生成" if x == "builtin" else "第三方 AI（复制 Prompt）",
-        index=0,
-        horizontal=True,
-        key="ai_gen_mode",
-    )
-
-    col_ai_btn, col_copy_hint = st.columns([1, 1.35], vertical_alignment="top")
-
-    with col_ai_btn:
-        ai_model_label = get_config()["openai_model"]
-
-        words_for_auto_ai = words_only
-        current_word_count = len(words_for_auto_ai)
-        if current_word_count > constants.MAX_AUTO_LIMIT:
+    if total_word_count > page_size:
+        if page == 0:
             st.caption(
-                f"⚠️ 当前 {current_word_count} 词；内置 AI 最多处理前 {constants.MAX_AUTO_LIMIT} 词。"
-                " 可选「第三方 AI」复制 Prompt 分批处理。"
+                f"⚠️ 共 {total_word_count} 词，首批处理前 {len(words_for_auto_ai)} 词。"
+                " 生成完成后可继续处理剩余词汇。"
             )
-            words_for_auto_ai = words_for_auto_ai[:constants.MAX_AUTO_LIMIT]
+        else:
+            st.caption(
+                f"⚠️ 第 {page + 1} 批，第 {start_idx + 1}–{min(end_idx, total_word_count)} 词"
+                f"（共 {total_word_count} 词）。"
+            )
 
-        if use_builtin_ai == "builtin":
-            if st.button(f"🚀 使用 {ai_model_label} 生成", type="primary", use_container_width=True):
-                batch_allowed, batch_msg = check_batch_limit()
-                if not batch_allowed:
-                    st.warning(batch_msg)
-                    st.stop()
+    # Handle auto-generate flag set by "继续下一批" button
+    auto_generate = st.session_state.pop("_builtin_auto_generate", False)
+
+    clicked = st.button(
+        f"🚀 使用 {ai_model_label} 一键制卡",
+        type="primary",
+        key="btn_builtin_gen",
+        use_container_width=True,
+    )
+
+    if clicked:
+        # Fresh generate: reset page and clear previous cards
+        st.session_state["_builtin_gen_page"] = 0
+        st.session_state.pop("_builtin_parsed_cards", None)
+        st.session_state.pop("_builtin_ai_partial_result", None)
+        st.session_state.pop("_builtin_ai_failed_words", None)
+        st.session_state.pop("card_editor", None)
+        # Re-compute pagination for page 0
+        words_for_auto_ai = words_only[:page_size]
+        remaining_words = max(0, total_word_count - page_size)
+
+    if clicked or auto_generate:
+        batch_allowed, batch_msg = check_batch_limit()
+        if not batch_allowed:
+            st.warning(batch_msg)
+            st.stop()
+        record_batch()
+
+        progress_title = st.empty()
+        card_text = st.empty()
+        card_bar = st.progress(0.0)
+        audio_text = st.empty()
+        audio_bar = st.progress(0.0)
+
+        total_words = len(words_for_auto_ai)
+        batch_size = constants.AI_BATCH_SIZE
+        first_end = min(batch_size, total_words)
+        progress_title.markdown("#### ⏳ 内置 AI 制卡进度")
+        st.caption("💡 第一组可能稍慢（建立连接），后续组并发进行。")
+        card_text.markdown(f"**制卡进度**：第 1 组（1–{first_end}/{total_words}）AI 生成中...")
+        audio_text.markdown("**音频进度**：等待制卡完成...")
+
+        def update_ai_progress(current: int, total: int) -> None:
+            ratio = current / total if total > 0 else 0.0
+            card_bar.progress(min(0.9, ratio * 0.9))
+            batch_idx = (current + batch_size - 1) // batch_size
+            start = (batch_idx - 1) * batch_size + 1
+            end = min(batch_idx * batch_size, total)
+            card_text.markdown(f"**制卡进度**：第 {batch_idx} 组（{start}–{end}/{total}）AI 生成中...")
+
+        # Fix 3: Unpack (content, failed_words) tuple; pass voice for IPA style (BrE/AmE)
+        _fmt = dict(card_format) if card_format else {}
+        _fmt["voice_code"] = voice_code
+        current_card_type = card_format.get("card_type", "standard") if card_format else "standard"
+        ai_result, failed_words = process_ai_in_batches(
+            words_for_auto_ai,
+            progress_callback=update_ai_progress,
+            card_format=_fmt,
+        )
+
+        st.session_state["_builtin_ai_failed_words"] = failed_words or []
+
+        # Fix 3: Report failed words
+        if failed_words:
+            st.warning(
+                f"⚠️ {len(failed_words)} 个词生成失败，已跳过："
+                f"{', '.join(failed_words[:20])}"
+                + ("..." if len(failed_words) > 20 else "")
+            )
+
+        if ai_result:
+            card_text.markdown("**制卡进度**：正在解析 AI 结果...")
+            parsed_data = parse_anki_data(ai_result, expected_card_type=current_card_type)
+
+            if parsed_data:
+                card_bar.progress(1.0)
+                req = len(words_for_auto_ai)
+                got = len(parsed_data)
+                count_msg = f"共 {got} 张" + (f"（请求 {req} 词）" if got != req else "")
+                card_text.markdown(f"**制卡进度**：✅ 完成（{count_msg}）")
+                audio_text.markdown("**音频进度**：进行中...")
+
+                # Fix 4: Checkpoint — save raw AI text in case packaging fails
+                st.session_state["_builtin_ai_partial_result"] = ai_result
+
+                # Fix 5: Save cards; append if continuing a batch
+                if auto_generate:
+                    existing = st.session_state.get("_builtin_parsed_cards") or []
+                    st.session_state["_builtin_parsed_cards"] = existing + parsed_data
+                    st.session_state.pop("card_editor", None)
+                else:
+                    st.session_state["_builtin_parsed_cards"] = parsed_data
+
+                edited_data = st.session_state["_builtin_parsed_cards"]
+
+                def update_pkg_progress(ratio: float, text: str) -> None:
+                    audio_bar.progress(ratio)
+                    audio_text.markdown(f"**音频进度**：{text}")
+
+                try:
+                    current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
+                    file_path, audio_failed, failed_phrases = generate_anki_package(
+                        edited_data,
+                        current_deck_name,
+                        card_type=current_card_type,
+                        enable_tts=enable_audio,
+                        tts_voice=voice_code,
+                        enable_example_tts=enable_example_audio,
+                        progress_callback=update_pkg_progress,
+                    )
+                    set_anki_pkg(file_path, current_deck_name)
+                    st.session_state["anki_cards_cache"] = edited_data
+                    st.session_state["_builtin_card_type"] = current_card_type
+                    st.session_state["_builtin_audio_failed_count"] = audio_failed
+                    st.session_state["_builtin_audio_failed_phrases"] = failed_phrases or []
+                    audio_bar.progress(1.0)
+                    suffix = f"（{audio_failed} 条失败，可点击下方重试）" if audio_failed else ""
+                    audio_text.markdown(f"**音频进度**：✅ 完成{suffix}")
+                    req = len(words_for_auto_ai)
+                    got = len(edited_data)
+                    st.info(f"✅ 解析完成，共 {got} 张卡片。" + (f"（请求 {req} 词，{req - got} 词未解析成功）" if got < req else ""))
+                    st.balloons()
+                    run_gc()
+                except Exception as e:
+                    audio_text.markdown("**音频进度**：❌ 生成失败")
+                    ErrorHandler.handle(e, "生成 .apkg 出错")
+            else:
+                card_text.markdown("**制卡进度**：❌ 解析失败")
+                audio_text.markdown("**音频进度**：未开始")
+                st.error("解析失败，AI 返回内容为空或格式错误。")
+        else:
+            card_text.markdown("**制卡进度**：❌ AI 生成失败")
+            audio_text.markdown("**音频进度**：未开始")
+            st.error("AI 生成失败，请检查 API Key 或网络连接。")
+
+    # Fix 5: Next batch button — shown whenever cards are in session state
+    if st.session_state.get("_builtin_parsed_cards") and remaining_words > 0:
+        if st.button(
+            f"▶ 下一批（剩余 {remaining_words} 词）",
+            key="btn_gen_next_page",
+            use_container_width=True,
+        ):
+            st.session_state["_builtin_gen_page"] = page + 1
+            st.session_state["_builtin_auto_generate"] = True
+            st.rerun()
+
+    render_anki_download_button(
+        f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
+        button_type="primary",
+        use_container_width=True,
+        key="builtin_download_btn",
+    )
+
+    ai_failed_words = st.session_state.get("_builtin_ai_failed_words", [])
+    if ai_failed_words and st.session_state.get("_builtin_parsed_cards"):
+        st.warning(
+            f"⚠️ 仍有 {len(ai_failed_words)} 个词未完成制卡："
+            f"{', '.join(ai_failed_words[:20])}"
+            + ("..." if len(ai_failed_words) > 20 else "")
+        )
+        if st.button("🔄 重试失败词制卡", key="btn_retry_failed_words_builtin", use_container_width=True):
+            batch_allowed, batch_msg = check_batch_limit()
+            if not batch_allowed:
+                st.warning(batch_msg)
+            else:
                 record_batch()
 
-                progress_title = st.empty()
-                card_text = st.empty()
-                card_bar = st.progress(0.0)
-                audio_text = st.empty()
-                audio_bar = st.progress(0.0)
-
-                total_words = len(words_for_auto_ai)
-                batch_size = constants.AI_BATCH_SIZE
-                first_end = min(batch_size, total_words)
-                progress_title.markdown("#### ⏳ 内置 AI 制卡进度")
-                card_text.markdown(f"**制卡进度**：第 1 组（1–{first_end}/{total_words}）AI 生成中...")
-                audio_text.markdown("**音频进度**：等待制卡完成...")
-
-                def update_ai_progress(current: int, total: int) -> None:
-                    ratio = current / total if total > 0 else 0.0
-                    card_bar.progress(min(0.9, ratio * 0.9))
-                    batch_idx = (current + batch_size - 1) // batch_size
-                    start = (batch_idx - 1) * batch_size + 1
-                    end = min(batch_idx * batch_size, total)
-                    card_text.markdown(f"**制卡进度**：第 {batch_idx} 组（{start}–{end}/{total}）AI 生成中...")
-
-                ai_result = process_ai_in_batches(
-                    words_for_auto_ai,
-                    progress_callback=update_ai_progress,
-                    card_format=shared_card_format,
+                _fmt = dict(card_format) if card_format else {}
+                _fmt["voice_code"] = voice_code
+                current_card_type = st.session_state.get("_builtin_card_type") or (
+                    card_format.get("card_type", "standard") if card_format else "standard"
                 )
+                with st.spinner(f"⏳ 重试 {len(ai_failed_words)} 个失败词..."):
+                    try:
+                        retry_result, retry_failed_words = process_ai_in_batches(
+                            ai_failed_words,
+                            card_format=_fmt,
+                        )
+                        retry_parsed = (
+                            parse_anki_data(retry_result, expected_card_type=current_card_type)
+                            if retry_result else []
+                        )
 
-                if ai_result:
-                    card_text.markdown("**制卡进度**：正在解析 AI 结果...")
-                    parsed_data = parse_anki_data(ai_result)
+                        existing_cards = st.session_state.get("_builtin_parsed_cards") or []
+                        seen_words = {str(c.get("w", "")).strip().lower() for c in existing_cards if c.get("w")}
+                        added_cards = []
+                        for card in retry_parsed:
+                            card_word = str(card.get("w", "")).strip().lower()
+                            if not card_word or card_word in seen_words:
+                                continue
+                            seen_words.add(card_word)
+                            added_cards.append(card)
 
-                    if parsed_data:
-                        try:
-                            card_bar.progress(1.0)
-                            card_text.markdown(f"**制卡进度**：✅ 完成（共 {len(parsed_data)} 张）")
-                            audio_text.markdown("**音频进度**：进行中...")
-                            audio_bar.progress(0.0)
-                            deck_name = f"Vocab_{get_beijing_time_str()}"
+                        merged_cards = existing_cards + added_cards
+                        st.session_state["_builtin_parsed_cards"] = merged_cards
+                        st.session_state.pop("card_editor", None)
 
-                            def update_pkg_progress(ratio: float, text: str) -> None:
-                                audio_bar.progress(ratio)
-                                audio_text.markdown(f"**音频进度**：{text}")
+                        unresolved_after_parse = []
+                        if current_card_type in ("standard", "cloze", "audio"):
+                            parsed_heads = {str(c.get("w", "")).strip().lower() for c in retry_parsed if c.get("w")}
+                            unresolved_after_parse = [
+                                w for w in ai_failed_words
+                                if w.strip().lower() not in parsed_heads
+                            ]
+                        remaining_failed = list(dict.fromkeys((retry_failed_words or []) + unresolved_after_parse))
+                        st.session_state["_builtin_ai_failed_words"] = remaining_failed
 
-                            file_path = generate_anki_package(
-                                parsed_data,
-                                deck_name,
-                                enable_tts=enable_audio_auto,
-                                tts_voice=selected_voice_code,
-                                progress_callback=update_pkg_progress
+                        if added_cards:
+                            current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
+                            new_file, audio_failed, failed_phrases = generate_anki_package(
+                                merged_cards,
+                                current_deck_name,
+                                card_type=current_card_type,
+                                enable_tts=enable_audio,
+                                tts_voice=voice_code,
+                                enable_example_tts=enable_example_audio,
                             )
+                            set_anki_pkg(new_file, current_deck_name)
+                            st.session_state["anki_cards_cache"] = merged_cards
+                            st.session_state["_builtin_card_type"] = current_card_type
+                            st.session_state["_builtin_audio_failed_count"] = audio_failed
+                            st.session_state["_builtin_audio_failed_phrases"] = failed_phrases or []
 
-                            set_anki_pkg(file_path, deck_name)
+                        if added_cards:
+                            st.success(f"✅ 重试补全 {len(added_cards)} 张卡片。")
+                        else:
+                            st.info("本次重试未解析出新卡片。")
+                        if remaining_failed:
+                            st.warning(
+                                f"⚠️ 仍失败 {len(remaining_failed)} 词："
+                                + ", ".join(remaining_failed[:20])
+                                + ("..." if len(remaining_failed) > 20 else "")
+                            )
+                        run_gc()
+                    except Exception as e:
+                        ErrorHandler.handle(e, "重试失败词制卡失败")
+                st.rerun()
 
-                            audio_bar.progress(1.0)
-                            audio_text.markdown("**音频进度**：✅ 完成")
-                            st.balloons()
-                            run_gc()
-                        except Exception as e:
-                            audio_text.markdown("**音频进度**：❌ 失败")
-                            ErrorHandler.handle(e, "生成出错")
-                    else:
-                        card_text.markdown("**制卡进度**：❌ 解析失败")
-                        audio_text.markdown("**音频进度**：未开始")
-                        st.error("解析失败，AI 返回内容为空或格式错误。")
-                else:
-                    card_text.markdown("**制卡进度**：❌ AI 生成失败")
-                    audio_text.markdown("**音频进度**：未开始")
-                    st.error("AI 生成失败，请检查 API Key 或网络连接。")
-        else:
-            st.info("请使用右侧「复制 Prompt」到第三方 AI，格式与上方通用设置一致。")
-
-        render_anki_download_button(
-            f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
-            button_type="primary",
-            use_container_width=True
+    # Audio retry: only re-run TTS for files still missing (cache skips successful ones)
+    audio_failed = st.session_state.get("_builtin_audio_failed_count", 0)
+    failed_phrases = st.session_state.get("_builtin_audio_failed_phrases", [])
+    if audio_failed > 0 and st.session_state.get("_builtin_parsed_cards") and st.session_state.get("anki_pkg_path"):
+        st.warning(
+            f"⚠️ {audio_failed} 条音频生成失败，涉及 {len(failed_phrases)} 个词。"
+            " 点击重试，已成功的音频会直接复用，只补全缺失部分。"
         )
-        st.caption("⚠️ AI 结果请人工复核后再学习。")
+        with st.expander("❓ 音频失败可能原因", expanded=False):
+            st.markdown("""
+- **网络超时**：edge-tts 需联网，网络不稳或超时会导致失败
+- **文本过短**：例句 ≤3 字符可能被 TTS 忽略或生成失败
+- **非 ASCII 括号**：例句含中文括号 `（）` 等，TTS 可能收到错误文本
+- **速率限制**：大批量时服务端可能限流
+- **临时目录**：权限或磁盘空间不足导致写入失败
+- **语音不支持**：极少数字符或语言组合不被所选语音支持
+""")
+        if failed_phrases:
+            st.caption("失败词汇：" + "、".join(failed_phrases[:20]) + (" …" if len(failed_phrases) > 20 else ""))
+        if st.button("🔄 重试失败音频", key="btn_retry_audio_builtin"):
+            cards = st.session_state["_builtin_parsed_cards"]
+            with st.spinner(f"⏳ 重试 {audio_failed} 条音频..."):
+                try:
+                    current_deck_name = st.session_state.get("builtin_deck_name", deck_name)
+                    new_file, new_failed, new_phrases = generate_anki_package(
+                        cards, current_deck_name,
+                        card_type=st.session_state.get("_builtin_card_type", "standard"),
+                        enable_tts=enable_audio, tts_voice=voice_code,
+                        enable_example_tts=enable_example_audio,
+                    )
+                    set_anki_pkg(new_file, current_deck_name)
+                    st.session_state["_builtin_audio_failed_count"] = new_failed
+                    st.session_state["_builtin_audio_failed_phrases"] = new_phrases or []
+                    run_gc()
+                    st.rerun()
+                except Exception as e:
+                    ErrorHandler.handle(e, "重试音频失败")
 
-    with col_copy_hint:
-        if use_builtin_ai == "thirdparty":
-            st.markdown("#### 📌 复制 Prompt（可自定义卡片格式）")
-            st.caption("在下方选择卡片格式后复制 Prompt 到第三方 AI，生成结果粘贴到「Anki 制卡」页解析。")
-        else:
-            st.markdown("#### 第三方 AI Prompt")
-            st.caption("需要大批量或自定义卡片格式时，可切换为「第三方 AI」在下方自定义格式并复制 Prompt。")
+    st.caption("⚠️ AI 结果请人工复核后再学习。")
 
-        with st.expander("📌 复制 Prompt（第三方 AI）", expanded=(use_builtin_ai == "thirdparty")):
-            st.markdown("##### ⚙️ 卡片格式（仅影响下方 Prompt）")
-            col_tp_front, col_tp_def = st.columns(2)
-            with col_tp_front:
-                tp_front = st.radio(
-                    "正面",
-                    options=["word", "phrase"],
-                    format_func=lambda x: "单词" if x == "word" else "短语/词组",
-                    index=0,
-                    horizontal=True,
-                    key="tp_prompt_front",
-                )
-            with col_tp_def:
-                tp_def = st.radio(
-                    "释义",
-                    options=["cn", "en", "both"],
-                    format_func=lambda x: {"cn": "中文", "en": "英文", "both": "中英双语"}[x],
-                    index=0,
-                    horizontal=True,
-                    key="tp_prompt_def",
-                )
-            col_tp_ex, col_tp_ety = st.columns(2)
-            with col_tp_ex:
-                tp_ex = st.radio(
-                    "例句数量",
-                    options=[1, 2, 3],
-                    format_func=lambda x: f"{x} 条",
-                    index=1,
-                    horizontal=True,
-                    key="tp_prompt_ex",
-                )
-            with col_tp_ety:
-                tp_ety = st.checkbox("词根词源词缀", value=False, key="tp_prompt_ety")
-            tp_ex_cn = st.checkbox("例句带中文翻译", value=True, key="tp_prompt_ex_cn")
-            tp_colloquial = st.checkbox("例句用口语", value=examples_colloquial, key="tp_prompt_colloquial", help="例句使用日常口语化表达")
 
-            third_party_card_format: CardFormat = {
-                "front": tp_front,
-                "definition": tp_def,
-                "examples": tp_ex,
-                "examples_with_cn": tp_ex_cn,
-                "etymology": tp_ety,
-                "examples_colloquial": tp_colloquial,
-            }
+def _render_extract_results() -> None:
+    """Render the extracted words results, AI card generation, and third-party prompt."""
+    if not st.session_state.get('gen_words_data'):
+        return
 
-            batch_size_prompt = int(
-                st.number_input("🔢 分组大小 (最大 500)", min_value=1, max_value=500, value=50, step=10, key="batch_size_prompt")
-            )
-            current_batch_words = []
+    data = st.session_state['gen_words_data']
 
-            if words_only:
-                total_w = len(words_only)
-                if total_w <= 500:
-                    st.caption(f"💡 当前共 {total_w} 个单词（≤500），已全部放入一个 Prompt。")
-                    current_batch_words = words_only
-                else:
-                    num_batches = (total_w + batch_size_prompt - 1) // batch_size_prompt
-                    batch_options = [
-                        f"第 {i+1} 组 ({i*batch_size_prompt+1} - {min((i+1)*batch_size_prompt, total_w)})"
-                        for i in range(num_batches)
-                    ]
-                    selected_batch_str = st.selectbox("📂 选择当前分组", batch_options)
-                    sel_idx = batch_options.index(selected_batch_str)
-                    current_batch_words = words_only[
-                        sel_idx*batch_size_prompt:min((sel_idx+1)*batch_size_prompt, total_w)
-                    ]
-            else:
-                st.warning("⚠️ 暂无单词数据，请先提取单词。")
+    _render_extraction_stats(data)
 
-            words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[INSERT YOUR WORD LIST HERE]"
-            strict_prompt_template = build_card_prompt(words_str_for_prompt, third_party_card_format)
-            st.code(strict_prompt_template, language="text")
+    st.markdown("### ✅ 提取成功！")
+
+    words_only = _render_word_editor(data)
+
+    st.markdown("---")
+    st.markdown("### 🤖 AI 生成 Anki 卡片")
+
+    enable_audio, voice_code, enable_example_audio = _render_audio_settings("auto")
+
+    st.markdown("#### 内置 AI 一键制卡")
+    card_type = st.radio(
+        "卡片类型",
+        options=constants.CARD_TYPES,
+        format_func=lambda x: {
+            "standard":    "📖 标准卡（正面单词，反面中英释义+例句）",
+            "cloze":       "📖 阅读卡（正面挖空句，反面单词+释义+例句）",
+            "production":  "✍️ 口语表达卡（正面中文场景，反面英文词块+例句）",
+            "translation": "📝 互译卡（正面中文释义，反面英文单词+音标）",
+            "audio":       "🔊 听音卡（正面音频，反面单词+释义）",
+        }.get(x, x),
+        index=1,
+        horizontal=False,
+        key="builtin_card_type",
+    )
+    _render_builtin_ai_section(
+        words_only, enable_audio, voice_code, enable_example_audio,
+        {"card_type": card_type},
+    )
 
 
 def _do_lookup(query_word: str) -> None:
@@ -943,16 +663,16 @@ def _do_lookup(query_word: str) -> None:
 
 
 def render_quick_lookup() -> None:
-    if "quick_lookup_last_query" not in st.session_state:
-        st.session_state["quick_lookup_last_query"] = ""
-    if "quick_lookup_last_result" not in st.session_state:
-        st.session_state["quick_lookup_last_result"] = None
-    if "quick_lookup_is_loading" not in st.session_state:
-        st.session_state["quick_lookup_is_loading"] = False
-    if "quick_lookup_block_until" not in st.session_state:
-        st.session_state["quick_lookup_block_until"] = 0.0
-    if "quick_lookup_cache_keys" not in st.session_state:
-        st.session_state["quick_lookup_cache_keys"] = []
+    # Guard against sessions that predate DEFAULT_SESSION_STATE centralization.
+    for _k, _v in {
+        "quick_lookup_last_query": "",
+        "quick_lookup_last_result": None,
+        "quick_lookup_is_loading": False,
+        "quick_lookup_block_until": 0.0,
+        "quick_lookup_cache_keys": [],
+    }.items():
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
 
     now_ts = time.time()
     in_cooldown = now_ts < st.session_state["quick_lookup_block_until"]
@@ -963,6 +683,11 @@ def render_quick_lookup() -> None:
         st.session_state["quick_lookup_word"] = pending_word
         st.session_state["_auto_lookup_word"] = pending_word
 
+    # Update input to lemma only (no lookup) - must run before widget creation
+    update_input_only = st.session_state.pop("_quick_lookup_update_input_only", "")
+    if update_input_only:
+        st.session_state["quick_lookup_word"] = update_input_only
+
     # Handle pending clear (must happen before text_input widget is created)
     if st.session_state.pop("_quick_lookup_pending_clear", False):
         st.session_state["quick_lookup_word"] = ""
@@ -972,16 +697,20 @@ def render_quick_lookup() -> None:
 
     auto_word = st.session_state.pop("_auto_lookup_word", "")
     if auto_word and not in_cooldown:
-        _do_lookup(auto_word)
+        lemma = get_lemma_for_word(auto_word)
+        st.session_state["quick_lookup_word"] = lemma
+        _do_lookup(lemma)
 
-    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else "🔍 deepseek"
+    lookup_model_label = get_config().get("openai_model_display", constants.AI_MODEL_DISPLAY)
+    _btn_label = "查询中..." if st.session_state["quick_lookup_is_loading"] else f"🔍 {lookup_model_label}"
     _has_content = bool(st.session_state.get("quick_lookup_word") or st.session_state.get("quick_lookup_last_result"))
 
     with st.form("quick_lookup_form", clear_on_submit=False, border=False):
-        if _has_content:
-            col_word, col_btn, col_clear = st.columns([4, 2, 1.2])
-        else:
-            col_word, col_btn = st.columns([5, 2])
+        # Always render 3 columns so the form structure stays constant across
+        # reruns.  A changing column count (2 vs 3) shifts the submit button's
+        # element ID, causing Streamlit to lose the "clicked" signal and making
+        # the lookup button silently do nothing on the first submission.
+        col_word, col_btn, col_clear = st.columns([4, 2, 1.2])
         with col_word:
             lookup_word = st.text_input(
                 "输入单词或短语",
@@ -997,11 +726,8 @@ def render_quick_lookup() -> None:
                 use_container_width=True,
                 disabled=lookup_disabled
             )
-        if _has_content:
-            with col_clear:
-                clear_submit = st.form_submit_button("清空", use_container_width=True)
-        else:
-            clear_submit = False
+        with col_clear:
+            clear_submit = st.form_submit_button("清空", use_container_width=True, disabled=not _has_content)
         if clear_submit:
             st.session_state["_quick_lookup_pending_clear"] = True
             st.rerun()
@@ -1020,7 +746,10 @@ def render_quick_lookup() -> None:
             elif time.time() < st.session_state["quick_lookup_block_until"]:
                 st.info("⏱️ 请求过于频繁，请稍后再试。")
             else:
-                _do_lookup(query_word)
+                lemma = get_lemma_for_word(query_word)
+                _do_lookup(lemma)
+                st.session_state["_quick_lookup_update_input_only"] = lemma
+                st.rerun()
 
     result = st.session_state.get("quick_lookup_last_result")
     if result and 'error' not in result:
@@ -1066,7 +795,7 @@ if hasattr(st, "fragment"):
     _render_extract_results = st.fragment(_render_extract_results)
 
 if not VOCAB_DICT:
-    st.error("⚠️ 缺失 `coca_cleaned.csv` 词库文件，请检查目录。")
+    st.error("⚠️ 缺失 `ngsl_word_rank.csv` 词库文件，请检查目录。")
 
 with st.expander("使用指南 & 支持格式", expanded=False):
     st.markdown("""
@@ -1079,154 +808,170 @@ with st.expander("使用指南 & 支持格式", expanded=False):
     TXT · PDF · DOCX · EPUB · CSV · XLSX · XLS · DB · SQLite · Anki 导出 (.txt)
     """)
 
-tab_lookup, tab_extract, tab_anki = st.tabs([
+tab_lookup, tab_extract_anki = st.tabs([
     "AI查词",
-    "筛选单词",
-    "anki制卡",
+    "筛选单词&制卡",
 ])
 
 with tab_lookup:
     render_quick_lookup()
 
 # ==========================================
-# Tab 1: Word Extraction
+# Tab 1: Word Extraction（筛选单词）
 # ==========================================
-with tab_extract:
-    mode_paste, mode_url, mode_upload, mode_rank, mode_manual = st.tabs([
-        "文本",
-        "链接",
-        "文件",
+def _render_shared_rank_selection() -> tuple[int, int]:
+    """渲染通用词汇量 rank 选择（文本/链接/文件/词库共用，词表不适用）。返回 (min_rank, max_rank)。"""
+    st.markdown("#### 词汇量 rank 选择（文本 / 链接 / 文件 / 词库 通用）")
+    preset_choices = [f"{label} ({min_r}–{max_r})" for label, min_r, max_r in constants.RANK_PRESETS] + ["自定义"]
+    selected = st.radio(
+        "词汇量区间",
+        preset_choices,
+        key="extract_rank_preset",
+        horizontal=True,
+        format_func=lambda x: x,
+    )
+    if selected != "自定义":
+        for _label, min_r, max_r in constants.RANK_PRESETS:
+            if selected == f"{_label} ({min_r}–{max_r})":
+                st.session_state["extract_min_rank"] = min_r
+                st.session_state["extract_max_rank"] = max_r
+                break
+        min_rank = st.session_state["extract_min_rank"]
+        max_rank = st.session_state["extract_max_rank"]
+    else:
+        col1, col2 = st.columns(2)
+        min_rank = col1.number_input(
+            "忽略前 N 高频词 (Min Rank)", 1, 50000, st.session_state["extract_min_rank"], step=100,
+            key="extract_min_rank"
+        )
+        max_rank = col2.number_input(
+            "忽略后 N 低频词 (Max Rank)", 2000, 50000, st.session_state["extract_max_rank"], step=500,
+            key="extract_max_rank"
+        )
+        if max_rank < min_rank:
+            st.warning("⚠️ Max Rank 小于 Min Rank，已自动交换两者。")
+            min_rank, max_rank = max_rank, min_rank
+            st.session_state["extract_min_rank"] = min_rank
+            st.session_state["extract_max_rank"] = max_rank
+    return min_rank, max_rank
+
+
+with tab_extract_anki:
+    # 通用 rank 区间（文本/链接/文件/词库共用；词库直接制卡不筛 rank）
+    shared_min_rank, shared_max_rank = _render_shared_rank_selection()
+    st.markdown("---")
+
+    mode_input_text, mode_rank, mode_direct = st.tabs([
+        "输入文本",
         "词库",
-        "词表",
+        "直接制卡",
     ])
 
-    with mode_paste:
-        col1, col2 = st.columns(2)
-        current_rank = col1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100)
-        target_rank = col2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
-
-        if target_rank < current_rank:
-            st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
-
-        pasted_text = st.text_area(
-            "粘贴文章文本",
-            height=100,
-            key="paste_key_2_1",
-            placeholder="支持直接粘贴文章内容..."
-        )
-
-        col_gen_p, col_clr_p = st.columns([4, 1])
-        with col_gen_p:
-            btn_paste = st.button("🚀 从文本生成重点词", type="primary", key="btn_mode_2_1", use_container_width=True)
-        with col_clr_p:
-            st.button("清空", key="clr_paste", use_container_width=True,
-                       on_click=lambda: st.session_state.update({"paste_key_2_1": ""}))
-
-        if btn_paste:
-            if target_rank < current_rank:
-                st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
-            elif len(pasted_text) > constants.MAX_PASTE_TEXT_LENGTH:
-                st.error(f"❌ 文本过长（最大约 {constants.MAX_PASTE_TEXT_LENGTH // 1000}K 字符），请缩短后重试。")
-            else:
-                with st.status("🔍 正在加载资源并分析文本...", expanded=True) as status:
-                    start_time = time.time()
-                    raw_text = pasted_text
-
-                    status.write("🧠 正在进行 NLP 词形还原与分级...")
-                    if _analyze_and_set_words(raw_text, current_rank, target_rank):
-                        st.session_state['process_time'] = time.time() - start_time
-                        run_gc()
-                        status.update(label="✅ 分析完成", state="complete", expanded=False)
-                    else:
-                        status.update(label="⚠️ 内容为空或太短", state="error")
-
-    with mode_url:
-        col1, col2 = st.columns(2)
-        current_rank_url = col1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100, key="min_rank_2_2")
-        target_rank_url = col2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500, key="max_rank_2_2")
-
-        if target_rank_url < current_rank_url:
-            st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
-
-        input_url = st.text_input(
-            "🔗 输入文章 URL（自动抓取）",
-            placeholder="https://www.economist.com/...",
-            key="url_input_key_2_2"
-        )
-
-        col_gen_u, col_clr_u = st.columns([4, 1])
-        with col_gen_u:
-            btn_url = st.button("🌐 从链接生成重点词", type="primary", key="btn_mode_2_2", use_container_width=True)
-        with col_clr_u:
-            st.button("清空", key="clr_url", use_container_width=True,
-                       on_click=lambda: st.session_state.update({"url_input_key_2_2": ""}))
-
-        if btn_url:
-            if target_rank_url < current_rank_url:
-                st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
-            elif not input_url.strip():
-                st.warning("⚠️ 请输入有效链接。")
-            elif len(input_url) > constants.MAX_URL_LENGTH:
-                st.error(f"❌ URL 过长（最大 {constants.MAX_URL_LENGTH} 字符）。")
-            elif not re.match(r'^https?://', input_url.strip()):
-                st.error("❌ 请输入以 http:// 或 https:// 开头的有效链接。")
-            else:
-                url_allowed, url_msg = check_url_limit()
-                if not url_allowed:
-                    st.warning(url_msg)
+    with mode_input_text:
+        sub_paste, sub_upload, sub_url = st.tabs(["粘贴文本", "上传文件", "链接"])
+        with sub_paste:
+            pasted_text = st.text_area(
+                "粘贴文章文本",
+                height=100,
+                key="paste_key_2_1",
+                placeholder="支持直接粘贴文章内容..."
+            )
+            col_gen_p, col_clr_p = st.columns([4, 1])
+            with col_gen_p:
+                btn_paste = st.button("🚀 从文本生成重点词", type="primary", key="btn_mode_2_1", use_container_width=True)
+            with col_clr_p:
+                st.button("清空", key="clr_paste", use_container_width=True,
+                          on_click=lambda: st.session_state.update({"paste_key_2_1": ""}))
+            if btn_paste:
+                if shared_max_rank < shared_min_rank:
+                    st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
+                elif len(pasted_text) > constants.MAX_PASTE_TEXT_LENGTH:
+                    st.error(f"❌ 文本过长（最大约 {constants.MAX_PASTE_TEXT_LENGTH // 1000}K 字符），请缩短后重试。")
                 else:
-                    record_url()
-                    with st.status("🌐 正在抓取并分析网页文本...", expanded=True) as status:
+                    with st.status("🔍 正在加载资源并分析文本...", expanded=True) as status:
                         start_time = time.time()
-                        status.write(f"正在抓取：{input_url}")
-                        raw_text = extract_text_from_url(input_url)
-                        if _analyze_and_set_words(raw_text, current_rank_url, target_rank_url):
+                        raw_text = pasted_text
+                        status.write("🧠 正在进行 NLP 词形还原与分级...")
+                        if _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
+                            st.session_state['process_time'] = time.time() - start_time
+                            run_gc()
+                            status.update(label="✅ 分析完成", state="complete", expanded=False)
+                        else:
+                            status.update(label="⚠️ 内容为空或太短", state="error")
+        with sub_upload:
+            uploaded_file = st.file_uploader(
+                "上传文件（TXT/PDF/DOCX/EPUB/CSV/Excel/DB）",
+                type=['txt', 'pdf', 'docx', 'epub', 'csv', 'xlsx', 'xls', 'db', 'sqlite'],
+                key="upload_2_3",
+            )
+            if uploaded_file and is_upload_too_large(uploaded_file):
+                st.error(f"❌ 文件过大，已限制为 {constants.MAX_UPLOAD_MB}MB。请缩小文件后重试。")
+                uploaded_file = None
+            if st.button("📁 从文件生成重点词", type="primary", key="btn_mode_2_3"):
+                if shared_max_rank < shared_min_rank:
+                    st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
+                elif uploaded_file is None:
+                    st.warning("⚠️ 请先上传文件。")
+                else:
+                    with st.status("📄 正在解析文件并提取重点词...", expanded=True) as status:
+                        start_time = time.time()
+                        raw_text = extract_text_from_file(uploaded_file)
+                        if _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
                             st.session_state['process_time'] = time.time() - start_time
                             run_gc()
                             status.update(label="✅ 生成完成", state="complete", expanded=False)
                         else:
-                            status.update(label="⚠️ 抓取内容为空或过短", state="error")
-
-    with mode_upload:
-        col1, col2 = st.columns(2)
-        current_rank_upload = col1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100, key="min_rank_2_3")
-        target_rank_upload = col2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500, key="max_rank_2_3")
-
-        if target_rank_upload < current_rank_upload:
-            st.warning("⚠️ Max Rank 必须大于等于 Min Rank")
-
-        uploaded_file = st.file_uploader(
-            "上传文件（TXT/PDF/DOCX/EPUB/CSV/Excel/DB）",
-            type=['txt', 'pdf', 'docx', 'epub', 'csv', 'xlsx', 'xls', 'db', 'sqlite'],
-            key="upload_2_3",
-        )
-        if uploaded_file and is_upload_too_large(uploaded_file):
-            st.error(f"❌ 文件过大，已限制为 {constants.MAX_UPLOAD_MB}MB。请缩小文件后重试。")
-            uploaded_file = None
-
-        if st.button("📁 从文件生成重点词", type="primary", key="btn_mode_2_3"):
-            if target_rank_upload < current_rank_upload:
-                st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
-            elif uploaded_file is None:
-                st.warning("⚠️ 请先上传文件。")
-            else:
-                with st.status("📄 正在解析文件并提取重点词...", expanded=True) as status:
-                    start_time = time.time()
-                    raw_text = extract_text_from_file(uploaded_file)
-                    if _analyze_and_set_words(raw_text, current_rank_upload, target_rank_upload):
-                        st.session_state['process_time'] = time.time() - start_time
-                        run_gc()
-                        status.update(label="✅ 生成完成", state="complete", expanded=False)
+                            status.update(label="⚠️ 文件内容为空或过短", state="error")
+        with sub_url:
+            input_url = st.text_input(
+                "🔗 输入文章 URL（自动抓取）",
+                placeholder="https://www.economist.com/...",
+                key="url_input_key_2_2"
+            )
+            col_gen_u, col_clr_u = st.columns([4, 1])
+            with col_gen_u:
+                btn_url = st.button("🌐 从链接生成重点词", type="primary", key="btn_mode_2_2", use_container_width=True)
+            with col_clr_u:
+                st.button("清空", key="clr_url", use_container_width=True,
+                          on_click=lambda: st.session_state.update({"url_input_key_2_2": ""}))
+            if btn_url:
+                if shared_max_rank < shared_min_rank:
+                    st.error("❌ Max Rank 必须大于等于 Min Rank，请在上方修正后重试。")
+                elif not input_url.strip():
+                    st.warning("⚠️ 请输入有效链接。")
+                elif len(input_url) > constants.MAX_URL_LENGTH:
+                    st.error(f"❌ URL 过长（最大 {constants.MAX_URL_LENGTH} 字符）。")
+                elif not re.match(r'^https?://', input_url.strip()):
+                    st.error("❌ 请输入以 http:// 或 https:// 开头的有效链接。")
+                else:
+                    url_allowed, url_msg = check_url_limit()
+                    if not url_allowed:
+                        st.warning(url_msg)
                     else:
-                        status.update(label="⚠️ 文件内容为空或过短", state="error")
+                        record_url()
+                        with st.status("🌐 正在抓取并分析网页文本...", expanded=True) as status:
+                            start_time = time.time()
+                            status.write(f"正在抓取：{input_url}")
+                            raw_text = _cached_extract_url(input_url)
+                            if raw_text.startswith("Error:"):
+                                st.error(f"❌ {raw_text}")
+                                status.update(label="❌ 抓取失败", state="error", expanded=False)
+                            elif _analyze_and_set_words(raw_text, shared_min_rank, shared_max_rank):
+                                st.session_state['process_time'] = time.time() - start_time
+                                run_gc()
+                                status.update(label="✅ 生成完成", state="complete", expanded=False)
+                            else:
+                                status.update(label="⚠️ 抓取内容为空或过短", state="error")
 
-    with mode_manual:
-        st.markdown("#### 直接粘贴整理好的词表（不做 rank 筛选）")
+    with mode_direct:
+        st.markdown("#### 直接粘贴词表（不做 rank 筛选）")
+        st.caption("💡 词表模式：无需筛选，直接生成。")
+        st.caption("支持任意格式：可直接粘贴文章、列表、带序号或符号的文本，将自动提取其中所有英文单词。")
         manual_words_text = st.text_area(
-            "✍️ 单词列表（每行一个或逗号分隔）",
+            "✍️ 粘贴任意包含英文单词的文本",
             height=220,
             key="manual_words_2_5",
-            placeholder="altruism\nhectic\nserendipity",
+            placeholder="如：1. altruism 2. hectic  或 直接粘贴整段英文…",
         )
 
         col_gen_m, col_clr_m = st.columns([4, 1])
@@ -1239,37 +984,33 @@ with tab_extract:
         if btn_gen_manual:
             with st.spinner("正在解析列表..."):
                 if manual_words_text.strip():
-                    raw_items = [w.strip() for w in re.split(r'[,\n\t]+', manual_words_text) if w.strip()]
-                    valid_words = []
-                    invalid_items = []
-                    for item in raw_items:
-                        if re.match(r"^[a-zA-Z]+(?:[-'][a-zA-Z]+)*$", item):
-                            valid_words.append(item)
-                        else:
-                            invalid_items.append(item)
-
-                    if invalid_items:
-                        preview = ", ".join(invalid_items[:10])
-                        suffix = f" 等共 {len(invalid_items)} 项" if len(invalid_items) > 10 else ""
-                        st.warning(f"⚠️ 已跳过格式不正确的条目：{preview}{suffix}")
+                    # 弱化格式要求：从整段文本中提取所有英文单词，自动去除符号、空格等
+                    valid_words = re.findall(r"[a-zA-Z]+(?:[-'][a-zA-Z]+)*", manual_words_text)
+                    valid_words = [
+                        w for w in valid_words
+                        if constants.MIN_WORD_LENGTH <= len(w) <= constants.MAX_WORD_LENGTH
+                    ]
 
                     if not valid_words:
-                        st.error("❌ 没有识别到有效的英文单词，请检查输入格式（每行一个单词或逗号分隔）。")
+                        st.error("❌ 没有识别到有效的英文单词（2–25 字母），请检查输入内容。")
                     else:
-                        unique_words = []
-                        seen = set()
+                        seen_lemmas = set()
+                        data_list = []
                         for word in valid_words:
-                            w_lower = word.lower().strip()
-                            if not w_lower or w_lower in seen:
+                            w = word.strip()
+                            if not w:
                                 continue
-                            seen.add(w_lower)
-                            unique_words.append(word)
+                            lemma = get_lemma_for_word(w)
+                            if lemma in seen_lemmas:
+                                continue
+                            seen_lemmas.add(lemma)
+                            data_list.append((lemma, resources.get_rank_for_word(lemma)))
 
                         raw_count = len(valid_words)
-                        data_list = [(w, resources.get_rank_for_word(w)) for w in unique_words]
                         set_generated_words_state(data_list, raw_count, None)
-                        duplicated = raw_count - len(unique_words)
-                        msg = f"✅ 已加载 {len(unique_words)} 个单词（不筛 rank）"
+                        unique_count = len(data_list)
+                        duplicated = raw_count - unique_count
+                        msg = f"✅ 已加载 {unique_count} 个单词（不筛 rank，已统一为 lemma）"
                         if duplicated > 0:
                             msg += f"（去重 {duplicated} 个）"
                         st.toast(msg, icon="🎉")
@@ -1277,155 +1018,59 @@ with tab_extract:
                     st.warning("⚠️ 内容为空。")
 
     with mode_rank:
+        st.caption("使用上方「词汇量 rank 选择」的区间；顺序生成从区间起点起取，随机抽取在区间内随机取。")
         gen_type = st.radio("生成模式", ["🔢 顺序生成", "🔀 随机抽取"], horizontal=True)
 
         if "顺序生成" in gen_type:
+            # 当 rank 选择变化时，起始排名跟随 shared_min_rank 更新
+            if st.session_state.get("rank_start_sync_min") != shared_min_rank:
+                st.session_state["rank_start_2_4"] = shared_min_rank
+                st.session_state["rank_start_sync_min"] = shared_min_rank
             col_a, col_b = st.columns(2)
-            start_rank = col_a.number_input("起始排名", 1, 20000, 8000, step=100)
+            start_rank = col_a.number_input("起始排名", 1, 50000, shared_min_rank, step=100, key="rank_start_2_4")
             count = col_b.number_input("数量", 10, 5000, 10, step=10)
 
             if st.button("🚀 生成列表"):
                 with st.spinner("正在提取..."):
                     if FULL_DF is not None:
-                        rank_col = next(c for c in FULL_DF.columns if 'rank' in c)
-                        word_col = next(c for c in FULL_DF.columns if 'word' in c)
-                        subset = FULL_DF[FULL_DF[rank_col] >= start_rank].sort_values(rank_col).head(count)
-                        set_generated_words_state(
-                            list(zip(subset[word_col], subset[rank_col])),
-                            0,
-                            None
-                        )
-        else:
-            col_min, col_max, col_cnt = st.columns([1, 1, 1])
-            min_rank = col_min.number_input("最小排名", 1, 20000, 12000, step=100)
-            max_rank = col_max.number_input("最大排名", 1, 25000, 15000, step=100)
-            random_count = col_cnt.number_input("抽取数量", 10, 5000, 10, step=10)
-
-            if max_rank < min_rank:
-                st.warning("⚠️ 最大排名必须大于等于最小排名")
-
-            if st.button("🎲 随机抽取"):
-                if max_rank < min_rank:
-                    st.error("❌ 最大排名必须大于等于最小排名，请修正后重试。")
-                else:
-                    with st.spinner("正在抽取..."):
-                        if FULL_DF is not None:
-                            rank_col = next(c for c in FULL_DF.columns if 'rank' in c)
-                            word_col = next(c for c in FULL_DF.columns if 'word' in c)
-                            pool = FULL_DF[(FULL_DF[rank_col] >= min_rank) & (FULL_DF[rank_col] <= max_rank)]
-                            if len(pool) < random_count:
-                                st.warning(f"⚠️ 该范围只有 {len(pool)} 个单词，已全部选中")
-                            sample = pool.sample(n=min(random_count, len(pool)))
+                        rank_col = next((c for c in FULL_DF.columns if 'rank' in c), None)
+                        word_col = next((c for c in FULL_DF.columns if 'word' in c), None)
+                        if rank_col is None or word_col is None:
+                            st.error("❌ 词库CSV格式异常：缺少 rank 或 word 列")
+                        else:
+                            subset = FULL_DF[FULL_DF[rank_col] >= start_rank].sort_values(rank_col).head(count)
                             set_generated_words_state(
-                                list(zip(sample[word_col], sample[rank_col])),
+                                list(zip(subset[word_col], subset[rank_col])),
                                 0,
                                 None
                             )
+        else:
+            random_count = st.number_input("抽取数量", 10, 5000, 10, step=10, key="rank_random_count_2_4")
+            st.caption(f"当前区间：{shared_min_rank} – {shared_max_rank}（在上方修改）")
+
+            if st.button("🎲 随机抽取"):
+                if shared_max_rank < shared_min_rank:
+                    st.error("❌ 最大排名必须大于等于最小排名，请在上方修正后重试。")
+                else:
+                    with st.spinner("正在抽取..."):
+                        if FULL_DF is not None:
+                            rank_col = next((c for c in FULL_DF.columns if 'rank' in c), None)
+                            word_col = next((c for c in FULL_DF.columns if 'word' in c), None)
+                            if rank_col is None or word_col is None:
+                                st.error("❌ 词库CSV格式异常：缺少 rank 或 word 列")
+                            else:
+                                pool = FULL_DF[(FULL_DF[rank_col] >= shared_min_rank) & (FULL_DF[rank_col] <= shared_max_rank)]
+                                if len(pool) < random_count:
+                                    st.warning(f"⚠️ 该范围只有 {len(pool)} 个单词，已全部选中")
+                                sample = pool.sample(n=min(random_count, len(pool)))
+                                set_generated_words_state(
+                                    list(zip(sample[word_col], sample[rank_col])),
+                                    0,
+                                    None
+                                )
 
     # Display results (shared across all modes)
     _render_extract_results()
-
-# ==========================================
-# Tab 2: Manual Anki Card Creation
-# ==========================================
-with tab_anki:
-    st.markdown("### 📦 手动制作 Anki 牌组")
-
-    if 'anki_cards_cache' not in st.session_state:
-        st.session_state['anki_cards_cache'] = None
-
-    def reset_anki_state() -> None:
-        st.session_state['anki_cards_cache'] = None
-        if st.session_state.get('anki_pkg_path'):
-            try:
-                if os.path.exists(st.session_state['anki_pkg_path']):
-                    os.remove(st.session_state['anki_pkg_path'])
-            except OSError as e:
-                logger.warning("Could not remove temp anki package: %s", e)
-        st.session_state['anki_pkg_path'] = ""
-        st.session_state['anki_pkg_name'] = ""
-        st.session_state['anki_input_text'] = ""
-
-    beijing_time_str = get_beijing_time_str()
-    deck_name = st.text_input("🏷️ 牌组名称", f"Vocab_{beijing_time_str}")
-
-    ai_response = st.text_area(
-        "粘贴 AI 返回内容",
-        height=300,
-        key="anki_input_text",
-        placeholder='hectic ||| 忙乱的 ||| She has a hectic schedule today.',
-    )
-
-    manual_voice_label = st.radio(
-        "🎙️ 发音人",
-        options=list(constants.VOICE_MAP.keys()),
-        index=0,
-        horizontal=True,
-        key="sel_voice_manual",
-    )
-    manual_voice_code = constants.VOICE_MAP[manual_voice_label]
-
-    enable_audio = st.checkbox("启用语音", value=True, key="chk_audio_manual")
-
-    col_btn1, col_btn2 = st.columns([1, 4])
-    with col_btn1:
-        start_gen = st.button("🚀 生成卡片", type="primary", use_container_width=True)
-    with col_btn2:
-        st.button("🗑️ 清空重置", type="secondary", on_click=reset_anki_state, key="btn_clear_anki")
-
-    if start_gen:
-        if not ai_response.strip():
-            st.warning("⚠️ 输入框为空。")
-        else:
-            progress_container = st.container()
-            with progress_container:
-                progress_bar_manual = st.progress(0)
-                status_manual = st.empty()
-
-            def update_progress_manual(ratio: float, text: str) -> None:
-                progress_bar_manual.progress(ratio)
-                status_manual.text(text)
-
-            with st.spinner("⏳ 正在解析并生成..."):
-                parsed_data = parse_anki_data(ai_response)
-                if parsed_data:
-                    st.session_state['anki_cards_cache'] = parsed_data
-                    try:
-                        file_path = generate_anki_package(
-                            parsed_data,
-                            deck_name,
-                            enable_tts=enable_audio,
-                            tts_voice=manual_voice_code,
-                            progress_callback=update_progress_manual
-                        )
-
-                        set_anki_pkg(file_path, deck_name)
-
-                        status_manual.markdown(f"✅ **生成完毕！共制作 {len(parsed_data)} 张卡片**")
-                        st.balloons()
-                        st.toast("任务完成！", icon="🎉")
-                        run_gc()
-                    except Exception as e:
-                        ErrorHandler.handle(e, "生成文件出错")
-                else:
-                    st.error("❌ 解析失败，请检查输入格式。")
-
-    if st.session_state['anki_cards_cache']:
-        cards = st.session_state['anki_cards_cache']
-        with st.expander(f"👀 预览卡片 (前 {constants.MAX_PREVIEW_CARDS} 张)", expanded=False):
-            df_view = pd.DataFrame(cards)
-            display_cols = ['w', 'm', 'e', 'r']
-            df_view = df_view[[c for c in display_cols if c in df_view.columns]]
-            col_labels = ["正面", "中文/英文释义", "例句"]
-            if len(df_view.columns) > 3:
-                col_labels.append("词源")
-            df_view.columns = col_labels[:len(df_view.columns)]
-            st.dataframe(df_view.head(constants.MAX_PREVIEW_CARDS), use_container_width=True, hide_index=True)
-
-        render_anki_download_button(
-            f"📥 下载 {st.session_state.get('anki_pkg_name', 'deck.apkg')}",
-            button_type="primary"
-        )
 
 st.markdown(
     '<div class="app-footer">Vocab Flow Ultra &nbsp;·&nbsp; Built for learners</div>',
