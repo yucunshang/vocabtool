@@ -2,7 +2,7 @@
 
 import pytest
 
-from anki_parse import parse_anki_data
+from anki_parse import build_first_letter_hint, parse_anki_data
 
 
 def test_parse_anki_data_empty():
@@ -18,6 +18,7 @@ def test_parse_anki_data_single_line():
     assert result[0]["m"] == "你好"
     assert result[0]["e"] == "Hello world."
     assert result[0]["r"] == "词源"
+    assert result[0]["hint"] == "h____"
 
 
 def test_parse_anki_data_two_fields():
@@ -67,8 +68,30 @@ def test_parse_anki_data_card_shape():
     result = parse_anki_data(raw)
     assert len(result) == 1
     card = result[0]
-    assert set(card.keys()) == {"w", "m", "e", "r"}
+    assert set(card.keys()) == {"w", "pos", "cn", "en", "m", "e", "ec", "hint", "r"}
     assert card["w"] == "phrase"
     assert card["m"] == "def"
     assert card["e"] == "example"
     assert card["r"] == "etymology"
+
+
+def test_parse_anki_data_six_field_template():
+    raw = (
+        "hectic ||| adjective ||| 忙乱的；忙碌的 ||| full of hurried activity "
+        "||| She had a hectic schedule. ||| 她的日程很忙乱。"
+    )
+    result = parse_anki_data(raw)
+    assert len(result) == 1
+    card = result[0]
+    assert card["w"] == "hectic"
+    assert card["pos"] == "adjective"
+    assert card["cn"] == "忙乱的；忙碌的"
+    assert card["en"] == "full of hurried activity"
+    assert card["e"] == "She had a hectic schedule."
+    assert card["ec"] == "她的日程很忙乱。"
+    assert card["hint"] == "h_____"
+    assert "full of hurried activity" in card["m"]
+
+
+def test_build_first_letter_hint_phrase():
+    assert build_first_letter_hint("take off") == "t___ o__"

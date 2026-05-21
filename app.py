@@ -14,7 +14,7 @@ import streamlit as st
 
 import constants
 import resources
-from ai import get_word_quick_definition, process_ai_in_batches
+from ai import build_anki_prompt, get_word_quick_definition, process_ai_in_batches
 from anki_package import cleanup_old_apkg_files, generate_anki_package
 from anki_parse import parse_anki_data
 from config import get_config
@@ -217,11 +217,27 @@ def render_anki_download_button(
         st.error("❌ 下载文件读取失败，请重新生成。")
 
 
+def select_card_template(widget_key: str) -> str:
+    """Render a card-template selector and return its template key."""
+    label_to_key = {
+        template["label"]: template_key
+        for template_key, template in constants.CARD_TEMPLATES.items()
+    }
+    selected_label = st.selectbox(
+        "🧩 卡片模板",
+        options=list(label_to_key.keys()),
+        key=widget_key,
+    )
+    selected_key = label_to_key[selected_label]
+    st.caption(constants.CARD_TEMPLATES[selected_key]["description"])
+    return selected_key
+
+
 # ==========================================
 # UI Components
 # ==========================================
 st.title("⚡️ Vocab Flow Ultra · Stable")
-st.caption("文本 → 词表 → Anki 牌组，一步到位。支持 AI 释义、词源与语音。")
+st.caption("文本 → 词表 → Anki 牌组，一步到位。支持 AI 释义、多模板制卡与语音。")
 
 
 def render_quick_lookup() -> None:
@@ -606,6 +622,7 @@ with tab_extract:
 
         with col_ai_btn:
             ai_model_label = get_config()["openai_model"]
+            auto_card_template = select_card_template("sel_card_template_auto")
 
             selected_voice_label = st.radio(
                 "🎙️ 发音人",
@@ -633,7 +650,11 @@ with tab_extract:
                     status_text.text(f"正在处理 ({current}/{total})")
 
                 status_text.text("🧠 正在请求 AI 生成...")
-                ai_result = process_ai_in_batches(words_only, progress_callback=update_ai_progress)
+                ai_result = process_ai_in_batches(
+                    words_only,
+                    progress_callback=update_ai_progress,
+                    card_template=auto_card_template,
+                )
 
                 if ai_result:
                     status_text.text("✅ AI 生成完成，正在解析...")
@@ -653,7 +674,8 @@ with tab_extract:
                                 deck_name,
                                 enable_tts=enable_audio_auto,
                                 tts_voice=selected_voice_code,
-                                progress_callback=update_pkg_progress
+                                progress_callback=update_pkg_progress,
+                                card_template=auto_card_template,
                             )
 
                             set_anki_pkg(file_path, deck_name)
@@ -699,51 +721,7 @@ with tab_extract:
             else:
                 st.warning("⚠️ 暂无单词数据，请先提取单词。")
 
-            words_str_for_prompt = ", ".join(current_batch_words) if current_batch_words else "[INSERT YOUR WORD LIST HERE]"
-
-            strict_prompt_template = f"""# Role
-You are an expert English Lexicographer and Anki Card Designer. Your goal is to convert a list of target words into high-quality, import-ready Anki flashcards focusing on **natural collocations** (word chunks).
-Make sure to process everything in one go, without missing anything.
-
-# Input Data
-{words_str_for_prompt}
-
-# Output Format Guidelines
-1. **Output Container**: Strictly inside a single ```text code block.
-2. **Layout**: One entry per line.
-3. **Separator**: Use `|||` as the delimiter.
-4. **Target Structure**:
-   `Natural Phrase/Collocation` ||| `Concise Definition of the Phrase` ||| `Short Example Sentence` ||| `Etymology breakdown (Simplified Chinese)`
-
-# Field Constraints (Strict)
-1. **Field 1: Phrase (CRITICAL)**
-   - DO NOT output the single target word.
-   - You MUST generate a high-frequency **collocation** or **short phrase** containing the target word.
-   - Example: If input is "rain", output "heavy rain" or "torrential rain".
-   
-2. **Field 2: Definition (English)**
-   - Define the *phrase*, not just the isolated word. Keep it concise (B2-C1 level English).
-
-3. **Field 3: Example**
-   - A short, authentic sentence containing the phrase.
-
-4. **Field 4: Roots/Etymology (Simplified Chinese)**
-   - Format: `prefix- (meaning) + root (meaning) + -suffix (meaning)`.
-   - If no classical roots exist, explain the origin briefly in Chinese.
-   - Use Simplified Chinese for meanings.
-
-# Valid Example (Follow this logic strictly)
-Input: altruism
-Output:
-motivated by altruism ||| acting out of selfless concern for the well-being of others ||| His donation was motivated by altruism, not a desire for fame. ||| alter (其他) + -ism (主义/行为)
-
-Input: hectic
-Output:
-a hectic schedule ||| a timeline full of frantic activity and very busy ||| She has a hectic schedule with meetings all day. ||| hect- (持续的/习惯性的 - 来自希腊语hektikos) + -ic (形容词后缀)
-
-# Task
-Process the provided input list strictly adhering to the format above."""
-            st.code(strict_prompt_template, language="text")
+            st.code(build_anki_prompt(current_batch_words, auto_card_template), language="text")
 
 # ==========================================
 # Tab 2: Manual Anki Card Creation
@@ -771,11 +749,24 @@ with tab_anki:
         beijing_time_str = get_beijing_time_str()
         deck_name = st.text_input("🏷️ 牌组名称", f"Vocab_{beijing_time_str}")
 
+    manual_card_template = select_card_template("sel_card_template_manual")
+
+    with st.expander("📌 复制制卡 Prompt (第三方 AI 用)", expanded=False):
+        prompt_words_text = st.text_area(
+            "单词列表",
+            height=160,
+            key="manual_prompt_words",
+            placeholder="hectic\naltruism\nresilient",
+            help="每行一个单词或短语。留空时会保留占位符。",
+        )
+        prompt_words = [w.strip() for w in prompt_words_text.splitlines() if w.strip()]
+        st.code(build_anki_prompt(prompt_words, manual_card_template), language="text")
+
     ai_response = st.text_area(
         "粘贴 AI 返回内容",
         height=300,
         key="anki_input_text",
-        placeholder='hectic ||| 忙乱的 ||| She has a hectic schedule today.'
+        placeholder='hectic ||| adjective ||| 忙乱的；忙碌的 ||| full of hurried activity ||| She had a hectic schedule all week. ||| 她整周日程都很忙乱。'
     )
 
     manual_voice_label = st.radio(
@@ -818,7 +809,8 @@ with tab_anki:
                             deck_name,
                             enable_tts=enable_audio,
                             tts_voice=manual_voice_code,
-                            progress_callback=update_progress_manual
+                            progress_callback=update_progress_manual,
+                            card_template=manual_card_template,
                         )
 
                         set_anki_pkg(file_path, deck_name)
@@ -837,11 +829,9 @@ with tab_anki:
         cards = st.session_state['anki_cards_cache']
         with st.expander(f"👀 预览卡片 (前 {constants.MAX_PREVIEW_CARDS} 张)", expanded=True):
             df_view = pd.DataFrame(cards)
-            display_cols = ['w', 'm', 'e', 'r']
+            display_cols = ['w', 'pos', 'cn', 'en', 'e', 'ec', 'r']
             df_view = df_view[[c for c in display_cols if c in df_view.columns]]
-            col_labels = ["正面", "中文/英文释义", "例句"]
-            if len(df_view.columns) > 3:
-                col_labels.append("词源")
+            col_labels = ["单词", "词性", "中文释义", "英文释义", "英文例句", "中文例句", "词源"]
             df_view.columns = col_labels[:len(df_view.columns)]
             st.dataframe(df_view.head(constants.MAX_PREVIEW_CARDS), use_container_width=True, hide_index=True)
 

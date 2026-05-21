@@ -120,9 +120,72 @@ express
         return {"error": str(e)}
 
 
+def build_anki_prompt(
+    words_list: List[str],
+    card_template: str = constants.DEFAULT_CARD_TEMPLATE,
+) -> str:
+    """Build the third-party AI prompt for the selected Anki card template."""
+    template = constants.CARD_TEMPLATES.get(
+        card_template,
+        constants.CARD_TEMPLATES[constants.DEFAULT_CARD_TEMPLATE],
+    )
+    words_block = "\n".join(words_list) if words_list else "[INSERT YOUR WORD LIST HERE]"
+
+    template_instructions = {
+        "word_front": """# Selected Card Template
+Front: target word or phrase.
+Back: Chinese meaning + English definition + English example + Chinese example.""",
+        "example_front": """# Selected Card Template
+Front: English example sentence with the target word/phrase bolded by Anki.
+Back: Chinese meaning + English definition + English example + Chinese example.""",
+        "definition_front": """# Selected Card Template
+Front: English definition + part of speech + first-letter hint.
+Back: target word/phrase + Chinese meaning + example sentence.""",
+    }.get(card_template, """# Selected Card Template
+Front: target word or phrase.
+Back: Chinese meaning + English definition + English example + Chinese example.""")
+
+    return f"""# Role
+You are an expert English lexicographer and Anki card designer.
+Create high-quality vocabulary cards for the selected template.
+Process every input item exactly once.
+
+{template_instructions}
+
+# Input Data
+{words_block}
+
+# Output Format Guidelines
+1. Output strictly inside one ```text code block.
+2. One card per line.
+3. Use `|||` as the only field delimiter.
+4. Use exactly this 6-field structure:
+   `Word/Phrase` ||| `Part of Speech` ||| `Chinese Meaning` ||| `English Definition` ||| `English Example` ||| `Chinese Example`
+
+# Field Rules
+1. Field 1: Use the exact target word unless the input itself is a phrase.
+2. Field 2: Use concise part-of-speech labels, such as `noun`, `verb`, `adjective`, `adverb`, or `phrasal verb`.
+3. Field 3: Simplified Chinese only. Keep it concise and aligned to the most common meaning.
+4. Field 4: Short English definition, B1-C1 level, under 12 words.
+5. Field 5: Natural English example sentence. It must contain the exact target word/phrase from Field 1.
+6. Field 6: Natural Simplified Chinese translation of Field 5.
+7. Do not output numbering, bullets, Markdown tables, explanations, or extra fields.
+8. The app computes the first-letter hint automatically; do not add a hint field.
+
+# Valid Example
+```text
+hectic ||| adjective ||| 忙乱的；忙碌的 ||| full of hurried activity ||| She had a hectic schedule all week. ||| 她整周日程都很忙乱。
+altruism ||| noun ||| 利他主义；无私 ||| selfless concern for other people ||| Altruism motivated her anonymous donation. ||| 利他主义促使她匿名捐款。
+```
+
+# Task
+Create cards using the `{template["label"]}` template and strictly follow the 6-field format."""
+
+
 def process_ai_in_batches(
     words_list: List[str],
-    progress_callback: Optional[Callable[[int, int], None]] = None
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    card_template: str = constants.DEFAULT_CARD_TEMPLATE,
 ) -> Optional[str]:
     """Process words in batches using AI with progress reporting."""
     client = get_openai_client()
@@ -137,37 +200,7 @@ def process_ai_in_batches(
 
     for i in range(0, total_words, constants.AI_BATCH_SIZE):
         batch = words_list[i:i + constants.AI_BATCH_SIZE]
-        current_batch_str = "\n".join(batch)
-
-        user_prompt = f"""# Role
-You are an expert English Lexicographer.
-# Input Data
-{current_batch_str}
-
-# Output Format Guidelines
-1. **Output Container**: Strictly inside a single ```text code block.
-2. **Layout**: One entry per line.
-3. **Separator**: Use `|||` as the delimiter.
-4. **Target Structure**:
-   `Word/Phrase` ||| `Chinese Definition` ||| `Short Example Sentence` ||| `Etymology (Chinese)`
-
-# Field Constraints
-1. Field 1: Phrase - Output the target word OR a very short high-frequency collocation (1-3 words max).
-2. Field 2: Definition - **Simplified Chinese Only**. Concise meaning corresponding to the phrase.
-3. Field 3: Example - Short authentic sentence.
-4. Field 4: Etymology - **Simplified Chinese Only**. Format: `root (CN meaning) + affix (CN meaning)`.
-
-# Valid Example
-Input: hectic
-Output:
-hectic schedule ||| 忙乱的日程/非常忙碌 ||| She has a hectic schedule with meetings all day. ||| hect- (持续/习惯 - 希腊语) + -ic (形容词后缀)
-
-Input: altruism
-Output:
-altruism ||| 利他主义/无私 ||| Motivated by altruism, he donated anonymously. ||| alter (其他) + -ism (主义/行为)
-
-# Task
-Process the input list strictly."""
+        user_prompt = build_anki_prompt(batch, card_template)
 
         for attempt in range(constants.MAX_RETRIES):
             try:
