@@ -222,10 +222,11 @@ def select_card_template(widget_key: str) -> str:
         template["label"]: template_key
         for template_key, template in constants.CARD_TEMPLATES.items()
     }
-    selected_label = st.selectbox(
-        "🧩 卡片模板",
+    selected_label = st.radio(
+        "🧩 制作卡片模板（三选一）",
         options=list(label_to_key.keys()),
         key=widget_key,
+        horizontal=False,
     )
     selected_key = label_to_key[selected_label]
     st.caption(constants.CARD_TEMPLATES[selected_key]["description"])
