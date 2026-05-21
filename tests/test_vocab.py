@@ -4,7 +4,14 @@ import pytest
 
 # Set up minimal vocab dict and mock NLP so tests run without Streamlit/NLTK
 import resources
-resources.VOCAB_DICT = {"run": 100, "running": 100, "hello": 500, "known": 50}
+resources.VOCAB_DICT = {
+    "run": 100,
+    "running": 100,
+    "hello": 500,
+    "known": 50,
+    "altruism": 9000,
+    "hectic": 7000,
+}
 resources.FULL_DF = None
 
 
@@ -24,7 +31,13 @@ def mock_nlp(monkeypatch):
     monkeypatch.setattr("vocab.load_nlp_resources", fake_load_nlp)
 
 
-from vocab import is_valid_word, analyze_logic
+from vocab import (
+    analyze_logic,
+    filter_word_list_by_priority,
+    get_vocab_rank,
+    is_valid_word,
+    parse_word_list_input,
+)
 
 
 def test_is_valid_word_length():
@@ -81,3 +94,36 @@ def test_analyze_logic_sort_by_rank():
     candidates, _, _ = analyze_logic(text, current_level=10, target_level=2000, include_unknown=False)
     ranks = [r for _, r in candidates]
     assert ranks == sorted(ranks)
+
+
+def test_parse_word_list_input_deduplicates_and_splits():
+    raw = "hello, run\nhello；hectic、altruism\tunknown"
+    assert parse_word_list_input(raw) == ["hello", "run", "hectic", "altruism", "unknown"]
+
+
+def test_filter_word_list_by_rank_priority_and_count():
+    words = ["unknown", "altruism", "run", "hectic", "hello"]
+    result = filter_word_list_by_priority(
+        words,
+        priority_key="rank_ascending",
+        max_count=3,
+        include_all=False,
+        vocab_dict=resources.VOCAB_DICT,
+    )
+    assert result == [("run", 100), ("hello", 500), ("hectic", 7000)]
+
+
+def test_filter_word_list_can_include_all_and_prioritize_unknown():
+    words = ["hello", "mystery", "altruism"]
+    result = filter_word_list_by_priority(
+        words,
+        priority_key="unknown_first",
+        max_count=1,
+        include_all=True,
+        vocab_dict=resources.VOCAB_DICT,
+    )
+    assert result == [("mystery", 99999), ("altruism", 9000), ("hello", 500)]
+
+
+def test_get_vocab_rank_unknown_fallback():
+    assert get_vocab_rank("missing", resources.VOCAB_DICT) == 99999

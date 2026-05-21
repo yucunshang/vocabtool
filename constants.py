@@ -19,9 +19,32 @@ APKG_CLEANUP_MAX_AGE_SECONDS = 24 * 3600  # 24 hours
 MIN_WORD_LENGTH = 2
 MAX_WORD_LENGTH = 25
 
-AI_BATCH_SIZE = 10
-MAX_AUTO_LIMIT = 300
+AI_BATCH_SIZE = 20
+MAX_AUTO_LIMIT = 1000
+MAX_PROMPT_BATCH_SIZE = 1000
 MAX_RETRIES = 3
+
+DIRECT_WORD_DEFAULT_COUNT = 200
+DIRECT_WORD_MAX_COUNT = 5000
+DEFAULT_DIRECT_WORD_PRIORITY = "input_order"
+DIRECT_WORD_PRIORITY_OPTIONS = {
+    "input_order": {
+        "label": "按输入顺序",
+        "description": "保留原始列表顺序，适合你已经排好优先级的单词表。",
+    },
+    "rank_ascending": {
+        "label": "基础优先 (Rank 小→大)",
+        "description": "优先保留内置词典中排名更靠前、使用频率更高的单词。",
+    },
+    "rank_descending": {
+        "label": "进阶优先 (Rank 大→小)",
+        "description": "优先保留排名更靠后、更进阶的词；词典外单词排在最后。",
+    },
+    "unknown_first": {
+        "label": "未知词优先",
+        "description": "优先保留内置词典未收录的词，再按进阶优先排序。",
+    },
+}
 
 TTS_CONCURRENCY = 3
 TTS_RETRY_ATTEMPTS = 3

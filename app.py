@@ -6,7 +6,6 @@ resources, extraction, vocab, ai, anki_parse, tts, anki_package, state.
 import html
 import logging
 import os
-import re
 import time
 
 import pandas as pd
@@ -26,7 +25,7 @@ from extraction import (
 )
 from state import clear_all_state, set_generated_words_state
 from utils import get_beijing_time_str, render_copy_button, run_gc
-from vocab import analyze_logic
+from vocab import analyze_logic, filter_word_list_by_priority, parse_word_list_input
 
 # Load vocab and expose to app (and to resources for vocab/ai modules)
 VOCAB_DICT, FULL_DF = resources.load_vocab_data()
@@ -383,7 +382,7 @@ with st.expander("📖 使用指南 & 支持格式", expanded=False):
     st.markdown("""
     **🚀 极速工作流**
     1. **查词**：顶部 AI 查词，秒速获取精准释义、**词源拆解**和双语例句。
-    2. **提取**：支持 PDF、ePub、Docx、TXT、CSV、Excel (xlsx/xls) 等格式。
+    2. **筛词**：文本语料用内置词典 Rank 筛选；批量单词可按优先级与数量筛选或全部包含。
     3. **生成**：自动完成文本生成、**并发语音合成**并打包下载。
     
     **📄 支持的文件格式**
@@ -406,12 +405,13 @@ tab_extract, tab_anki = st.tabs([
 # ==========================================
 with tab_extract:
     mode_context, mode_direct, mode_rank = st.tabs([
-        "📄 语境分析",
-        "📝 直接输入 (含 Anki 导入)",
+        "📄 文本语料筛选",
+        "📝 批量单词筛选",
         "🔢 词频列表"
     ])
 
     with mode_context:
+        st.caption("适合文章、文件、URL 或长文本语料。这里只用内置词典 Rank 做筛选，不把整篇语料交给 AI。")
         col1, col2 = st.columns(2)
         current_rank = col1.number_input("忽略前 N 高频词 (Min Rank)", 1, 20000, 6000, step=100)
         target_rank = col2.number_input("忽略后 N 低频词 (Max Rank)", 2000, 50000, 10000, step=500)
@@ -444,7 +444,7 @@ with tab_extract:
             placeholder="支持直接粘贴文章内容..."
         )
 
-        if st.button("🚀 开始分析", type="primary"):
+        if st.button("🚀 用内置词典筛选", type="primary"):
             if target_rank < current_rank:
                 st.error("❌ Max Rank 必须大于等于 Min Rank，请修正后重试。")
             else:
@@ -474,6 +474,9 @@ with tab_extract:
                         status.update(label="⚠️ 内容为空或太短", state="error")
 
     with mode_direct:
+        st.markdown("#### 📚 批量单词筛选")
+        st.caption("适合已经有很多单词的情况。可以按输入顺序、词频 Rank 或未知词优先筛选，也可以全部包含。")
+
         st.markdown("#### 📤 导入 Anki 牌组导出文件 (可选)")
         st.caption("💡 提示：在 Anki 导出时，推荐选择 **'Notes in Plain Text'** (笔记纯文本)。但如果您选择了 **'Cards in Plain Text'**，系统也会尝试自动解析。")
 
@@ -500,21 +503,45 @@ with tab_extract:
             placeholder="altruism\nhectic\nserendipity"
         )
 
+        priority_label_to_key = {
+            option["label"]: key
+            for key, option in constants.DIRECT_WORD_PRIORITY_OPTIONS.items()
+        }
+        priority_label = st.selectbox(
+            "🎚️ 筛选优先级",
+            options=list(priority_label_to_key.keys()),
+            index=list(priority_label_to_key.keys()).index(
+                constants.DIRECT_WORD_PRIORITY_OPTIONS[constants.DEFAULT_DIRECT_WORD_PRIORITY]["label"]
+            ),
+            key="direct_word_priority"
+        )
+        priority_key = priority_label_to_key[priority_label]
+        st.caption(constants.DIRECT_WORD_PRIORITY_OPTIONS[priority_key]["description"])
+
+        include_all_words = st.checkbox("全部包含，不按数量截断", value=True, key="direct_include_all")
+        direct_count = st.number_input(
+            "保留数量",
+            1,
+            constants.DIRECT_WORD_MAX_COUNT,
+            constants.DIRECT_WORD_DEFAULT_COUNT,
+            step=50,
+            disabled=include_all_words,
+            key="direct_word_count"
+        )
+
         if st.button("🚀 生成列表", key="btn_direct", type="primary"):
             with st.spinner("正在解析列表..."):
                 if raw_input.strip():
-                    words = [w.strip() for w in re.split(r'[,\n\t]+', raw_input) if w.strip()]
-                    unique_words = []
-                    seen = set()
-
-                    for word in words:
-                        if word.lower() not in seen:
-                            seen.add(word.lower())
-                            unique_words.append(word)
-
-                    data_list = [(w, VOCAB_DICT.get(w.lower(), 99999)) for w in unique_words]
+                    unique_words = parse_word_list_input(raw_input)
+                    data_list = filter_word_list_by_priority(
+                        unique_words,
+                        priority_key,
+                        int(direct_count),
+                        include_all_words,
+                        VOCAB_DICT
+                    )
                     set_generated_words_state(data_list, len(unique_words), None)
-                    st.toast(f"✅ 已加载 {len(unique_words)} 个单词", icon="🎉")
+                    st.toast(f"✅ 已加载 {len(data_list)}/{len(unique_words)} 个单词", icon="🎉")
                 else:
                     st.warning("⚠️ 内容为空。")
 
@@ -703,7 +730,13 @@ with tab_extract:
             st.info("👈 点击左侧按钮自动生成。如使用第三方 AI，请复制下方 Prompt。")
 
         with st.expander("📌 手动复制 Prompt (第三方 AI 用)"):
-            batch_size_prompt = st.number_input("🔢 分组大小 (Max 500)", 10, 500, 50, step=10)
+            batch_size_prompt = st.number_input(
+                f"🔢 分组大小 (Max {constants.MAX_PROMPT_BATCH_SIZE})",
+                10,
+                constants.MAX_PROMPT_BATCH_SIZE,
+                100,
+                step=10
+            )
             current_batch_words = []
 
             if words_only:

@@ -149,6 +149,8 @@ Back: Chinese meaning + English definition + English example + Chinese example."
 You are an expert English lexicographer and Anki card designer.
 Create high-quality vocabulary cards for the selected template.
 Process every input item exactly once.
+The input list may already be filtered by rank, priority, and quantity in the app.
+Preserve the input order; do not add, remove, merge, skip, or substitute entries.
 
 {template_instructions}
 
@@ -163,7 +165,7 @@ Process every input item exactly once.
    `Word/Phrase` ||| `Part of Speech` ||| `Chinese Meaning` ||| `English Definition` ||| `English Example` ||| `Chinese Example`
 
 # Field Rules
-1. Field 1: Use the exact target word unless the input itself is a phrase.
+1. Field 1: Use the exact target word or phrase from the input.
 2. Field 2: Use concise part-of-speech labels, such as `noun`, `verb`, `adjective`, `adverb`, or `phrasal verb`.
 3. Field 3: Simplified Chinese only. Keep it concise and aligned to the most common meaning.
 4. Field 4: Short English definition, B1-C1 level, under 12 words.
@@ -171,6 +173,7 @@ Process every input item exactly once.
 6. Field 6: Natural Simplified Chinese translation of Field 5.
 7. Do not output numbering, bullets, Markdown tables, explanations, or extra fields.
 8. The app computes the first-letter hint automatically; do not add a hint field.
+9. If the list is long, continue until every input item has one card.
 
 # Valid Example
 ```text

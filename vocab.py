@@ -2,7 +2,7 @@
 
 import re
 from collections import Counter
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import constants
 from resources import get_vocab_dict, load_nlp_resources
@@ -30,6 +30,63 @@ def get_lemma(word: str, lemminflect: Any) -> str:
         return lemmas[0] if lemmas else word
     except Exception:
         return word
+
+
+def parse_word_list_input(raw_input: str) -> List[str]:
+    """Parse a pasted word list while preserving first-seen order."""
+    candidates = [
+        item.strip()
+        for item in re.split(r'[,，;；、\n\t]+', raw_input)
+        if item.strip()
+    ]
+    unique_words = []
+    seen = set()
+    for word in candidates:
+        key = word.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_words.append(word)
+    return unique_words
+
+
+def get_vocab_rank(word: str, vocab_dict: Optional[Dict[str, int]] = None) -> int:
+    """Return the built-in dictionary rank for a word, or 99999 if unknown."""
+    if vocab_dict is None:
+        vocab_dict = _vocab_dict()
+    try:
+        return int(vocab_dict.get(word.lower().strip(), 99999))
+    except (TypeError, ValueError):
+        return 99999
+
+
+def filter_word_list_by_priority(
+    words: List[str],
+    priority_key: str,
+    max_count: int,
+    include_all: bool,
+    vocab_dict: Optional[Dict[str, int]] = None
+) -> List[Tuple[str, int]]:
+    """Filter a word list by priority and count using built-in ranks."""
+    if vocab_dict is None:
+        vocab_dict = _vocab_dict()
+
+    ranked_words = [
+        (idx, word, get_vocab_rank(word, vocab_dict))
+        for idx, word in enumerate(words)
+    ]
+
+    if priority_key == "rank_ascending":
+        ranked_words.sort(key=lambda item: (item[2] == 99999, item[2], item[0]))
+    elif priority_key == "rank_descending":
+        ranked_words.sort(key=lambda item: (item[2] == 99999, -item[2], item[0]))
+    elif priority_key == "unknown_first":
+        ranked_words.sort(key=lambda item: (item[2] != 99999, -item[2], item[0]))
+
+    if not include_all:
+        ranked_words = ranked_words[:max(0, int(max_count))]
+
+    return [(word, rank) for _, word, rank in ranked_words]
 
 
 def analyze_logic(
