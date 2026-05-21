@@ -404,6 +404,11 @@ tab_extract, tab_anki = st.tabs([
 # Tab 1: Word Extraction
 # ==========================================
 with tab_extract:
+    st.markdown("### 🧩 制卡模板")
+    extract_card_template = select_card_template("sel_card_template_extract")
+    st.caption("这个模板会用于下方筛词结果的内置 AI 制卡和第三方 AI Prompt。")
+    st.markdown("---")
+
     mode_context, mode_direct, mode_rank = st.tabs([
         "📄 文本语料筛选",
         "📝 批量单词筛选",
@@ -649,7 +654,6 @@ with tab_extract:
 
         with col_ai_btn:
             ai_model_label = get_config()["openai_model"]
-            auto_card_template = select_card_template("sel_card_template_auto")
 
             selected_voice_label = st.radio(
                 "🎙️ 发音人",
@@ -680,7 +684,7 @@ with tab_extract:
                 ai_result = process_ai_in_batches(
                     words_only,
                     progress_callback=update_ai_progress,
-                    card_template=auto_card_template,
+                    card_template=extract_card_template,
                 )
 
                 if ai_result:
@@ -702,7 +706,7 @@ with tab_extract:
                                 enable_tts=enable_audio_auto,
                                 tts_voice=selected_voice_code,
                                 progress_callback=update_pkg_progress,
-                                card_template=auto_card_template,
+                                card_template=extract_card_template,
                             )
 
                             set_anki_pkg(file_path, deck_name)
@@ -754,7 +758,7 @@ with tab_extract:
             else:
                 st.warning("⚠️ 暂无单词数据，请先提取单词。")
 
-            st.code(build_anki_prompt(current_batch_words, auto_card_template), language="text")
+            st.code(build_anki_prompt(current_batch_words, extract_card_template), language="text")
 
 # ==========================================
 # Tab 2: Manual Anki Card Creation
